@@ -8,7 +8,7 @@ use http::{Method, StatusCode};
 
 use crate::error::Error;
 use crate::handler::{BoxFuture, Chain, Handler, Middleware, Next};
-use crate::request::{Params, Request, Shared, StateMap};
+use crate::request::{Request, Shared, StateMap};
 use crate::response::{IntoResponse, Response};
 use crate::router::{MethodMap, Route, routing_methods};
 use crate::server::{self, ListenAddr, Server};
@@ -62,7 +62,7 @@ impl App {
             state: StateMap::default(),
             body_limit: DEFAULT_BODY_LIMIT,
             workers: None,
-            thread_per_core: false,
+            thread_per_core: true,
         }
     }
 
@@ -149,15 +149,18 @@ impl App {
         self
     }
 
-    /// Mode « un thread par cœur » pour [`App::run`] (Linux uniquement,
-    /// ignoré ailleurs).
+    /// Mode « un thread par cœur » pour [`App::run`] : activé par défaut
+    /// sous Linux (ignoré ailleurs).
     ///
     /// Chaque thread a sa propre boucle d'événements et son propre socket
     /// (`SO_REUSEPORT`) : le noyau répartit les connexions et une requête ne
-    /// change jamais de thread. Cela consomme un peu moins de CPU par requête
-    /// quand le serveur est saturé, mais la charge n'est plus rééquilibrée
-    /// entre threads : à éviter si des handlers font des calculs longs ou si
-    /// les connexions sont peu nombreuses et très inégales.
+    /// change jamais de thread, sans aucune synchronisation entre cœurs. C'est
+    /// le mode le plus rapide.
+    ///
+    /// En contrepartie, la charge n'est pas rééquilibrée entre threads :
+    /// désactivez-le (`false`) pour utiliser le runtime multi-thread de tokio
+    /// si des handlers font de longs calculs bloquants ou si les connexions
+    /// sont peu nombreuses et très inégales.
     pub fn thread_per_core(&mut self, enabled: bool) -> &mut Self {
         self.thread_per_core = enabled;
         self
@@ -209,11 +212,10 @@ impl App {
         self.bind(addr).await?.run().await
     }
 
-    /// Démarre le serveur sans avoir besoin de `#[tokio::main]` : crée le
-    /// runtime (un thread par cœur, voir [`App::workers`]) et s'arrête
-    /// proprement sur `Ctrl+C` / `SIGTERM`.
-    ///
-    /// Voir aussi [`App::thread_per_core`].
+    /// Démarre le serveur sans avoir besoin de `#[tokio::main]` : crée les
+    /// threads (un par cœur, voir [`App::workers`] et
+    /// [`App::thread_per_core`]) et s'arrête proprement sur `Ctrl+C` /
+    /// `SIGTERM`. C'est le mode le plus rapide.
     pub fn run(self, addr: impl ListenAddr) -> io::Result<()> {
         let addrs = addr.socket_addrs()?;
         let workers = self
@@ -246,20 +248,19 @@ struct Dispatcher {
 impl Handler for Dispatcher {
     #[inline]
     fn call(&'static self, mut req: Request) -> BoxFuture<Response> {
-        let path = req.head.uri.path();
-        let Some((methods, captures)) = self.tree.find(path) else {
+        let Some((methods, captures)) = self.tree.find(req.path()) else {
             return self.fallback.call(req);
         };
-        match methods.find(&req.head.method) {
+        match methods.find(req.method()) {
             Some(route) => {
                 if !captures.is_empty() {
-                    req.params = Params::new(&route.names, path, captures);
+                    req.set_params(&route.names, captures);
                 }
                 route.handler.call(req)
             }
             None => {
                 let allow = HeaderValue::try_from(methods.allow()).ok();
-                let mut res = if req.head.method == Method::OPTIONS {
+                let mut res = if *req.method() == Method::OPTIONS {
                     Response::new().status(StatusCode::NO_CONTENT)
                 } else {
                     Error::from_status(StatusCode::METHOD_NOT_ALLOWED).into_response()

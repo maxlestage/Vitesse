@@ -1,7 +1,7 @@
 //! Serveur utilisé par `bench/run.sh` (mêmes routes que `bench/express/server.js`).
 //!
-//! Variables d'environnement : `PORT`, `WORKERS`, et `VITESSE_MODE=tpc` pour
-//! le mode « un thread par cœur » (`app.thread_per_core(true)`).
+//! Variables d'environnement : `PORT`, `WORKERS`, et `VITESSE_MODE=mt` pour
+//! utiliser le runtime multi-thread de tokio au lieu d'un thread par cœur.
 
 use vitesse::prelude::*;
 
@@ -37,6 +37,8 @@ fn main() -> std::io::Result<()> {
     if let Some(n) = std::env::var("WORKERS").ok().and_then(|w| w.parse().ok()) {
         app.workers(n);
     }
-    app.thread_per_core(std::env::var("VITESSE_MODE").as_deref() == Ok("tpc"));
+    if std::env::var("VITESSE_MODE").as_deref() == Ok("mt") {
+        app.thread_per_core(false);
+    }
     app.run(port)
 }

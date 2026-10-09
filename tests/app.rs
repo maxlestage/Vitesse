@@ -658,3 +658,193 @@ async fn real_server_over_tcp() {
         .unwrap()
         .unwrap();
 }
+
+/// Un flux de trois morceaux, pour tester les réponses `chunked`.
+struct Chunks(u8);
+
+impl futures_core::Stream for Chunks {
+    type Item = Result<String, std::io::Error>;
+
+    fn poll_next(
+        mut self: std::pin::Pin<&mut Self>,
+        _cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Self::Item>> {
+        self.0 += 1;
+        std::task::Poll::Ready((self.0 <= 3).then(|| Ok(format!("morceau{}", self.0))))
+    }
+}
+
+/// Envoie `request`, puis lit la réponse jusqu'à la fermeture.
+async fn raw_bytes(addr: std::net::SocketAddr, request: &[u8]) -> String {
+    let mut stream = tokio::net::TcpStream::connect(addr).await.unwrap();
+    stream.write_all(request).await.unwrap();
+    let mut out = Vec::new();
+    stream.read_to_end(&mut out).await.unwrap();
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+#[tokio::test]
+async fn engine_edge_cases() {
+    let mut app = App::new();
+    app.post("/len", |req: Request| async move {
+        let body = req.bytes().await?;
+        Ok::<_, Error>(body.len().to_string())
+    });
+    app.post("/ignore", |_| async { "ignoré" });
+    app.get("/slow", |_| async {
+        tokio::time::sleep(Duration::from_millis(30)).await;
+        "lent"
+    });
+    app.get("/fast", |_| async { "rapide" });
+    app.get("/stream", |_| async { Body::from_stream(Chunks(0)) });
+    app.get("/json", |_| async { json!({ "ok": true }) });
+    app.get("/empty", |_| async { StatusCode::NO_CONTENT });
+    app.body_limit(10 * 1024 * 1024);
+
+    let server = app.bind("127.0.0.1:0").await.unwrap();
+    let addr = server.local_addr();
+    tokio::spawn(server.run());
+
+    // Gros corps (> 64 Kio) : transmis au handler en flux.
+    let big = "x".repeat(300_000);
+    let req = format!(
+        "POST /len HTTP/1.1\r\nHost: x\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{big}",
+        big.len()
+    );
+    let res = raw_bytes(addr, req.as_bytes()).await;
+    assert!(
+        res.ends_with("\r\n\r\n300000"),
+        "{}",
+        &res[..200.min(res.len())]
+    );
+
+    // Gros corps en chunked.
+    let mut req = String::from(
+        "POST /len HTTP/1.1\r\nHost: x\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n",
+    );
+    for _ in 0..10 {
+        req.push_str(&format!("{:x}\r\n{}\r\n", 20_000, "y".repeat(20_000)));
+    }
+    req.push_str("0\r\n\r\n");
+    let res = raw_bytes(addr, req.as_bytes()).await;
+    assert!(res.ends_with("\r\n\r\n200000"), "{res}");
+
+    // Un handler qui ignore un gros corps : on répond puis on ferme.
+    let req = format!(
+        "POST /ignore HTTP/1.1\r\nHost: x\r\nContent-Length: {}\r\n\r\n{big}",
+        big.len()
+    );
+    let res = raw_bytes(addr, req.as_bytes()).await;
+    assert!(res.starts_with("HTTP/1.1 200 OK\r\n"), "{res}");
+    assert!(res.contains("connection: close\r\n"), "{res}");
+
+    // Expect: 100-continue.
+    let mut stream = tokio::net::TcpStream::connect(addr).await.unwrap();
+    let body = "z".repeat(100_000);
+    let head = format!(
+        "POST /len HTTP/1.1\r\nHost: x\r\nContent-Length: {}\r\nExpect: 100-continue\r\nConnection: close\r\n\r\n",
+        body.len()
+    );
+    stream.write_all(head.as_bytes()).await.unwrap();
+    let mut buf = [0u8; 25];
+    stream.read_exact(&mut buf).await.unwrap();
+    assert_eq!(&buf, b"HTTP/1.1 100 Continue\r\n\r\n");
+    stream.write_all(body.as_bytes()).await.unwrap();
+    let mut out = String::new();
+    stream.read_to_string(&mut out).await.unwrap();
+    assert!(out.ends_with("100000"), "{out}");
+
+    // HTTP/1.0 : fermeture par défaut, keep-alive sur demande.
+    let res = raw_bytes(addr, b"GET /fast HTTP/1.0\r\n\r\n").await;
+    assert!(
+        res.contains("connection: close\r\n") && res.ends_with("rapide"),
+        "{res}"
+    );
+    let res = raw_bytes(
+        addr,
+        b"GET /fast HTTP/1.0\r\nConnection: keep-alive\r\n\r\nGET /fast HTTP/1.0\r\n\r\n",
+    )
+    .await;
+    assert!(res.contains("connection: keep-alive\r\n"), "{res}");
+    assert_eq!(res.matches("rapide").count(), 2, "{res}");
+
+    // Requêtes invalides.
+    let res = raw_bytes(addr, b"BLA BLA\r\n\r\n").await;
+    assert!(res.starts_with("HTTP/1.1 400 Bad Request\r\n"), "{res}");
+    let huge = format!("GET / HTTP/1.1\r\nX-Big: {}\r\n\r\n", "a".repeat(70_000));
+    let res = raw_bytes(addr, huge.as_bytes()).await;
+    assert!(
+        res.starts_with("HTTP/1.1 431 "),
+        "{}",
+        &res[..60.min(res.len())]
+    );
+    let res = raw_bytes(
+        addr,
+        b"POST /len HTTP/1.1\r\nContent-Length: 3\r\nTransfer-Encoding: chunked\r\n\r\n",
+    )
+    .await;
+    assert!(res.starts_with("HTTP/1.1 400 "), "{res}");
+
+    // Pipelining avec un handler lent : l'ordre des réponses est respecté.
+    let res = raw_bytes(
+        addr,
+        b"GET /slow HTTP/1.1\r\nHost: x\r\n\r\nGET /fast HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n",
+    )
+    .await;
+    let (slow, fast) = (res.find("lent").unwrap(), res.find("rapide").unwrap());
+    assert!(slow < fast, "{res}");
+
+    // Réponse en flux (taille inconnue) : chunked.
+    let res = raw_bytes(addr, b"GET /stream HTTP/1.1\r\nConnection: close\r\n\r\n").await;
+    assert!(res.contains("transfer-encoding: chunked\r\n"), "{res}");
+    assert!(
+        res.ends_with("\r\n\r\n8\r\nmorceau1\r\n8\r\nmorceau2\r\n8\r\nmorceau3\r\n0\r\n\r\n"),
+        "{res}"
+    );
+
+    // HEAD sur une route JSON, et 204 sans corps ni longueur.
+    let res = raw_bytes(addr, b"HEAD /json HTTP/1.1\r\nConnection: close\r\n\r\n").await;
+    assert!(
+        res.contains("content-length: 11\r\n") && res.ends_with("\r\n\r\n"),
+        "{res}"
+    );
+    let res = raw_bytes(addr, b"GET /empty HTTP/1.1\r\nConnection: close\r\n\r\n").await;
+    assert!(
+        res.starts_with("HTTP/1.1 204 ") && !res.contains("content-length"),
+        "{res}"
+    );
+}
+
+#[tokio::test]
+async fn graceful_shutdown_finishes_requests() {
+    let mut app = App::new();
+    app.get("/slow", |_| async {
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        "fini"
+    });
+    let server = app.bind("127.0.0.1:0").await.unwrap();
+    let addr = server.local_addr();
+    let (stop_tx, stop_rx) = tokio::sync::oneshot::channel::<()>();
+    let handle = tokio::spawn(server.with_graceful_shutdown(async {
+        stop_rx.await.ok();
+    }));
+
+    // Une connexion inactive, qui ne doit pas bloquer l'arrêt.
+    let _idle = tokio::net::TcpStream::connect(addr).await.unwrap();
+    let slow = tokio::spawn(raw(addr, "GET /slow HTTP/1.1\r\nHost: x\r\n\r\n"));
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    stop_tx.send(()).unwrap();
+
+    let res = slow.await.unwrap();
+    assert!(res.starts_with("HTTP/1.1 200 OK\r\n"), "{res}");
+    assert!(
+        res.contains("connection: close\r\n") && res.ends_with("fini"),
+        "{res}"
+    );
+    tokio::time::timeout(Duration::from_secs(3), handle)
+        .await
+        .expect("le serveur doit s'arrêter")
+        .unwrap()
+        .unwrap();
+    assert!(tokio::net::TcpStream::connect(addr).await.is_err());
+}

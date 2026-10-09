@@ -22,7 +22,7 @@ pub struct Body {
     kind: Kind,
 }
 
-enum Kind {
+pub(crate) enum Kind {
     Empty,
     Full(Bytes),
     Stream(UnsyncBoxBody<Bytes, BoxError>),
@@ -57,6 +57,12 @@ impl Body {
         Body::wrap(StreamBody {
             stream: Box::pin(stream),
         })
+    }
+
+    /// Le contenu brut, pour le moteur HTTP.
+    #[inline]
+    pub(crate) fn into_kind(self) -> Kind {
+        self.kind
     }
 
     /// Nombre d'octets si la taille est connue à l'avance.

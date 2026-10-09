@@ -1,25 +1,22 @@
-//! Le serveur HTTP : sockets, boucle d'acceptation et intégration hyper.
+//! Le serveur : sockets, boucle d'acceptation, arrêt propre et runtimes.
 
-use std::convert::Infallible;
 use std::future::{Future, pending};
 use std::io;
 use std::net::{IpAddr, SocketAddr, ToSocketAddrs};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::pin::{Pin, pin};
+use std::sync::atomic::Ordering;
 use std::task::{Context, Poll};
 use std::time::Duration;
 
-use hyper::body::Incoming;
-use hyper::server::conn::http1;
-use hyper_util::rt::{TokioIo, TokioTimer};
-use hyper_util::server::graceful::GracefulShutdown;
 use socket2::{Domain, Protocol, Socket, Type};
 use tokio::net::TcpListener;
+use tokio::task::JoinSet;
 
 use crate::app::AppService;
-use crate::body::Body;
 use crate::handler::{BoxFuture, panic_response};
-use crate::request::{ReqBody, Request};
+use crate::http1::{ServerState, serve_connection};
+use crate::request::Request;
 use crate::response::Response;
 
 /// Délai laissé aux requêtes en cours lors d'un arrêt propre.
@@ -166,15 +163,9 @@ pub(crate) async fn serve(
     app: &'static AppService,
     shutdown: impl Future<Output = ()>,
 ) -> io::Result<()> {
-    let mut builder = http1::Builder::new();
-    builder
-        .timer(TokioTimer::new())
-        .header_read_timeout(Duration::from_secs(30))
-        .keep_alive(true)
-        // Regroupe les réponses des requêtes « pipelinées » en un seul write.
-        .pipeline_flush(true);
-
-    let graceful = GracefulShutdown::new();
+    // Vit aussi longtemps que les connexions, qui peuvent survivre à la boucle.
+    let state: &'static ServerState = Box::leak(Box::default());
+    let mut connections = JoinSet::new();
     let mut shutdown = pin!(shutdown);
 
     loop {
@@ -193,18 +184,20 @@ pub(crate) async fn serve(
             },
         };
         let _ = stream.set_nodelay(true);
-        let conn = builder.serve_connection(TokioIo::new(stream), ConnService { app, peer });
-        let conn = graceful.watch(conn);
-        tokio::spawn(async move {
-            let _ = conn.await;
-        });
+        connections.spawn(serve_connection(stream, peer, app, state));
+        // Libère les connexions terminées.
+        while connections.try_join_next().is_some() {}
     }
 
+    // Arrêt propre : on n'accepte plus rien, on laisse les requêtes en cours
+    // se terminer, puis on ferme les connexions inactives.
     drop(listener);
-    tokio::select! {
-        _ = graceful.shutdown() => {}
-        _ = tokio::time::sleep(SHUTDOWN_GRACE) => {}
+    state.shutdown.store(true, Ordering::Relaxed);
+    let deadline = tokio::time::Instant::now() + SHUTDOWN_GRACE;
+    while state.busy() > 0 && tokio::time::Instant::now() < deadline {
+        tokio::time::sleep(Duration::from_millis(5)).await;
     }
+    connections.shutdown().await;
     Ok(())
 }
 
@@ -320,35 +313,10 @@ fn run_thread_per_core(
     result
 }
 
-/// Le service hyper d'une connexion.
-#[derive(Clone, Copy)]
-struct ConnService {
-    app: &'static AppService,
-    peer: SocketAddr,
-}
-
-impl hyper::service::Service<http::Request<Incoming>> for ConnService {
-    type Response = http::Response<Body>;
-    type Error = Infallible;
-    type Future = ResponseFuture;
-
-    #[inline]
-    fn call(&self, req: http::Request<Incoming>) -> ResponseFuture {
-        let (head, body) = req.into_parts();
-        let req = Request::new(
-            head,
-            ReqBody::Incoming(body),
-            Some(self.peer),
-            &self.app.shared,
-        );
-        ResponseFuture::new(self.app, req)
-    }
-}
-
 /// Le `Future` d'une réponse, qui transforme une panique en `500`.
 pub(crate) enum ResponseFuture {
     Pending(BoxFuture<Response>),
-    Ready(Option<Response>),
+    Ready(Option<Box<Response>>),
 }
 
 impl ResponseFuture {
@@ -356,26 +324,25 @@ impl ResponseFuture {
     pub(crate) fn new(app: &'static AppService, req: Request) -> Self {
         match catch_unwind(AssertUnwindSafe(|| app.handle(req))) {
             Ok(fut) => ResponseFuture::Pending(fut),
-            Err(_) => ResponseFuture::Ready(Some(panic_response())),
+            Err(_) => ResponseFuture::Ready(Some(Box::new(panic_response()))),
         }
     }
 }
 
 impl Future for ResponseFuture {
-    type Output = Result<http::Response<Body>, Infallible>;
+    type Output = Response;
 
     #[inline]
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Response> {
         match self.get_mut() {
             ResponseFuture::Pending(fut) => {
                 match catch_unwind(AssertUnwindSafe(|| fut.as_mut().poll(cx))) {
-                    Ok(Poll::Ready(res)) => Poll::Ready(Ok(res.into_http())),
-                    Ok(Poll::Pending) => Poll::Pending,
-                    Err(_) => Poll::Ready(Ok(panic_response().into_http())),
+                    Ok(poll) => poll,
+                    Err(_) => Poll::Ready(panic_response()),
                 }
             }
             ResponseFuture::Ready(res) => {
-                Poll::Ready(Ok(res.take().unwrap_or_else(panic_response).into_http()))
+                Poll::Ready(res.take().map_or_else(panic_response, |res| *res))
             }
         }
     }

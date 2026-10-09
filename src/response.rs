@@ -2,6 +2,7 @@
 //! façon Express du module [`res`].
 
 use std::borrow::Cow;
+use std::cell::RefCell;
 use std::fmt;
 use std::time::Duration;
 
@@ -54,10 +55,9 @@ impl Response {
     /// Une réponse `200 OK` vide.
     #[inline]
     pub fn new() -> Self {
-        Response {
-            inner: http::Response::new(Body::empty()),
-            error: None,
-        }
+        let mut inner = http::Response::new(Body::empty());
+        *inner.headers_mut() = header_pool::take();
+        Response { inner, error: None }
     }
 
     /// Change le statut (`res.status(404)` en Express).
@@ -273,6 +273,40 @@ impl Response {
     /// Construit à partir d'une [`http::Response`].
     pub fn from_http(inner: http::Response<Body>) -> Self {
         Response { inner, error: None }
+    }
+}
+
+/// Réserve de `HeaderMap` déjà allouées, par thread : une réponse réutilise
+/// les tables d'une réponse précédente au lieu d'en allouer de nouvelles.
+pub(crate) mod header_pool {
+    use super::*;
+
+    const MAX_POOLED: usize = 128;
+
+    thread_local! {
+        static POOL: RefCell<Vec<HeaderMap>> = const { RefCell::new(Vec::new()) };
+    }
+
+    #[inline]
+    pub(crate) fn take() -> HeaderMap {
+        POOL.try_with(|pool| pool.borrow_mut().pop())
+            .ok()
+            .flatten()
+            .unwrap_or_default()
+    }
+
+    #[inline]
+    pub(crate) fn recycle(mut map: HeaderMap) {
+        if map.capacity() == 0 || map.capacity() > 64 {
+            return;
+        }
+        map.clear();
+        let _ = POOL.try_with(|pool| {
+            let mut pool = pool.borrow_mut();
+            if pool.len() < MAX_POOLED {
+                pool.push(map);
+            }
+        });
     }
 }
 

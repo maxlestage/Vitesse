@@ -1,10 +1,14 @@
 #!/usr/bin/env bash
-# Benchmark Vitesse vs Express avec `oha` (cargo install oha).
+# Benchmark Vitesse vs Drogon, axum et Express avec `wrk`.
 #
 #   bench/run.sh [durée] [connexions]
 #
-# Le serveur et le générateur de charge sont épinglés sur des cœurs distincts
-# (SERVER_CPUS / CLIENT_CPUS) pour ne pas se marcher dessus.
+# Prérequis : wrk, Node.js, et Drogon installé pour bench/drogon (sinon il
+# est ignoré ; DROGON_PREFIX=/chemin/install si besoin).
+#
+# Le serveur et wrk sont épinglés sur des cœurs distincts (SERVER_CPUS /
+# CLIENT_CPUS). En plus du débit, on mesure le temps CPU consommé par le
+# serveur pour chaque requête : une mesure qui ne dépend pas de wrk.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -13,18 +17,28 @@ CONNECTIONS=${2:-128}
 SERVER_CPUS=${SERVER_CPUS:-0,1}
 CLIENT_CPUS=${CLIENT_CPUS:-2,3}
 NCPU=$(awk -F, '{print NF}' <<<"$SERVER_CPUS")
+WRK=${WRK:-wrk}
 RESULTS=$(mktemp -d)
+trap 'rm -rf "$RESULTS"' EXIT
 
-command -v oha >/dev/null || { echo "oha introuvable : cargo install oha" >&2; exit 1; }
+command -v "$WRK" >/dev/null || { echo "wrk introuvable (apt install wrk / brew install wrk)" >&2; exit 1; }
 cargo build --release --example bench -q
 (cd bench/axum && cargo build --release -q)
 (cd bench/express && [ -d node_modules ] || npm install --silent --no-audit --no-fund)
+if [ ! -x bench/drogon/build/bench-drogon ]; then
+  cmake -S bench/drogon -B bench/drogon/build -DCMAKE_BUILD_TYPE=Release \
+    ${DROGON_PREFIX:+-DCMAKE_PREFIX_PATH=$DROGON_PREFIX} >/dev/null 2>&1 &&
+    cmake --build bench/drogon/build -j >/dev/null 2>&1 ||
+    echo "Drogon introuvable : bench/drogon ignoré" >&2
+fi
 
+# nom|chemin|script|argument
 SCENARIOS=(
-  "texte|GET|/|"
-  "json|GET|/json|"
-  "params|GET|/users/42|"
-  "post-json|POST|/echo|{\"name\":\"Ada\",\"langages\":[\"rust\",\"js\"],\"age\":36}"
+  "texte|/||"
+  "json|/json||"
+  "params|/users/42||"
+  "post-json|/echo|bench/lua/post.lua|"
+  "pipeline×16|/|bench/lua/pipeline.lua|16"
 )
 
 wait_port() {
@@ -36,10 +50,19 @@ wait_port() {
   return 1
 }
 
-load() { # port méthode chemin corps durée
-  local args=(-z "$5" -c "$CONNECTIONS" --no-tui --output-format json -m "$2")
-  [ -n "$4" ] && args+=(-d "$4" -H "content-type: application/json")
-  taskset -c "$CLIENT_CPUS" oha "${args[@]}" "http://127.0.0.1:$1$3"
+# Temps CPU (en centièmes de seconde) d'un processus et de ses enfants.
+cpu_ticks() {
+  local total=0 pid
+  for pid in $1 $(pgrep -P "$1" || true); do
+    total=$((total + $(awk '{print $14 + $15}' "/proc/$pid/stat" 2>/dev/null || echo 0)))
+  done
+  echo "$total"
+}
+
+load() { # port chemin script argument durée
+  local args=(-t"$NCPU" -c"$CONNECTIONS" -d"$5" --latency)
+  [ -n "$3" ] && args+=(-s "$3")
+  taskset -c "$CLIENT_CPUS" "$WRK" "${args[@]}" "http://127.0.0.1:$1$2" -- $4
 }
 
 run_server() { # nom port commande...
@@ -48,53 +71,67 @@ run_server() { # nom port commande...
   taskset -c "$SERVER_CPUS" "$@" >/dev/null 2>&1 &
   local pid=$!
   wait_port "$port"
-  load "$port" GET / "" 2s >/dev/null # échauffement (JIT de V8, caches…)
+  load "$port" / "" "" 2s >/dev/null # échauffement (JIT de V8, caches…)
   for s in "${SCENARIOS[@]}"; do
-    IFS='|' read -r label method path body <<<"$s"
-    load "$port" "$method" "$path" "$body" "$DURATION" >"$RESULTS/$name.$label.json"
+    IFS='|' read -r label path script arg <<<"$s"
+    local before after
+    before=$(cpu_ticks "$pid")
+    load "$port" "$path" "$script" "$arg" "$DURATION" >"$RESULTS/out"
+    after=$(cpu_ticks "$pid")
+    {
+      echo "$name|$label|$((after - before))"
+      cat "$RESULTS/out"
+    } >"$RESULTS/$name.$label"
   done
   kill -TERM "$pid" 2>/dev/null || true
-  pkill -P "$pid" 2>/dev/null || true
+  pkill -TERM -P "$pid" 2>/dev/null || true
   wait "$pid" 2>/dev/null || true
   sleep 0.5
 }
 
-echo "Serveur sur les CPU $SERVER_CPUS, oha sur $CLIENT_CPUS, $CONNECTIONS connexions, $DURATION par scénario"
+echo "Serveur sur les CPU $SERVER_CPUS, wrk sur $CLIENT_CPUS, $CONNECTIONS connexions, $DURATION par scénario"
 
-run_server "Express (1 processus)" 3001 node bench/express/server.js
-run_server "Express (cluster x$NCPU)" 3001 env WORKERS="$NCPU" node bench/express/server.js
-run_server "axum 0.8" 3002 env WORKERS="$NCPU" PORT=3002 bench/axum/target/release/bench-axum
+run_server "Express" 3001 node bench/express/server.js
+run_server "Express cluster" 3001 env WORKERS="$NCPU" node bench/express/server.js
+[ -x bench/drogon/build/bench-drogon ] &&
+  run_server "Drogon" 3003 env WORKERS="$NCPU" PORT=3003 bench/drogon/build/bench-drogon
+run_server "axum" 3002 env WORKERS="$NCPU" PORT=3002 bench/axum/target/release/bench-axum
 run_server "Vitesse" 3000 env WORKERS="$NCPU" PORT=3000 target/release/examples/bench
-run_server "Vitesse (thread par cœur)" 3000 env VITESSE_MODE=tpc WORKERS="$NCPU" PORT=3000 target/release/examples/bench
 
 python3 - "$RESULTS" <<'PY'
-import json, os, sys
+import os, re, sys
+
 d = sys.argv[1]
-servers, rows = [], {}
+rows, servers = {}, []
 for f in sorted(os.listdir(d)):
-    name, label, _ = f.rsplit(".", 2)
-    s = json.load(open(os.path.join(d, f)))
-    rps = s["summary"]["requestsPerSec"]
-    p99 = s["latencyPercentiles"]["p99"] * 1000
-    ok = s["statusCodeDistribution"]
-    rows.setdefault(label, {})[name] = (rps, p99, ok)
+    if f == "out":
+        continue
+    text = open(os.path.join(d, f)).read()
+    name, label, ticks = text.splitlines()[0].split("|")
+    reqs = int(re.search(r"(\d+) requests in", text).group(1))
+    rps = float(re.search(r"Requests/sec:\s+([\d.]+)", text).group(1))
+    errors = re.search(r"Non-2xx or 3xx responses: (\d+)", text)
+    rows.setdefault(label, {})[name] = (rps, int(ticks) * 1e4 / reqs, errors)
     if name not in servers:
         servers.append(name)
-order = ["texte", "json", "params", "post-json"]
-rank = ["Express (1", "Express (cluster", "axum", "Vitesse", "Vitesse (thread"]
-servers.sort(key=lambda n: max(i for i, p in enumerate(rank) if n.startswith(p)))
+
+order = ["Express", "Express cluster", "Drogon", "axum", "Vitesse"]
+servers.sort(key=order.index)
+fmt = lambda n: f"{n:,.0f}".replace(",", " ")
+print()
+print("Requêtes par seconde (temps CPU serveur par requête) :")
 print()
 print("| Scénario | " + " | ".join(servers) + " |")
-print("|---|" + "---|" * len(servers))
-for label in order:
+print("|---|" + "---:|" * len(servers))
+for label in ["texte", "json", "params", "post-json", "pipeline×16"]:
     cells = []
-    base = rows[label].get(servers[0], (1, 0, {}))[0]
-    for n in servers:
-        rps, p99, ok = rows[label][n]
-        codes = ",".join(sorted(ok))
-        warn = "" if codes == "200" else f" ⚠ {codes}"
-        rps_txt = f"{rps:,.0f}".replace(",", "\u202f")
-        cells.append(f"**{rps_txt}** req/s<br>p99 {p99:.2f} ms · ×{rps / base:.1f}{warn}")
+    for name in servers:
+        rps, us, errors = rows[label][name]
+        cell = f"{fmt(rps)} ({us:.2f} µs)"
+        if name == "Vitesse":
+            cell = f"**{cell}**"
+        if errors:
+            cell += f" ⚠ {errors.group(1)} erreurs"
+        cells.append(cell)
     print(f"| {label} | " + " | ".join(cells) + " |")
 PY
-rm -rf "$RESULTS"

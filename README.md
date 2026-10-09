@@ -4,7 +4,7 @@
 
 Vitesse est un framework web minimaliste qui reprend l'API d'Express
 (`app.get`, `req.params`, `res.status(201).json(...)`, `app.use`, `Router`,
-`express.static`…) en Rust natif, sur [hyper](https://hyper.rs) et
+`express.static`…) en Rust natif, avec son propre moteur HTTP/1.1 sur
 [tokio](https://tokio.rs).
 
 ```rust
@@ -21,26 +21,32 @@ fn main() -> std::io::Result<()> {
 
 ## Benchmark
 
-Requêtes par seconde (plus c'est haut, mieux c'est) :
+Requêtes par seconde, et entre parenthèses le temps CPU consommé par le serveur
+pour chaque requête (plus c'est bas, mieux c'est) :
 
-| Scénario | Express 5 | Express 5 (cluster ×2) | axum 0.8 | **Vitesse** |
+| Scénario | Express 5 | Drogon 1.9 (C++) | axum 0.8 | **Vitesse** |
 |---|---:|---:|---:|---:|
-| `GET /` (texte) | 7 948 | 16 661 | 186 506 | **203 540** (×25,6) |
-| `GET /json` | 8 101 | 15 525 | 191 580 | **199 881** (×24,7) |
-| `GET /users/:id` (paramètre + JSON) | 7 798 | 15 233 | 195 821 | **203 960** (×26,2) |
-| `POST /echo` (parse + renvoie du JSON) | 6 239 | 11 848 | 147 854 | **189 994** (×30,5) |
-| Latence p99 | 27 à 39 ms | 18 à 26 ms | ~4,7 ms | **~4,7 ms** |
+| `GET /` (texte) | 8 864 (120 µs) | 252 421 (7,8 µs) | 205 641 (9,6 µs) | **293 699 (6,0 µs)** |
+| `GET /json` | 8 916 (120 µs) | 178 130 (11,1 µs) | 198 569 (9,9 µs) | **295 080 (6,0 µs)** |
+| `GET /users/:id` (paramètre + JSON) | 8 905 (120 µs) | 139 001 (14,2 µs) | 178 361 (11,0 µs) | **299 664 (6,1 µs)** |
+| `POST /echo` (lit et renvoie du JSON) | 7 221 (149 µs) | 108 410 (18,3 µs) | 144 965 (13,6 µs) | **292 670 (6,6 µs)** |
+| `GET /` pipeliné ×16 | 11 679 (92 µs) | 836 154 (2,4 µs) | 304 843 (6,5 µs) | **2 552 061 (0,77 µs)** |
 
-Le multiplicateur est calculé par rapport à Express seul. À nombre de cœurs
-égal (Express en cluster sur 2 processus), Vitesse reste **12 à 16 fois plus
-rapide**, et au niveau d'[axum](https://github.com/tokio-rs/axum), la référence
-en Rust.
+- **Contre Drogon**, l'un des frameworks C++ les plus rapides : de +16 % (texte)
+  à +170 % (POST JSON) de débit, et **3 fois plus** en pipeline. Pour le même
+  travail, Vitesse consomme 23 % à 64 % de CPU en moins.
+- **Contre Express** : 33 à 40 fois plus de requêtes par seconde, et encore
+  16 à 21 fois plus face à Express en cluster sur les mêmes 2 cœurs
+  (14 à 18 k req/s).
+- **Contre axum**, la référence en Rust : de +43 % à +102 % de débit,
+  et 8 fois plus en pipeline.
 
-<sub>VM 4 vCPU : serveur épinglé sur 2 cœurs, générateur de charge
-[oha](https://github.com/hatoo/oha) sur les 2 autres, 128 connexions keep-alive,
-10 s par scénario. Node 22.22 / Express 5.3.0, Rust 1.97. Les serveurs Rust
-saturent le générateur de charge bien avant leurs propres cœurs : leurs chiffres
-sont un minimum. Pour reproduire : `bench/run.sh`.</sub>
+<sub>VM 4 vCPU : serveur épinglé sur 2 cœurs, [wrk](https://github.com/wg/wrk)
+sur les 2 autres, 128 connexions keep-alive, 10 s par scénario. Node 22.22 /
+Express 5.3.0, Drogon 1.9.13 (GCC 13, `-O3`), axum 0.8, Rust 1.97, allocateur
+système partout. Sans pipeline, les serveurs les plus rapides saturent wrk : le
+temps CPU par requête, mesuré côté serveur, est alors le juge le plus fiable.
+Pour reproduire : `bench/run.sh` (code des serveurs dans `bench/`).</sub>
 
 ## Installation
 
@@ -298,27 +304,43 @@ server.with_graceful_shutdown(signal).await?;
 ```
 
 Réglages : `app.workers(n)` (threads, un par cœur par défaut),
-`app.body_limit(octets)`, `app.thread_per_core(true)` (voir plus bas).
+`app.body_limit(octets)`, `app.thread_per_core(false)` (voir plus bas).
 
 ## Pourquoi c'est rapide
 
-- **Natif et multi-cœur** : le socle HTTP/1.1 est hyper sur tokio, compilé avec
-  LTO. Keep-alive et pipelining (réponses regroupées en un seul `write`).
-- **Routeur sans regex** : un arbre de segments parcouru sans allocation pour
-  les routes statiques ; les paramètres pointent dans le chemin et ne sont
-  copiés que s'ils contiennent des `%XX`.
-- **Zéro compteur atomique par requête** : l'application est figée au
-  démarrage (`&'static`). Handlers, middlewares et état sont lus sans `Arc`,
-  donc sans ping-pong de lignes de cache entre cœurs.
-- **Une allocation par handler** pour son `Future`, et la récupération des
-  paniques n'en ajoute aucune.
-- **Rien de superflu** : le corps n'est lu que si le handler le demande, la
-  query string est décodée à la demande, sans copie quand c'est possible.
-- **Option thread-par-cœur** (`app.thread_per_core(true)`, Linux) : une boucle
-  d'événements et un socket `SO_REUSEPORT` par cœur, aucune synchronisation
-  entre threads. Un peu moins de CPU par requête à pleine charge, mais sans
-  rééquilibrage de la charge entre threads ; d'où un défaut sur le runtime
-  multi-thread de tokio.
+La quasi-totalité du temps d'une requête simple est passée dans le noyau
+(lecture et écriture du socket) : un serveur rapide est un serveur qui ajoute
+le moins possible autour. Vitesse fait exactement **un `read` et un `write`
+par requête**, et un seul de chaque pour tout un lot de requêtes pipelinées.
+
+- **Un moteur HTTP/1.1 maison** (`src/http1.rs`) :
+  - la tête de la requête est analysée par [httparse](https://github.com/seanmonstar/httparse)
+    (SIMD) et les en-têtes restent dans le tampon de lecture : seules leurs
+    positions sont notées. La `HeaderMap` et l'`Uri` ne sont construites que si
+    un handler les demande ;
+  - les réponses sont sérialisées directement dans un tampon d'écriture
+    réutilisé, avec l'en-tête `Date` en cache par thread ;
+  - un handler qui répond sans attendre suit un chemin entièrement synchrone :
+    pas de `Future` intermédiaire ni de copie de grosses structures ;
+  - un seul minuteur par connexion (et non par requête) gère l'inactivité.
+- **Un thread par cœur** (Linux) : chaque cœur a sa propre boucle d'événements
+  et son propre socket `SO_REUSEPORT`, le noyau répartit les connexions et une
+  requête ne change jamais de thread. `app.thread_per_core(false)` revient au
+  runtime multi-thread de tokio (utile si des handlers font de longs calculs
+  bloquants).
+- **Un routeur sans regex** : un arbre de segments parcouru sans allocation
+  pour les routes statiques ; les paramètres pointent dans le chemin.
+- **Zéro compteur atomique partagé par requête** : l'application est figée au
+  démarrage (`&'static`), handlers, middlewares et état sont lus sans `Arc`.
+- **Peu d'allocations et de copies** : la requête traverse middlewares et
+  handlers en ne déplaçant qu'un pointeur, les tables d'en-têtes des réponses
+  sont recyclées, et le corps n'est lu que si le handler le demande.
+
+Le moteur reste robuste : rejet des requêtes ambiguës (`Content-Length` +
+`Transfer-Encoding`), limites de taille des en-têtes (431) et du corps (413),
+délais d'inactivité, `Expect: 100-continue`, corps `chunked` dans les deux
+sens, fermeture différée pour ne pas perdre de réponse, et arrêt propre qui
+laisse finir les requêtes en cours.
 
 ## Lancer le projet
 
@@ -326,7 +348,7 @@ Réglages : `app.workers(n)` (threads, un par cœur par défaut),
 cargo run --release --example hello      # Hello World
 cargo run --release --example rest_api   # API CRUD complète
 cargo test                               # tests unitaires, d'intégration et doctests
-bench/run.sh                             # benchmark (nécessite oha et Node.js)
+bench/run.sh                             # benchmark (wrk, Node.js, et Drogon si installé)
 ```
 
 ## Limites actuelles

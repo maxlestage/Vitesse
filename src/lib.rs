@@ -48,17 +48,20 @@
 //!
 //! ## Pourquoi c'est rapide
 //!
-//! - Le socle HTTP est [hyper](https://hyper.rs) sur [tokio](https://tokio.rs),
-//!   compilé en code natif et exécuté sur tous les cœurs.
-//! - Le routeur est un arbre de segments : pas d'expression régulière, pas
-//!   d'allocation pour les routes sans paramètre.
-//! - Une seule allocation par handler pour son `Future` ; les paniques sont
-//!   rattrapées sans coût supplémentaire.
-//! - L'application est figée au démarrage (`&'static`) : aucun compteur de
-//!   références atomique n'est touché par requête.
-//! - Le corps n'est lu que si le handler le demande.
-//! - En option, [`App::thread_per_core`] donne à chaque cœur sa propre boucle
-//!   d'événements et son propre socket (`SO_REUSEPORT`, Linux).
+//! - **Un moteur HTTP/1.1 maison** sur [tokio](https://tokio.rs) : têtes
+//!   analysées par `httparse` (SIMD) sans copie, en-têtes et URI construits
+//!   seulement si on les demande, réponses sérialisées directement dans le
+//!   tampon d'écriture, et un seul appel système pour tout un lot de
+//!   requêtes « pipelinées ».
+//! - **Un thread par cœur** ([`App::run`] sous Linux) : chaque cœur a sa
+//!   boucle d'événements et son socket `SO_REUSEPORT`, sans synchronisation.
+//! - **Un routeur sans regex** : arbre de segments, aucune allocation pour
+//!   les routes sans paramètre.
+//! - **Zéro compteur atomique partagé par requête** : l'application est
+//!   figée au démarrage (`&'static`).
+//! - **Peu d'allocations** : la requête traverse middlewares et handlers en
+//!   ne déplaçant qu'un pointeur, les tables d'en-têtes des réponses sont
+//!   recyclées, et le corps n'est lu que si le handler le demande.
 
 #![warn(missing_docs)]
 
@@ -66,6 +69,7 @@ mod app;
 mod body;
 mod error;
 mod handler;
+mod http1;
 mod request;
 mod response;
 mod router;

@@ -1,0 +1,8 @@
+{
+  "name": "vitesse-bench-express",
+  "private": true,
+  "description": "Serveur Express de référence pour le benchmark de Vitesse",
+  "dependencies": {
+    "express": "^5.1.0"
+  }
+}

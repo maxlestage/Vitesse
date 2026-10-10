@@ -1,5 +1,10 @@
 name: Site
 
+# Le site (site/) : une application Vitesse qui rend ses pages avec active, et le
+# code du navigateur compilé en WebAssembly. Le workflow vérifie la crate, construit
+# le code du navigateur, exporte tout le site en fichiers statiques (avec le préfixe
+# du dépôt dans chaque lien) et le publie sur GitHub Pages depuis master.
+
 on:
   push:
     branches: [master]
@@ -16,11 +21,10 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
-  TRUNK_VERSION: v0.21.14
 
 jobs:
   build:
-    name: Build (Yew + Trunk)
+    name: Build (active + Vitesse)
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -34,18 +38,29 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: site
-      - name: Install Trunk
+      # Le binaire précompilé, à la version de wasm-bindgen fixée par Cargo.lock.
+      - name: Install wasm-bindgen
         run: |
-          curl -sSfL "https://github.com/trunk-rs/trunk/releases/download/${TRUNK_VERSION}/trunk-x86_64-unknown-linux-gnu.tar.gz" \
-            | tar -xz -C "$HOME/.cargo/bin"
-          trunk --version
+          v=$(grep -A1 '^name = "wasm-bindgen"$' Cargo.lock | sed -n 's/^version = "\(.*\)"$/\1/p')
+          curl -sSfL "https://github.com/wasm-bindgen/wasm-bindgen/releases/download/$v/wasm-bindgen-$v-x86_64-unknown-linux-musl.tar.gz" \
+            | tar -xz --strip-components=1 -C "$HOME/.cargo/bin"
+          wasm-bindgen --version
       - run: cargo fmt --check
-      - run: cargo clippy --target wasm32-unknown-unknown --release -- -D warnings
-      # Tests natifs : langues, rendu Markdown, recherche, et vérification de
-      # toutes les pages de docs/ (titres, liens et ancres).
-      - run: cargo test
-      - name: Build
-        run: trunk build --release --public-url "/${{ github.event.repository.name }}/"
+      - run: cargo clippy --all-targets --locked -- -D warnings
+      - run: cargo clippy --lib --target wasm32-unknown-unknown --locked -- -D warnings
+      - name: Browser bundle (WebAssembly)
+        run: |
+          cargo build --lib --target wasm32-unknown-unknown --profile wasm-release --locked
+          wasm-bindgen --target web --no-typescript --out-dir pkg \
+            target/wasm32-unknown-unknown/wasm-release/vitesse_site.wasm
+      # Pages, PWA, redirections, export statique, et toute la documentation de
+      # docs/ (titres, liens et ancres).
+      - run: cargo test --locked
+      - name: Static export
+        env:
+          BASE_PATH: /${{ github.event.repository.name }}
+          SITE_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}
+        run: cargo run --release --locked -- export dist
       - uses: actions/upload-pages-artifact@v3
         if: github.event_name != 'pull_request'
         with:

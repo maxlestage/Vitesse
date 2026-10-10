@@ -119,7 +119,7 @@ async fn params_and_query() {
     assert_eq!(c.get("/users/42/").await.text(), "user 42");
     let r = c.get("/users/abc").await;
     assert_eq!(r.status(), 400);
-    assert!(r.text().contains("invalide"));
+    assert!(r.text().contains("invalid parameter"));
     assert_eq!(c.get("/users/1/posts/2").await.text(), "id=1,post=2");
     assert_eq!(c.get("/files/a/b/c.txt").await.text(), "a/b/c.txt");
     assert_eq!(c.get("/hello/Fran%C3%A7ois").await.text(), "François");
@@ -180,7 +180,7 @@ async fn bodies() {
         r.json::<serde_json::Value>()["error"]
             .as_str()
             .unwrap()
-            .starts_with("JSON invalide")
+            .starts_with("invalid JSON")
     );
 
     let r = c
@@ -458,6 +458,39 @@ async fn builtin_middlewares() {
 }
 
 #[tokio::test]
+async fn cors_credentials_never_echo_unknown_origins() {
+    // Sans origine déclarée, les cookies ne doivent pas ouvrir la porte à
+    // n'importe quel site : la réponse dit `*`, que les navigateurs refusent
+    // avec des identifiants.
+    let mut open = App::new();
+    open.middleware(middleware::cors().allow_credentials(true));
+    open.get("/", |_| async { "ok" });
+    let r = TestClient::new(open)
+        .get("/")
+        .header("origin", "https://pirate.fr")
+        .await;
+    assert_eq!(r.header("access-control-allow-origin"), Some("*"));
+
+    let mut strict = App::new();
+    strict.middleware(
+        middleware::cors()
+            .allow_origin("https://ok.fr")
+            .allow_credentials(true),
+    );
+    strict.get("/", |_| async { "ok" });
+    let c = TestClient::new(strict);
+    let r = c.get("/").header("origin", "https://ok.fr").await;
+    assert_eq!(
+        r.header("access-control-allow-origin"),
+        Some("https://ok.fr")
+    );
+    assert_eq!(r.header("access-control-allow-credentials"), Some("true"));
+    assert_eq!(r.header("vary"), Some("Origin"));
+    let r = c.get("/").header("origin", "https://pirate.fr").await;
+    assert_eq!(r.header("access-control-allow-origin"), None);
+}
+
+#[tokio::test]
 async fn static_files() {
     let dir = std::env::temp_dir().join(format!("vitesse-test-{}", std::process::id()));
     std::fs::create_dir_all(dir.join("sub")).unwrap();
@@ -544,7 +577,7 @@ async fn static_files() {
 }
 
 #[test]
-#[should_panic(expected = "route en double")]
+#[should_panic(expected = "duplicate route")]
 fn duplicate_route_panics() {
     let mut app = App::new();
     app.get("/a", |_| async { "1" });
@@ -552,10 +585,35 @@ fn duplicate_route_panics() {
 }
 
 #[test]
-#[should_panic(expected = "route invalide")]
+#[should_panic(expected = "invalid route")]
 fn invalid_route_panics() {
     let mut app = App::new();
     app.get("pas-de-slash", |_| async { "1" });
+}
+
+#[tokio::test]
+async fn utf8_header_values_are_read_the_same_way_everywhere() {
+    // Que la table des en-têtes soit construite ou non, une valeur UTF-8
+    // valide est lue de la même façon.
+    let mut app = App::new();
+    app.get("/lazy", |req: Request| async move {
+        req.header("x-name").unwrap_or("none").to_owned()
+    });
+    app.get("/map", |req: Request| async move {
+        let _ = req.headers().len();
+        req.header("x-name").unwrap_or("none").to_owned()
+    });
+    let server = app.bind("127.0.0.1:0").await.unwrap();
+    let addr = server.local_addr();
+    tokio::spawn(server.run());
+    for path in ["/lazy", "/map"] {
+        let res = raw(
+            addr,
+            &format!("GET {path} HTTP/1.1\r\nhost: x\r\nx-name: José\r\nconnection: close\r\n\r\n"),
+        )
+        .await;
+        assert!(res.ends_with("José"), "{path}: {res}");
+    }
 }
 
 /// Envoie des requêtes HTTP brutes sur une connexion TCP.

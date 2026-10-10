@@ -1,4 +1,4 @@
-//! Middlewares prêts à l'emploi : `logger`, `cors`, `helmet`, `timeout`,
+//! Ready-to-use middlewares: `logger`, `cors`, `helmet`, `timeout`,
 //! `serve_static`.
 
 use std::io::{IsTerminal, Write};
@@ -14,7 +14,7 @@ use crate::request::Request;
 use crate::response::{IntoResponse, Response};
 use crate::static_files::ServeDir;
 
-/// Journalise chaque requête, façon `morgan('dev')` :
+/// Logs every request, like `morgan('dev')`:
 ///
 /// ```text
 /// GET /users/42 200 0.084 ms
@@ -44,27 +44,25 @@ pub fn logger() -> impl Middleware {
     }
 }
 
-/// Coupe les requêtes trop longues avec une `503 Service Unavailable`.
+/// Cuts off requests that take too long with a `503 Service Unavailable`.
 pub fn timeout(duration: Duration) -> impl Middleware {
     move |req: Request, next: Next| async move {
         match tokio::time::timeout(duration, next.run(req)).await {
             Ok(res) => res,
-            Err(_) => Error::new(
-                StatusCode::SERVICE_UNAVAILABLE,
-                "délai de traitement dépassé",
-            )
-            .into_response(),
+            Err(_) => {
+                Error::new(StatusCode::SERVICE_UNAVAILABLE, "request timed out").into_response()
+            }
         }
     }
 }
 
-/// Sert les fichiers d'un dossier, en laissant passer vers les routes ce qui
-/// n'existe pas (`app.use(express.static('public'))`).
+/// Serves the files of a directory, letting requests for files that don't
+/// exist fall through to the routes (`app.use(express.static('public'))`).
 pub fn serve_static(dir: impl Into<PathBuf>) -> ServeDir {
     ServeDir::new(dir)
 }
 
-/// En-têtes de sécurité par défaut, façon `helmet()`.
+/// Default security headers, like `helmet()`.
 pub fn helmet() -> impl Middleware {
     const HEADERS: [(&str, &str); 9] = [
         ("x-content-type-options", "nosniff"),
@@ -92,13 +90,13 @@ pub fn helmet() -> impl Middleware {
     }
 }
 
-/// CORS avec la configuration par défaut d'Express (`cors()`) : toutes les
-/// origines, méthodes `GET, HEAD, PUT, PATCH, POST, DELETE`.
+/// CORS with Express's default configuration (`cors()`): all origins,
+/// methods `GET, HEAD, PUT, PATCH, POST, DELETE`.
 pub fn cors() -> Cors {
     Cors::new()
 }
 
-/// Middleware CORS configurable.
+/// Configurable CORS middleware.
 ///
 /// ```
 /// use vitesse::prelude::*;
@@ -107,7 +105,7 @@ pub fn cors() -> Cors {
 /// let mut app = App::new();
 /// app.middleware(
 ///     middleware::cors()
-///         .allow_origin("https://monsite.fr")
+///         .allow_origin("https://example.com")
 ///         .allow_credentials(true)
 ///         .max_age(Duration::from_secs(600)),
 /// );
@@ -129,7 +127,7 @@ impl Default for Cors {
 }
 
 impl Cors {
-    /// Toutes les origines autorisées.
+    /// Allows all origins.
     pub fn new() -> Self {
         Cors {
             origins: Vec::new(),
@@ -141,7 +139,8 @@ impl Cors {
         }
     }
 
-    /// N'autorise que cette origine (cumulable). `"*"` autorise tout.
+    /// Allows only this origin (can be called several times). `"*"` allows
+    /// every origin.
     pub fn allow_origin(mut self, origin: &str) -> Self {
         if origin != "*" {
             self.origins.push(origin.trim_end_matches('/').to_owned());
@@ -149,7 +148,7 @@ impl Cors {
         self
     }
 
-    /// Méthodes autorisées.
+    /// Allowed methods.
     pub fn allow_methods<I>(mut self, methods: I) -> Self
     where
         I: IntoIterator<Item = Method>,
@@ -162,37 +161,42 @@ impl Cors {
         self
     }
 
-    /// En-têtes autorisés (par défaut : ceux demandés par le navigateur).
+    /// Allowed headers (default: the ones requested by the browser).
     pub fn allow_headers(mut self, headers: &str) -> Self {
         self.headers = Some(headers.to_owned());
         self
     }
 
-    /// En-têtes de réponse lisibles par le navigateur.
+    /// Response headers the browser is allowed to read.
     pub fn expose_headers(mut self, headers: &str) -> Self {
         self.expose = Some(headers.to_owned());
         self
     }
 
-    /// Autorise les cookies et l'authentification.
+    /// Allows cookies and authentication.
+    ///
+    /// Browsers only send credentials to explicitly allowed origins: combine
+    /// it with [`Cors::allow_origin`]. With every origin allowed, the
+    /// response says `*` and browsers refuse credentialed requests.
     pub fn allow_credentials(mut self, allow: bool) -> Self {
         self.credentials = allow;
         self
     }
 
-    /// Durée de cache des requêtes préliminaires (`OPTIONS`).
+    /// How long the results of preflight requests (`OPTIONS`) can be cached.
     pub fn max_age(mut self, max_age: Duration) -> Self {
         self.max_age = Some(max_age.as_secs());
         self
     }
 
-    /// La valeur d'`Access-Control-Allow-Origin` pour cette origine, si elle est autorisée.
+    /// The `Access-Control-Allow-Origin` value for this origin, if it is allowed.
     fn allowed_origin(&self, origin: &str) -> Option<HeaderValue> {
         if self.origins.is_empty() {
-            if self.credentials {
-                // `*` est interdit avec les cookies : on renvoie l'origine.
-                return HeaderValue::from_str(origin).ok();
-            }
+            // Comme Express : `*`, même avec `allow_credentials(true)`. Les
+            // navigateurs refusent alors les requêtes avec cookies, ce qui
+            // oblige à lister les origines de confiance. Renvoyer l'origine
+            // reçue laisserait n'importe quel site lire les réponses d'un
+            // utilisateur connecté.
             return Some(HeaderValue::from_static("*"));
         }
         if self.origins.iter().any(|o| o == origin) {

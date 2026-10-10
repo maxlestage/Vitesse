@@ -1,4 +1,4 @@
-//! Petits utilitaires internes : décodage d'URL, types MIME et dates HTTP.
+//! Small internal utilities: URL decoding, MIME types and HTTP dates.
 
 use std::borrow::Cow;
 use std::path::Path;
@@ -14,9 +14,9 @@ fn hex_val(b: u8) -> Option<u8> {
     }
 }
 
-/// Décode les séquences `%XX` d'un segment d'URL (les `+` sont laissés tels quels).
+/// Decodes the `%XX` sequences of a URL segment (`+` signs are left as is).
 ///
-/// N'alloue rien quand il n'y a rien à décoder.
+/// Allocates nothing when there is nothing to decode.
 pub(crate) fn percent_decode(input: &str) -> Cow<'_, str> {
     let bytes = input.as_bytes();
     let Some(first) = bytes.iter().position(|&b| b == b'%') else {
@@ -43,7 +43,7 @@ pub(crate) fn percent_decode(input: &str) -> Cow<'_, str> {
     }
 }
 
-/// Devine le type MIME d'un fichier à partir de son extension.
+/// Guesses the MIME type of a file from its extension.
 pub(crate) fn mime_for(path: &Path) -> &'static str {
     let ext = path
         .extension()
@@ -86,7 +86,8 @@ pub(crate) fn mime_for(path: &Path) -> &'static str {
     }
 }
 
-/// Formate une date au format HTTP (RFC 9110), ex. `Sun, 06 Nov 1994 08:49:37 GMT`.
+/// Formats a date in the HTTP format (RFC 9110), e.g.
+/// `Sun, 06 Nov 1994 08:49:37 GMT`.
 pub(crate) fn http_date(time: SystemTime) -> String {
     const DAYS: [&str; 7] = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
     const MONTHS: [&str; 12] = [
@@ -111,8 +112,8 @@ pub(crate) fn http_date(time: SystemTime) -> String {
     )
 }
 
-/// Convertit un nombre de jours depuis 1970-01-01 en (année, mois, jour).
-/// Algorithme de Howard Hinnant.
+/// Converts a number of days since 1970-01-01 into (year, month, day).
+/// Howard Hinnant's algorithm.
 fn civil_from_days(z: i64) -> (i64, u32, u32) {
     let z = z + 719_468;
     let era = if z >= 0 { z } else { z - 146_096 } / 146_097;

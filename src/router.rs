@@ -203,6 +203,47 @@ macro_rules! routing_methods {
             self
         }
 
+        /// Adds a WebSocket route (`express-ws`'s `app.ws(path, handler)`):
+        /// `handler` receives the request and the open [`WebSocket`](crate::ws::WebSocket).
+        ///
+        /// A request that is not a WebSocket handshake gets
+        /// `426 Upgrade Required`. For subprotocols or a size limit, use
+        /// [`ws::Upgrade`](crate::ws::Upgrade) in a `GET` route.
+        ///
+        /// ```no_run
+        /// # use vitesse::prelude::*;
+        /// let mut app = App::new();
+        /// app.ws("/chat/:room", |req, mut socket| async move {
+        ///     let room = req.param("room").unwrap_or("lobby").to_owned();
+        ///     let _ = socket.send(format!("welcome to {room}")).await;
+        ///     while let Some(Ok(message)) = socket.recv().await {
+        ///         if socket.send(message).await.is_err() {
+        ///             break;
+        ///         }
+        ///     }
+        /// });
+        /// ```
+        #[cfg(feature = "ws")]
+        #[track_caller]
+        pub fn ws<F, Fut>(&mut self, path: &str, handler: F) -> &mut Self
+        where
+            F: Fn($crate::Request, $crate::ws::WebSocket) -> Fut + Send + Sync + 'static,
+            Fut: ::std::future::Future<Output = ()> + Send + 'static,
+        {
+            let handler = ::std::sync::Arc::new(handler);
+            self.get(path, move |req: $crate::Request| {
+                let handler = handler.clone();
+                async move {
+                    match $crate::ws::Upgrade::new(&req) {
+                        Ok(upgrade) => {
+                            upgrade.on_upgrade(req, move |req, socket| handler(req, socket))
+                        }
+                        Err(error) => $crate::IntoResponse::into_response(error),
+                    }
+                }
+            })
+        }
+
         /// Adds a route for an arbitrary method.
         #[track_caller]
         pub fn route<H: $crate::Handler>(

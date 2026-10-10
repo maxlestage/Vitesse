@@ -31,6 +31,12 @@ First public release.
   `Expect: 100-continue`, size limits, idle timeouts, graceful shutdown on
   Ctrl+C / SIGTERM (`app.run`, `app.listen` and `Server::run`),
   thread-per-core with `SO_REUSEPORT` on Linux.
+- WebSocket (`ws` feature, on by default): `app.ws(path, |req, socket| …)`
+  on apps and routers, `ws::Upgrade` for subprotocols and size limits,
+  `split()` to send and receive from two tasks, automatic pongs.
+- HTTP/3 over QUIC (`http3` feature): `app.http3(Http3::from_pem_files(…))`
+  serves the same routes over UDP next to HTTP/1.1, with TLS 1.3
+  (rustls), graceful shutdown (GOAWAY) and `Alt-Svc` advertising.
 - Documentation in English, French and Spanish, a Docker image and
   one-click deployment to Heroku.
 - A 100% Rust repository: the website is Yew (WebAssembly) and the

@@ -1,6 +1,6 @@
-//! Transforme une page Markdown de la documentation en HTML : titres avec
-//! ancres, liens réécrits vers le site, code coloré avec bouton « copier »,
-//! encadrés `> [!NOTE]` et tableaux qui défilent sur mobile.
+//! Transforme une page Markdown de la documentation en HTML, sur le serveur :
+//! titres avec ancres, liens réécrits vers les pages du site, code coloré avec
+//! bouton « copier », encadrés `> [!NOTE]` et tableaux qui défilent sur mobile.
 
 use std::collections::HashMap;
 
@@ -8,11 +8,12 @@ use pulldown_cmark::{
     BlockQuoteKind, CodeBlockKind, CowStr, Event, HeadingLevel, Options, Parser, Tag, TagEnd, html,
 };
 
+use crate::catalog;
 use crate::data::GITHUB;
-use crate::highlight::{self, Kind};
+use crate::highlight::{self, Kind, escape};
 use crate::i18n::Lang;
-
-use super::index;
+use crate::labels::labels;
+use crate::routes::{doc_href, docs_href};
 
 #[derive(Clone, PartialEq, Debug)]
 pub struct TocEntry {
@@ -57,20 +58,6 @@ impl Slugger {
     }
 }
 
-pub fn escape(text: &str) -> String {
-    let mut out = String::with_capacity(text.len());
-    for c in text.chars() {
-        match c {
-            '&' => out.push_str("&amp;"),
-            '<' => out.push_str("&lt;"),
-            '>' => out.push_str("&gt;"),
-            '"' => out.push_str("&quot;"),
-            _ => out.push(c),
-        }
-    }
-    out
-}
-
 fn level(level: HeadingLevel) -> u8 {
     match level {
         HeadingLevel::H1 => 1,
@@ -82,25 +69,14 @@ fn level(level: HeadingLevel) -> u8 {
     }
 }
 
-/// Le lien d'une page du site, avec une ancre éventuelle.
-pub fn page_href(slug: &str, anchor: Option<&str>) -> String {
-    match anchor {
-        Some(anchor) if !anchor.is_empty() => format!("#/docs/{slug}/{anchor}"),
-        _ => format!("#/docs/{slug}"),
-    }
-}
-
 /// Réécrit la destination d'un lien. Renvoie aussi `true` si le lien sort
 /// du site (il s'ouvre alors dans un nouvel onglet).
-pub fn rewrite_link(dest: &str, lang: Lang, slug: &str) -> (String, bool) {
+pub fn rewrite_link(dest: &str, lang: Lang) -> (String, bool) {
     if dest.starts_with("http://") || dest.starts_with("https://") {
         return (dest.to_owned(), true);
     }
-    if dest.starts_with("mailto:") {
+    if dest.starts_with("mailto:") || dest.starts_with('#') {
         return (dest.to_owned(), false);
-    }
-    if let Some(anchor) = dest.strip_prefix('#') {
-        return (page_href(slug, Some(anchor)), false);
     }
     let (path, anchor) = dest
         .split_once('#')
@@ -111,11 +87,17 @@ pub fn rewrite_link(dest: &str, lang: Lang, slug: &str) -> (String, bool) {
         let same_folder = !path.trim_start_matches("./").contains('/');
         let other_language = path.starts_with("../") && path.matches('/').count() == 2;
         if same_folder || other_language {
+            // `../fr/routing.md` mène à la page française.
+            let target = if other_language {
+                path.split('/').nth(1).and_then(Lang::parse).unwrap_or(lang)
+            } else {
+                lang
+            };
             if page == "README" {
-                return ("#/docs".to_owned(), false);
+                return (docs_href(target), false);
             }
-            if index::find(page).is_some() {
-                return (page_href(page, anchor), false);
+            if catalog::find(page).is_some() {
+                return (doc_href(target, page, anchor), false);
             }
         }
     }
@@ -127,19 +109,7 @@ pub fn rewrite_link(dest: &str, lang: Lang, slug: &str) -> (String, bool) {
 }
 
 fn spans(tokens: Vec<(Kind, String)>) -> String {
-    let mut out = String::new();
-    for (kind, text) in tokens {
-        if kind == Kind::Plain {
-            out.push_str(&escape(&text));
-        } else {
-            out.push_str(&format!(
-                "<span class=\"{}\">{}</span>",
-                kind.class(),
-                escape(&text)
-            ));
-        }
-    }
-    out
+    highlight::to_html(&tokens)
 }
 
 /// Coloration légère pour le shell, TOML, YAML, Dockerfile, Nginx… :
@@ -229,8 +199,9 @@ fn code_block(code: &str, language: &str, copy: &str, copied: &str) -> String {
     )
 }
 
-pub fn render(markdown: &str, lang: Lang, slug: &str) -> Rendered {
+pub fn render(markdown: &str, lang: Lang) -> Rendered {
     let texts = lang.texts();
+    let l = labels(lang);
     let options = Options::ENABLE_TABLES
         | Options::ENABLE_STRIKETHROUGH
         | Options::ENABLE_TASKLISTS
@@ -276,8 +247,8 @@ pub fn render(markdown: &str, lang: Lang, slug: &str) -> Rendered {
                 out.push(html_event(format!("<h{n} id=\"{}\">", escape(&id))));
                 out.extend(inner);
                 out.push(html_event(format!(
-                    "<a class=\"doc-anchor\" href=\"{}\" aria-hidden=\"true\" tabindex=\"-1\">#</a></h{n}>",
-                    escape(&page_href(slug, Some(&id)))
+                    "<a class=\"doc-anchor\" href=\"#{}\" aria-hidden=\"true\" tabindex=\"-1\">#</a></h{n}>",
+                    escape(&id)
                 )));
             }
             Event::Start(Tag::CodeBlock(kind)) => {
@@ -295,17 +266,12 @@ pub fn render(markdown: &str, lang: Lang, slug: &str) -> Rendered {
                         _ => {}
                     }
                 }
-                out.push(html_event(code_block(
-                    &code,
-                    &language,
-                    texts.copy,
-                    texts.copied,
-                )));
+                out.push(html_event(code_block(&code, &language, l.copy, l.copied)));
             }
             Event::Start(Tag::Link {
                 dest_url, title: t, ..
             }) => {
-                let (href, external) = rewrite_link(&dest_url, lang, slug);
+                let (href, external) = rewrite_link(&dest_url, lang);
                 let mut tag = format!("<a href=\"{}\"", escape(&href));
                 if !t.is_empty() {
                     tag.push_str(&format!(" title=\"{}\"", escape(&t)));
@@ -416,25 +382,22 @@ mod tests {
     #[test]
     fn rewrites_links() {
         let l = Lang::Fr;
-        assert_eq!(rewrite_link("routing.md", l, "intro").0, "#/docs/routing");
+        assert_eq!(rewrite_link("routing.md", l).0, "/fr/docs/routing/");
         assert_eq!(
-            rewrite_link("routing.md#jokers", l, "intro").0,
-            "#/docs/routing/jokers"
+            rewrite_link("routing.md#jokers", l).0,
+            "/fr/docs/routing/#jokers"
         );
-        assert_eq!(
-            rewrite_link("#plus-loin", l, "intro").0,
-            "#/docs/intro/plus-loin"
-        );
-        assert_eq!(rewrite_link("../en/routing.md", l, "x").0, "#/docs/routing");
-        assert_eq!(rewrite_link("README.md", l, "x").0, "#/docs");
-        let (href, external) = rewrite_link("../../examples/demo.rs", l, "x");
+        assert_eq!(rewrite_link("#plus-loin", l).0, "#plus-loin");
+        assert_eq!(rewrite_link("../en/routing.md", l).0, "/en/docs/routing/");
+        assert_eq!(rewrite_link("README.md", l).0, "/fr/docs/");
+        let (href, external) = rewrite_link("../../examples/demo.rs", l);
         assert!(external);
         assert_eq!(
             href,
             "https://github.com/maxlestage/Vitesse/blob/master/docs/fr/../../examples/demo.rs"
         );
         assert_eq!(
-            rewrite_link("https://docs.rs/vitesse", l, "x"),
+            rewrite_link("https://docs.rs/vitesse", l),
             ("https://docs.rs/vitesse".to_owned(), true)
         );
     }
@@ -442,12 +405,13 @@ mod tests {
     #[test]
     fn renders_headings_code_and_callouts() {
         let md = "# Titre\n\nIntro avec [un lien](routing.md).\n\n## Une section\n\n```rust\nlet x = 1;\n```\n\n> [!TIP]\n> Astuce !\n\n| a | b |\n|---|---|\n| 1 | 2 |\n";
-        let r = render(md, Lang::Fr, "intro");
+        let r = render(md, Lang::Fr);
         assert_eq!(r.title, "Titre");
         assert_eq!(r.toc.len(), 1);
         assert_eq!(r.toc[0].id, "une-section");
         assert!(r.html.contains("<h2 id=\"une-section\">"));
-        assert!(r.html.contains("href=\"#/docs/routing\""));
+        assert!(r.html.contains("href=\"/fr/docs/routing/\""));
+        assert!(r.html.contains("href=\"#une-section\""));
         assert!(r.html.contains("<span class=\"t-kw\">let</span>"));
         assert!(r.html.contains("callout--tip"));
         assert!(r.html.contains("Astuce"));
@@ -459,14 +423,13 @@ mod tests {
         let r = render(
             "| a | b |\n|---|---|\n| `\\|req\\| async {}` | x |\n",
             Lang::En,
-            "x",
         );
         assert!(r.html.contains("<code>|req| async {}</code>"), "{}", r.html);
     }
 
     #[test]
     fn escapes_raw_html() {
-        let r = render("Bonjour <script>alert(1)</script>", Lang::Fr, "x");
+        let r = render("Bonjour <script>alert(1)</script>", Lang::Fr);
         assert!(!r.html.contains("<script>"));
     }
 

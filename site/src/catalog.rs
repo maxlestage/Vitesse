@@ -1,6 +1,6 @@
 //! Le sommaire de la documentation : catégories et pages, dans l'ordre de
 //! lecture. Les pages elles-mêmes sont les fichiers `docs/<langue>/<slug>.md`
-//! du dépôt.
+//! du dépôt, rendus par le serveur.
 
 use crate::i18n::Lang;
 
@@ -10,6 +10,7 @@ pub struct Category {
     pub icon: &'static str,
 }
 
+#[derive(Debug, PartialEq, Eq)]
 pub struct Page {
     pub slug: &'static str,
     pub category: usize,
@@ -303,4 +304,35 @@ pub const PAGES: [Page; 22] = [
 
 pub fn find(slug: &str) -> Option<(usize, &'static Page)> {
     PAGES.iter().enumerate().find(|(_, p)| p.slug == slug)
+}
+
+/// Les pages d'une catégorie, dans l'ordre de lecture.
+pub fn pages_of(category: usize) -> impl Iterator<Item = &'static Page> {
+    PAGES.iter().filter(move |p| p.category == category)
+}
+
+/// La page précédente et la suivante, dans l'ordre de lecture.
+pub fn neighbours(slug: &str) -> (Option<&'static Page>, Option<&'static Page>) {
+    let Some((i, _)) = find(slug) else {
+        return (None, None);
+    };
+    (i.checked_sub(1).map(|i| &PAGES[i]), PAGES.get(i + 1))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn every_page_has_a_category_and_neighbours() {
+        assert!(PAGES.iter().all(|p| p.category < CATEGORIES.len()));
+        assert_eq!(neighbours("introduction").0, None);
+        assert_eq!(
+            neighbours("introduction").1.map(|p| p.slug),
+            Some("installation")
+        );
+        assert_eq!(neighbours("faq").1, None);
+        let total: usize = (0..CATEGORIES.len()).map(|c| pages_of(c).count()).sum();
+        assert_eq!(total, PAGES.len());
+    }
 }

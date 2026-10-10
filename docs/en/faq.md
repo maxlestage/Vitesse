@@ -26,7 +26,7 @@ Both are excellent and mature frameworks. Vitesse is a good fit if:
 - you come from Express and want the same mental model: one `Request`, middleware with `next`, routers, and handlers that simply return their response, with no extractors or service layers to learn;
 - you want top performance: in the [benchmark](performance.md), Vitesse handles more requests per second than both, with less CPU per request.
 
-Prefer actix-web or axum if you need what Vitesse does not do (yet): HTTP/2, TLS or WebSocket built in, the [tower](https://github.com/tower-rs/tower) middleware ecosystem, or a stable 1.x API.
+Prefer actix-web or axum if you need what Vitesse does not do (yet): HTTP/2 or TLS over TCP built in, the [tower](https://github.com/tower-rs/tower) middleware ecosystem, or a stable 1.x API.
 
 ### How is it different from Express?
 
@@ -48,11 +48,16 @@ Yes: the test suite runs on Linux, macOS and Windows. The thread-per-core mode (
 
 ### Does Vitesse support HTTPS and HTTP/2?
 
-Not directly: Vitesse speaks HTTP/1.1 over plain TCP. Put it behind a reverse proxy (Nginx, Caddy, or the load balancer of your platform) that handles TLS and HTTP/2 and forwards requests in HTTP/1.1, as is common with Express. Platforms such as Heroku already do this for you. See [Production](production.md).
+Not over TCP: Vitesse speaks HTTP/1.1 over plain TCP. Put it behind a reverse proxy (Nginx, Caddy, or the load balancer of your platform) that handles TLS and HTTP/2 and forwards requests in HTTP/1.1, as is common with Express. Platforms such as Heroku already do this for you. See [Production](production.md). The exception is HTTP/3, whose TLS is built into QUIC: see the next question.
 
-### WebSocket?
+### Does Vitesse support WebSocket and HTTP/3?
 
-Not supported. For server-to-client push, a streamed response often does the job: `Body::from_stream` sends each chunk as soon as it is produced, which is all you need for [Server-Sent Events](https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events) with a `text/event-stream` content type (see [Responses](responses.md)). For real bidirectional WebSocket, run a dedicated service next to Vitesse.
+Yes, both:
+
+- **WebSocket** is built in (the `ws` feature, enabled by default): `app.ws("/chat", |req, socket| async move { … })`, in the style of `express-ws`. See [WebSocket](websocket.md).
+- **HTTP/3** over QUIC is available with the opt-in `http3` feature: `app.http3(Http3::from_pem_files(...)?)` serves the same application over UDP, next to HTTP/1.1. See [HTTP/3 and QUIC](http3.md).
+
+WebSocket only works over HTTP/1.1, not over HTTP/3. For one-way server-to-client push, a streamed response is also an option: `Body::from_stream` sends each chunk as soon as it is produced, which is all you need for [Server-Sent Events](https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events) with a `text/event-stream` content type (see [Responses](responses.md)).
 
 ### Compression?
 
@@ -124,8 +129,9 @@ Vitesse is dual-licensed under [MIT](https://github.com/maxlestage/Vitesse/blob/
 
 Like Express, Vitesse deliberately does little. Not included (yet):
 
-- **HTTP/2 and TLS**: put Vitesse behind a reverse proxy such as Nginx or Caddy (see [Production](production.md));
-- **WebSocket**;
+- **HTTP/2, and TLS over TCP** (HTTPS): put Vitesse behind a reverse proxy such as Nginx or Caddy (see [Production](production.md)). [HTTP/3](http3.md), whose TLS is built in, is supported;
+- **WebSocket over HTTP/3**: [WebSocket](websocket.md) works over HTTP/1.1;
+- **0-RTT and streaming request bodies over HTTP/3**: HTTP/3 request bodies are read in full before the handler runs;
 - **Compression**: delegate it to the reverse proxy;
 - **Template engines**: use a template crate and return `Html(...)`;
 - **Partial parameters within a segment** (`/flights/:from-:to`), as well as optional parameters (`/:id?`) and regular expressions in routes;

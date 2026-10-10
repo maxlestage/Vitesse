@@ -1,6 +1,6 @@
 # Going to production
 
-This page gathers what matters when a Vitesse app leaves your laptop: an optimised build, configuration, a reverse proxy for HTTPS and HTTP/2, a service manager, graceful shutdown, limits, logs, security and monitoring. For containers, see also [Docker](docker.md); for Heroku, [Deploy to Heroku from your phone](heroku-mobile.md).
+This page gathers what matters when a Vitesse app leaves your laptop: an optimised build, configuration, a reverse proxy for HTTPS and HTTP/2, WebSocket and HTTP/3, a service manager, graceful shutdown, limits, logs, security and monitoring. For containers, see also [Docker](docker.md); for Heroku, [Deploy to Heroku from your phone](heroku-mobile.md).
 
 ## Build in release mode
 
@@ -64,7 +64,7 @@ fn main() -> std::io::Result<()> {
 
 ## Behind a reverse proxy
 
-Vitesse speaks HTTP/1.1 without TLS. In production, put a reverse proxy in front of it: it handles HTTPS and certificates, HTTP/2 (and HTTP/3), compression, and talks plain HTTP/1.1 to Vitesse over keep-alive connections on the local machine.
+Vitesse speaks HTTP/1.1 without TLS over TCP. In production, put a reverse proxy in front of it: it handles HTTPS and certificates, HTTP/2 (and HTTP/3, unless Vitesse serves it itself: see [HTTP/3](#http3)), compression, and talks plain HTTP/1.1 to Vitesse over keep-alive connections on the local machine.
 
 Vitesse closes a connection after about 60 seconds without a request (about 30 seconds if a client never finishes sending its headers). Let the proxy reuse its connections to the app, and have it drop idle ones a bit sooner than that.
 
@@ -130,6 +130,26 @@ server {
 
 The certificates can come from Let's Encrypt, for example with `sudo certbot --nginx -d example.com`. Check the configuration with `sudo nginx -t`, then apply it with `sudo systemctl reload nginx`.
 
+### WebSocket behind Nginx
+
+Caddy passes [WebSocket](websocket.md) connections through without any configuration. Nginx needs the `Upgrade` and `Connection` headers forwarded explicitly, and a long `proxy_read_timeout`: by default, it closes a connection that has been silent for 60 seconds. Add a `location` for your WebSocket routes (here, everything under `/ws/`) to the `server` block above:
+
+```nginx
+location /ws/ {
+    proxy_pass http://vitesse;
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_read_timeout 1h;
+    proxy_send_timeout 1h;
+}
+```
+
+Each WebSocket keeps its own connection between Nginx and Vitesse open for its whole life, outside the `keepalive` pool. For connections that can stay silent for a long time, have the server send a ping regularly (see [WebSocket](websocket.md#behind-a-reverse-proxy)).
+
 ### Getting the client's IP address
 
 Behind a proxy, `req.ip()` returns the proxy's address (`127.0.0.1`). Both configurations above send the real address in `X-Real-IP`:
@@ -146,6 +166,34 @@ app.get("/ip", |req: Request| async move {
 
 > [!IMPORTANT]
 > Only trust this header if the app can be reached **only** through the proxy (listen on `127.0.0.1`). Otherwise, any client can send a fake `X-Real-IP`.
+
+If Vitesse also serves HTTP/3 (below), those requests reach it directly, without the proxy: `req.ip()` is then the client's real address, and an `X-Real-IP` header can only come from the client. Only read the header for HTTP/1.1 requests (`req.version()`).
+
+## HTTP/3
+
+Browsers use HTTP/3 when the site announces it. Two ways to offer it:
+
+- **Let the proxy do it.** Caddy enables HTTP/3 by default, Nginx with `listen 443 quic` (version 1.25 or later). Nothing changes for Vitesse.
+- **Let Vitesse do it**, with the `http3` feature: the proxy keeps TCP port 443, and Vitesse receives UDP port 443 directly, with the same certificate. Its HTTP/1.1 responses carry the `alt-svc` header that the proxy passes on to browsers.
+
+```rust
+use vitesse::http3::Http3;
+
+app.http3(
+    Http3::from_pem_files("/etc/my-app/tls/fullchain.pem", "/etc/my-app/tls/privkey.pem")?
+        .port(443), // HTTP/3 on UDP 443, announced to browsers by alt-svc
+);
+app.run("0.0.0.0:3000") // TCP 3000 for the proxy; the UDP socket uses the same IP
+```
+
+In the second case:
+
+- open **UDP** port 443 in the firewall (`sudo ufw allow 443/udp`), and keep TCP port 3000 closed;
+- under systemd, add `AmbientCapabilities=CAP_NET_BIND_SERVICE` so the service's user can open port 443;
+- Nginx must not listen on `443 quic`, and Caddy needs `protocols h1 h2` in its global options, to leave UDP port 443 to Vitesse;
+- the certificate is loaded at startup: restart the app after each renewal.
+
+Everything is detailed in [HTTP/3 and QUIC](http3.md#in-production-behind-caddy-or-nginx).
 
 ## Run it as a service with systemd
 
@@ -177,6 +225,8 @@ Restart=on-failure
 RestartSec=2
 # Vitesse lets in-flight requests finish for up to 10 s after SIGTERM.
 TimeoutStopSec=15
+# Only for HTTP/3 on UDP port 443:
+# AmbientCapabilities=CAP_NET_BIND_SERVICE
 # One file descriptor per connection.
 LimitNOFILE=65536
 # Hardening (add ReadWritePaths=... if the app writes files).
@@ -213,6 +263,8 @@ A restart takes a fraction of a second, but connections attempted during it fail
 1. stops accepting new connections;
 2. lets in-flight requests finish, for up to **10 seconds**;
 3. closes the remaining connections and returns from `app.run` (or `app.listen`).
+
+HTTP/3 connections stop at the same time, after a `GOAWAY`, with the same 10 seconds for their requests. WebSocket connections are closed at the latest at the end of the grace period: make your clients reconnect automatically.
 
 The 10-second grace period is fixed. Make sure your platform waits a little longer before killing the process: systemd waits 90 seconds by default (`TimeoutStopSec`), Kubernetes 30 seconds (`terminationGracePeriodSeconds`), Heroku 30 seconds, but Docker only 10 seconds (use `--stop-timeout 15`).
 
@@ -315,7 +367,7 @@ See [Server configuration](server.md) and [Performance](performance.md) for more
 ## Security checklist
 
 - **HTTPS everywhere**, handled by the proxy, with a redirect from HTTP to HTTPS.
-- **The app is not exposed directly**: it listens on `127.0.0.1` (or a private network), and the firewall only opens ports 80 and 443.
+- **The app is not exposed directly**: it listens on `127.0.0.1` (or a private network), and the firewall only opens ports 80 and 443 (TCP, plus UDP 443 if Vitesse serves [HTTP/3](#http3): it then listens on every interface, and the firewall keeps its TCP port closed).
 - **An unprivileged user** runs the process (`User=` in systemd; the provided Docker image already uses a `vitesse` user).
 - **Security headers** with `middleware::helmet()`: `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`, `Strict-Transport-Security`… The last one tells browsers to only use HTTPS for one year, subdomains included: enable it once HTTPS works for the domain and its subdomains.
 - **CORS** with an explicit list of allowed origins, and **cookies** marked `http_only`, `secure` and `same_site` (see below).

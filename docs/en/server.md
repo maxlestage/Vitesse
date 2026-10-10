@@ -1,6 +1,6 @@
 # Server configuration
 
-This page covers everything around the server itself: the three ways to start it, listen addresses, threads, body size, the limits built into the HTTP engine and graceful shutdown. The defaults are designed for production, so most apps only ever need `app.run(port)`.
+This page covers everything around the server itself: the three ways to start it, listen addresses, threads, body size, the limits built into the HTTP engine, graceful shutdown and the protocols it speaks. The defaults are designed for production, so most apps only ever need `app.run(port)`.
 
 ## Three ways to start the server
 
@@ -76,6 +76,7 @@ async fn main() -> std::io::Result<()> {
 | `Server` method | Role |
 |---|---|
 | `server.local_addr()` | The address actually used (handy with port `0`) |
+| `server.http3_addr()` | The UDP address of [HTTP/3](http3.md), if `app.http3` is configured (`http3` feature) |
 | `server.run().await` | Serves until `Ctrl+C` / `SIGTERM`, then shuts down cleanly |
 | `server.with_graceful_shutdown(signal).await` | Serves until the `signal` future completes, then shuts down cleanly |
 
@@ -203,10 +204,14 @@ With `app.run`, `app.listen` and `Server::run`, `Ctrl+C` (SIGINT) and, on Unix, 
 2. requests in progress get up to **10 seconds** to finish, and their responses carry `connection: close`;
 3. the remaining connections (idle keep-alive connections, requests still running after 10 s) are closed, and `run` (or `listen`) returns `Ok(())`.
 
+With [HTTP/3](http3.md), the UDP side stops at the same time: open connections receive a `GOAWAY`, and their requests in progress get the same 10 seconds. [WebSocket](websocket.md) connections are not waited for: they are closed at the latest when the grace period ends, so clients should reconnect.
+
 This is exactly what Docker, Kubernetes or Heroku expect: they send `SIGTERM` and wait a while before forcing the process to stop. With `bind`, `with_graceful_shutdown(signal)` follows the same steps once your `signal` future completes, so you decide what triggers the shutdown; `Ctrl+C` and `SIGTERM` are then no longer watched, so include them in your future if you still need them. The 10-second grace period is not configurable.
 
-## HTTP/1.1 only
+## Protocols: HTTP/1.1, WebSocket and HTTP/3
 
-Vitesse speaks HTTP/1.1 (and HTTP/1.0) over plain TCP. For HTTPS and HTTP/2, put it behind a reverse proxy (Nginx, Caddy, or your platform's load balancer) that terminates TLS and forwards requests to Vitesse in HTTP/1.1, as is often done with Express. The proxy can also handle compression.
+Vitesse speaks HTTP/1.1 (and HTTP/1.0) over plain TCP, and upgrades connections to [WebSocket](websocket.md) (`ws` feature, enabled by default). With the `http3` feature, `app.http3(...)` also serves the application over [HTTP/3](http3.md), on a UDP port next to the TCP one; `server.http3_addr()` returns its address.
 
-Behind a proxy, `req.ip()` returns the proxy's address: the client's address is in the `X-Forwarded-For` header. All of this is covered in [Production](production.md).
+Vitesse doesn't do TLS over TCP, nor HTTP/2. For HTTPS and HTTP/2, put it behind a reverse proxy (Nginx, Caddy, or your platform's load balancer) that terminates TLS and forwards requests to Vitesse in HTTP/1.1, as is often done with Express. The proxy can also handle compression.
+
+Behind a proxy, `req.ip()` returns the proxy's address for the requests it forwards: the client's address is in the `X-Forwarded-For` header. All of this is covered in [Production](production.md).

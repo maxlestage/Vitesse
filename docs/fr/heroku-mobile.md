@@ -255,6 +255,8 @@ Une panique dans un handler ne fait pas planter l'application : Vitesse la trans
 - **La première requête est lente** : un dyno Eco dormait ; il se réveille à la première visite.
 - **Mes données ont disparu** : les données en mémoire sont perdues à chaque redémarrage. Utilisez une base de données.
 - **`PORT=8080` dans le `Dockerfile`** : ce n'est que la valeur par défaut pour les autres plateformes. Sur Heroku, la variable `PORT` définie au démarrage l'emporte.
+- **WebSocket fonctionne** : le routeur de Heroku prend en charge les connexions [WebSocket](websocket.md) (utilisez `wss://` avec l'adresse HTTPS de votre application). Il ferme une connexion qui reste silencieuse pendant environ 55 secondes : faites envoyer régulièrement un message ou un `Message::Ping` par le serveur (toutes les 30 secondes, par exemple).
+- **HTTP/3, non** : le routeur de Heroku ne transmet pas l'UDP aux dynos, [HTTP/3](http3.md) ne peut donc pas atteindre votre application sur Heroku. Laissez-y la feature `http3` désactivée.
 
 ## Pour aller plus loin
 

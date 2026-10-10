@@ -12,7 +12,8 @@
 Vitesse es un framework web minimalista que lleva la API de Express
 (`app.get`, `req.params`, `res.status(201).json(...)`, `app.use`, `Router`,
 `express.static`…) a Rust nativo, con su propio motor HTTP/1.1 sobre
-[tokio](https://tokio.rs).
+[tokio](https://tokio.rs), WebSocket integrado y HTTP/3 sobre QUIC como
+opción.
 
 ```rust
 use vitesse::prelude::*;
@@ -29,6 +30,8 @@ fn main() -> std::io::Result<()> {
 - **Familiar**: rutas y parámetros, middlewares con `next`, routers,
   archivos estáticos, cookies, JSON y formularios, y un cliente de pruebas en
   memoria.
+- **Tiempo real y protocolos modernos**: WebSocket con `app.ws`, y HTTP/3
+  sobre QUIC con una sola línea (feature `http3`).
 - **Rápido**: más rápido que actix-web, axum y Drogon en el benchmark de
   abajo.
 - **Robusto**: los pánicos se convierten en respuestas `500`, los límites de
@@ -104,6 +107,18 @@ Vitesse requiere Rust 1.85 o posterior. No hace falta `#[tokio::main]`:
 ordenada con `Ctrl+C` / `SIGTERM`. Si ya tienes un runtime de tokio, usa
 `app.listen(port).await` en su lugar.
 
+### Features de Cargo
+
+| Feature | Por defecto | Añade |
+|---|---|---|
+| `ws` | Activada | WebSocket: `app.ws(...)` y `vitesse::ws` ([guía](docs/es/websocket.md)) |
+| `http3` | Desactivada | HTTP/3 sobre QUIC: `app.http3(...)` y `vitesse::http3` ([guía](docs/es/http3.md)) |
+
+```toml
+[dependencies]
+vitesse = { version = "0.1", features = ["http3"] }
+```
+
 ## Recorrido rápido
 
 ```rust
@@ -164,13 +179,47 @@ curl -X POST localhost:3000/users -H 'content-type: application/json' -d '{"name
 curl localhost:3000/admin/stats -H 'authorization: Bearer secret'
 ```
 
+### WebSocket
+
+```rust
+// Una ruta WebSocket, al estilo de express-ws: la petición y después el socket.
+app.ws("/echo/:name", |req, mut socket| async move {
+    let name = req.param("name").unwrap_or("desconocido").to_owned();
+    while let Some(Ok(message)) = socket.recv().await {
+        if let ws::Message::Text(text) = message {
+            if socket.send(format!("{name} dijo: {text}")).await.is_err() {
+                break;
+            }
+        }
+    }
+});
+```
+
+Pruébala con [websocat](https://github.com/vi/websocat):
+`websocat ws://localhost:3000/echo/ada`. Subprotocolos, límites de tamaño,
+`split` y una sala de chat completa: [WebSocket](docs/es/websocket.md).
+
+### HTTP/3
+
+```rust
+use vitesse::http3::Http3;
+
+// Con la feature `http3`: la misma aplicación, servida también sobre QUIC (UDP).
+app.http3(Http3::from_pem_files("fullchain.pem", "privkey.pem")?);
+app.run(443) // HTTP/1.1 en TCP 443, HTTP/3 en UDP 443
+```
+
+Certificados, `Alt-Svc` y despliegue detrás de Caddy o Nginx:
+[HTTP/3 y QUIC](docs/es/http3.md).
+
 ## Documentación
 
 - **Sitio web**: https://maxlestage.github.io/Vitesse/#/docs
 - **En este repositorio**: [docs/es/README.md](docs/es/README.md), desde
   [tu primera aplicación](docs/es/first-app.md) hasta la
   [puesta en producción](docs/es/production.md), con una guía para quienes
-  [vienen de Express](docs/es/from-express.md).
+  [vienen de Express](docs/es/from-express.md), y las guías de
+  [WebSocket](docs/es/websocket.md) y [HTTP/3](docs/es/http3.md).
 - **Referencia de la API**: [docs.rs/vitesse](https://docs.rs/vitesse)
 
 La documentación también está disponible en [inglés](docs/en/README.md) y en
@@ -197,6 +246,7 @@ despliegues automáticos con GitHub Actions:
 | `app.use('/api', router)` | `app.mount("/api", router)` |
 | `express.Router()` | `Router::new()` |
 | `app.use(express.static('public'))` | `app.middleware(ServeDir::new("public"))` |
+| `app.ws('/chat', (ws, req) => …)` (express-ws) | `app.ws("/chat", \|req, socket\| async move { … })` |
 | `express.json()` + `req.body` | `req.json::<T>().await?` |
 | `next()` | `next.run(req).await` |
 | `req.params.id` | `req.param("id")` o `req.param_as::<u64>("id")?` |
@@ -235,10 +285,11 @@ Los detalles están en [Rendimiento](docs/es/performance.md).
 ## Límites actuales
 
 Como Express, Vitesse hace pocas cosas a propósito. No incluye (todavía):
-HTTP/2 ni TLS (colócalo detrás de un proxy inverso como Nginx o Caddy, como
-se suele hacer con Express: consulta
-[Puesta en producción](docs/es/production.md)), WebSocket, compresión,
-motores de plantillas ni parámetros parciales dentro de un segmento
+HTTP/2 ni TLS sobre TCP (colócalo detrás de un proxy inverso como Nginx o
+Caddy, como se suele hacer con Express: consulta
+[Puesta en producción](docs/es/production.md); HTTP/3, cuyo TLS va
+integrado, sí está soportado), WebSocket sobre HTTP/3, compresión, motores
+de plantillas ni parámetros parciales dentro de un segmento
 (`/vuelos/:origen-:destino`).
 
 ## Ejecutar el proyecto
@@ -247,6 +298,8 @@ motores de plantillas ni parámetros parciales dentro de un segmento
 cargo run --release --example hello      # Hello World
 cargo run --release --example rest_api   # API CRUD completa
 cargo run --release --example demo       # la app de demostración desplegada en Heroku (lee $PORT)
+cargo run --release --example chat       # sala de chat WebSocket (websocat ws://localhost:3000/chat/ada)
+cargo run --release --example http3 --features http3   # HTTP/1.1 + HTTP/3 en el puerto 4433, certificado autofirmado
 cargo test                               # tests unitarios, de integración y doctests
 cargo run --release --manifest-path bench/runner/Cargo.toml   # benchmark (Linux, wrk, y Drogon si está instalado)
 docker build -t vitesse-demo . && docker run --rm -p 8080:8080 vitesse-demo

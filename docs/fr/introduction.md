@@ -4,7 +4,7 @@ Vitesse est un framework web minimaliste pour Rust qui reprend l'API d'Express.j
 
 ## Qu'est-ce que Vitesse ?
 
-Vitesse est une bibliothèque pour construire des serveurs HTTP, des sites et des API JSON. Elle embarque son propre moteur HTTP/1.1, bâti sur [tokio](https://tokio.rs), un routeur sans expressions régulières, une chaîne de middlewares et quelques middlewares prêts à l'emploi.
+Vitesse est une bibliothèque pour construire des serveurs HTTP, des sites et des API JSON. Elle embarque son propre moteur HTTP/1.1, bâti sur [tokio](https://tokio.rs), un routeur sans expressions régulières, une chaîne de middlewares et quelques middlewares prêts à l'emploi, ainsi que WebSocket et, en option, HTTP/3 sur QUIC.
 
 Voici un serveur complet :
 
@@ -41,7 +41,7 @@ Pas besoin d'être expert en Rust. La plupart des handlers tiennent en quelques 
 
 ## Philosophie
 
-- **Un petit noyau, comme Express.** Vitesse couvre le routage, les middlewares, des outils pour lire les requêtes et construire les réponses, les fichiers statiques et un client de test. Base de données, templates, authentification : vous choisissez vos crates.
+- **Un petit noyau, comme Express.** Vitesse couvre le routage, les middlewares, des outils pour lire les requêtes et construire les réponses, les fichiers statiques, WebSocket et un client de test. Base de données, templates, authentification : vous choisissez vos crates.
 - **Une API familière.** La plupart des notions d'Express se retrouvent telles quelles dans Vitesse. La correspondance complète est dans [Venir d'Express](from-express.md).
 - **Pas de magie.** Un handler demande à la requête ce dont il a besoin (`req.param("id")`, `req.json().await`). Les erreurs sont des valeurs ordinaires, et `?` les transforme en réponses HTTP.
 - **Rapide par défaut.** Les chiffres ci-dessous ne demandent aucun réglage. `app.run(3000)` répartit déjà le travail sur tous les cœurs.
@@ -57,6 +57,8 @@ Pas besoin d'être expert en Rust. La plupart des handlers tiennent en quelques 
 - **Un seul type d'erreur** (`vitesse::Error`), qui devient `{"error": "..."}`. `app.on_error` permet de changer le format de toutes les réponses d'erreur.
 - **Fichiers statiques** avec types MIME, `ETag`/`Last-Modified`, requêtes `Range`, et protection contre `../` et les fichiers cachés.
 - **Cookies, redirections, téléchargements et streaming** des corps dans les deux sens.
+- **WebSocket** avec `app.ws("/chat", |req, socket| async move { … })`, dans le style d'`express-ws` : paramètres de route, middlewares et état fonctionnent comme dans n'importe quelle route.
+- **HTTP/3 sur QUIC**, avec la feature `http3` à activer : la même application répond aussi en UDP, à côté de HTTP/1.1.
 - **Un `TestClient`** qui teste votre application en mémoire, sans ouvrir de port.
 - **Un runtime géré** : pas besoin de `#[tokio::main]`. Vitesse fait tourner un thread par cœur sous Linux et s'arrête proprement.
 
@@ -86,8 +88,8 @@ Toutes ces mesures ont été faites sur une VM de 4 vCPU : le serveur épinglé 
 
 Comme Express, Vitesse fait volontairement peu de choses. Ne sont pas (encore) inclus :
 
-- HTTP/2 et TLS. Placez Vitesse derrière un reverse proxy comme Nginx ou Caddy, comme on le fait souvent avec Express (voir [Mise en production](production.md)).
-- WebSocket.
+- HTTP/2, et TLS sur TCP (HTTPS). Placez Vitesse derrière un reverse proxy comme Nginx ou Caddy, comme on le fait souvent avec Express (voir [Mise en production](production.md)). [HTTP/3](http3.md), en revanche, intègre TLS.
+- WebSocket sur HTTP/3 : [WebSocket](websocket.md) fonctionne en HTTP/1.1.
 - La compression des réponses.
 - Les moteurs de templates.
 - Les paramètres partiels dans un segment, comme `/vols/:de-:vers`.
@@ -95,8 +97,8 @@ Comme Express, Vitesse fait volontairement peu de choses. Ne sont pas (encore) i
 ## Organisation de la documentation
 
 - **Premiers pas** : [Installation](installation.md), puis [Votre première application](first-app.md), un tutoriel pas à pas.
-- **L'essentiel** : [Routage](routing.md), [Lire la requête](requests.md), [Envoyer la réponse](responses.md), [Middlewares](middleware.md), [Routeurs](routers.md), [État partagé](state.md), [Gestion des erreurs](errors.md) et [Fichiers statiques](static-files.md).
-- **Pour aller plus loin** : [Tests](testing.md), [Configuration du serveur](server.md) (adresses, threads, arrêt propre), [Performances](performance.md) et [Venir d'Express](from-express.md).
+- **L'essentiel** : [Routage](routing.md), [Lire la requête](requests.md), [Envoyer la réponse](responses.md), [Middlewares](middleware.md), [Routeurs](routers.md), [État partagé](state.md), [Gestion des erreurs](errors.md), [Fichiers statiques](static-files.md) et [WebSocket](websocket.md).
+- **Pour aller plus loin** : [Tests](testing.md), [Configuration du serveur](server.md) (adresses, threads, arrêt propre), [HTTP/3 et QUIC](http3.md), [Performances](performance.md) et [Venir d'Express](from-express.md).
 - **Déploiement** : [Déployer sur Heroku depuis un téléphone](heroku-mobile.md), [Docker](docker.md) et [Mise en production](production.md).
 - **Référence** : l'[aide-mémoire](cheatsheet.md) et la [FAQ](faq.md).
 

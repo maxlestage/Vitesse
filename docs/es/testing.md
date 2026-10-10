@@ -354,7 +354,7 @@ Los middlewares incluidos se prueban igual; por ejemplo, `middleware::cors()` en
 
 ## Pruebas de integración en un puerto real
 
-`TestClient` se salta el motor HTTP/1.1. Para lo que solo ocurre en una conexión real (`content-length`, keep-alive, pipelining, cuerpos `chunked`, `Expect: 100-continue`, límites de tamaño de las cabeceras), o para usar un cliente HTTP de verdad, arranca el servidor en un puerto real:
+`TestClient` se salta el motor HTTP/1.1. Para lo que solo ocurre en una conexión real (`content-length`, keep-alive, pipelining, cuerpos `chunked`, `Expect: 100-continue`, límites de tamaño de las cabeceras, conversaciones [WebSocket](#probar-websockets)), o para usar un cliente HTTP de verdad, arranca el servidor en un puerto real:
 
 - `app.bind("127.0.0.1:0")` abre el socket; el puerto `0` deja que el sistema operativo elija uno libre, así las pruebas en paralelo nunca chocan;
 - `server.local_addr()` te da la dirección que se está usando de verdad;
@@ -432,6 +432,60 @@ async fn responde_en_orden_a_peticiones_en_pipeline() {
 ```
 
 Consulta [Configuración del servidor](server.md) para `bind`, `Server` y el apagado ordenado.
+
+## Probar WebSockets
+
+`TestClient` no tiene un socket real, así que no puede mantener una conversación [WebSocket](websocket.md): en una ruta WebSocket solo ve la respuesta al handshake. Eso basta para probar los rechazos:
+
+```rust
+use vitesse::test::TestClient;
+
+#[tokio::test]
+async fn websocket_route_refuses_plain_http() {
+    let client = TestClient::new(my_api::app());
+    // Un GET normal en una ruta WebSocket: 426 Upgrade Required.
+    assert_eq!(client.get("/echo").await.status(), 426);
+}
+```
+
+Para intercambiar mensajes, arranca el servidor en un puerto real como arriba y conéctate con el cliente de [tokio-tungstenite](https://docs.rs/tokio-tungstenite), la biblioteca en la que se apoya el soporte de WebSocket de Vitesse:
+
+```toml
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt"] }
+tokio-tungstenite = { version = "0.30", features = ["connect"] }
+futures-util = "0.3"
+```
+
+```rust
+// tests/ws.rs
+use futures_util::{SinkExt, StreamExt};
+use tokio_tungstenite::connect_async;
+use tokio_tungstenite::tungstenite::Message;
+use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+
+#[tokio::test]
+async fn echo_over_a_real_websocket() {
+    let server = my_api::app().bind("127.0.0.1:0").await.unwrap();
+    let addr = server.local_addr();
+    tokio::spawn(server.run());
+
+    // Un handshake con cabeceras adicionales (cookie, origen…), para las rutas que las comprueban.
+    let mut request = format!("ws://{addr}/echo").into_client_request().unwrap();
+    request.headers_mut().insert("cookie", "session=abc".parse().unwrap());
+    let (mut socket, response) = connect_async(request).await.unwrap();
+    assert_eq!(response.status(), 101);
+
+    socket.send(Message::text("hola")).await.unwrap();
+    assert_eq!(socket.next().await.unwrap().unwrap(), Message::text("eco: hola"));
+
+    // El cliente cierra; el servidor responde al cierre y después el flujo termina.
+    socket.close(None).await.unwrap();
+    while let Some(Ok(_)) = socket.next().await {}
+}
+```
+
+`connect_async` falla si el servidor rechaza el handshake: para comprobar el estado de un rechazo, usa `TestClient` como arriba.
 
 ## Organizar tus pruebas
 

@@ -24,7 +24,7 @@ let mut app = App::new();
 app.mount("/users", users); // GET /users, GET /users/:id
 ```
 
-Un `Router` a les mêmes méthodes de routage que `App` : `get`, `post`, `put`, `patch`, `delete`, `head`, `options`, `all`, `route(méthode, chemin, handler)`, ainsi que `mount`, `static_dir` et `serve_dir`. Comme sur `App`, elles renvoient un `&mut Router` : vous pouvez donc les enchaîner.
+Un `Router` a les mêmes méthodes de routage que `App` : `get`, `post`, `put`, `patch`, `delete`, `head`, `options`, `all`, `route(méthode, chemin, handler)`, ainsi que `ws`, `mount`, `static_dir` et `serve_dir`. Comme sur `App`, elles renvoient un `&mut Router` : vous pouvez donc les enchaîner.
 
 ```rust
 let mut users = Router::new();
@@ -116,6 +116,20 @@ posts.get("/", |req: Request| async move {
 });
 
 app.mount("/users/:user_id/posts", posts); // GET /users/42/posts
+```
+
+## Routes WebSocket
+
+`router.ws(chemin, handler)` déclare une route [WebSocket](websocket.md), exactement comme `app.ws`. Le préfixe du routeur s'applique, et ses middlewares s'exécutent sur la requête de poignée de main, avant que la connexion ne soit acceptée : un middleware qui répond `401` refuse la connexion.
+
+```rust
+let mut live = Router::new();
+live.middleware(require_token); // vérifie aussi la poignée de main WebSocket
+live.ws("/feed", |_req, mut socket| async move {
+    let _ = socket.send("bienvenue sur le fil en direct").await;
+});
+
+app.mount("/live", live); // ws://example.com/live/feed
 ```
 
 ## Comment fonctionne le montage

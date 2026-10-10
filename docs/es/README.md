@@ -18,11 +18,13 @@ Todo lo que necesitas para crear aplicaciones web rápidas con Vitesse, el frame
 - [Estado compartido](state.md): compartir configuración, contadores o pools de conexiones entre peticiones.
 - [Manejo de errores](errors.md): `vitesse::Error`, el operador `?`, respuestas de error personalizadas y pánicos.
 - [Archivos estáticos](static-files.md): servir una carpeta de archivos con caché, peticiones parciales y protecciones integradas.
+- [WebSocket](websocket.md): conexiones bidireccionales en tiempo real con `app.ws`, desde un servidor de eco hasta una sala de chat.
 
 ## Profundizando
 
 - [Pruebas](testing.md): probar tu aplicación en memoria con `TestClient`, sin red.
 - [Configuración del servidor](server.md): `run`, `listen` y `bind`, direcciones de escucha, workers, límites y apagado.
+- [HTTP/3 y QUIC](http3.md): servir tu aplicación en HTTP/3 junto a HTTP/1.1, certificados y despliegue.
 - [Rendimiento](performance.md): por qué Vitesse es rápido, los benchmarks y consejos de ajuste.
 - [Viniendo de Express](from-express.md): la tabla de equivalencias Express → Vitesse y consejos de migración.
 

@@ -26,7 +26,7 @@ Ce sont deux excellents frameworks, matures. Vitesse est un bon choix si :
 - vous venez d'Express et voulez garder la même façon de penser : une seule `Request`, des middlewares avec `next`, des routeurs, et des handlers qui renvoient simplement leur réponse, sans extracteurs ni couches de services à apprendre ;
 - vous voulez les meilleures performances : dans le [benchmark](performance.md), Vitesse traite plus de requêtes par seconde que les deux, avec moins de CPU par requête.
 
-Préférez actix-web ou axum si vous avez besoin de ce que Vitesse ne fait pas (encore) : HTTP/2, TLS ou WebSocket intégrés, l'écosystème de middlewares [tower](https://github.com/tower-rs/tower), ou une API 1.x stable.
+Préférez actix-web ou axum si vous avez besoin de ce que Vitesse ne fait pas (encore) : HTTP/2 ou TLS sur TCP intégrés, l'écosystème de middlewares [tower](https://github.com/tower-rs/tower), ou une API 1.x stable.
 
 ### En quoi est-il différent d'Express ?
 
@@ -48,11 +48,16 @@ Oui : la suite de tests tourne sous Linux, macOS et Windows. Le mode un thread p
 
 ### Vitesse gère-t-il HTTPS et HTTP/2 ?
 
-Pas directement : Vitesse parle HTTP/1.1 en TCP simple. Placez-le derrière un reverse proxy (Nginx, Caddy, ou le load balancer de votre hébergeur) qui gère TLS et HTTP/2 et transmet les requêtes en HTTP/1.1, comme on le fait couramment avec Express. Des plateformes comme Heroku le font déjà pour vous. Voir [Production](production.md).
+Pas sur TCP : Vitesse parle HTTP/1.1 en TCP simple. Placez-le derrière un reverse proxy (Nginx, Caddy, ou le load balancer de votre hébergeur) qui gère TLS et HTTP/2 et transmet les requêtes en HTTP/1.1, comme on le fait couramment avec Express. Des plateformes comme Heroku le font déjà pour vous. Voir [Production](production.md). L'exception est HTTP/3, dont le TLS est intégré à QUIC : voir la question suivante.
 
-### Et WebSocket ?
+### Vitesse gère-t-il WebSocket et HTTP/3 ?
 
-Non pris en charge. Pour envoyer des données du serveur vers le client, une réponse en flux suffit souvent : `Body::from_stream` envoie chaque morceau dès qu'il est produit, ce qui est tout ce qu'il faut pour des [Server-Sent Events](https://developer.mozilla.org/fr/docs/Web/API/Server-sent_events) avec le type de contenu `text/event-stream` (voir [Réponses](responses.md)). Pour un vrai WebSocket bidirectionnel, faites tourner un service dédié à côté de Vitesse.
+Oui, les deux :
+
+- **WebSocket** est intégré (la feature `ws`, activée par défaut) : `app.ws("/chat", |req, socket| async move { … })`, dans le style d'`express-ws`. Voir [WebSocket](websocket.md).
+- **HTTP/3** sur QUIC est disponible avec la feature `http3`, à activer : `app.http3(Http3::from_pem_files(...)?)` sert la même application en UDP, à côté de HTTP/1.1. Voir [HTTP/3 et QUIC](http3.md).
+
+WebSocket ne fonctionne qu'en HTTP/1.1, pas en HTTP/3. Pour envoyer des données du serveur vers le client dans un seul sens, une réponse en flux est aussi une option : `Body::from_stream` envoie chaque morceau dès qu'il est produit, ce qui est tout ce qu'il faut pour des [Server-Sent Events](https://developer.mozilla.org/fr/docs/Web/API/Server-sent_events) avec le type de contenu `text/event-stream` (voir [Réponses](responses.md)).
 
 ### La compression ?
 
@@ -124,8 +129,9 @@ Vitesse est distribué sous double licence [MIT](https://github.com/maxlestage/V
 
 Comme Express, Vitesse fait volontairement peu de choses. Ne sont pas (encore) inclus :
 
-- **HTTP/2 et TLS** : placez Vitesse derrière un reverse proxy comme Nginx ou Caddy (voir [Production](production.md)) ;
-- **WebSocket** ;
+- **HTTP/2, et TLS sur TCP** (HTTPS) : placez Vitesse derrière un reverse proxy comme Nginx ou Caddy (voir [Production](production.md)). [HTTP/3](http3.md), dont le TLS est intégré, est pris en charge ;
+- **WebSocket sur HTTP/3** : [WebSocket](websocket.md) fonctionne en HTTP/1.1 ;
+- **Le 0-RTT et la lecture en flux des corps de requête en HTTP/3** : en HTTP/3, les corps de requête sont lus en entier avant l'exécution du handler ;
 - **La compression** : confiez-la au reverse proxy ;
 - **Les moteurs de templates** : utilisez un crate de templates et renvoyez `Html(...)` ;
 - **Les paramètres partiels dans un segment** (`/vols/:de-:vers`), ainsi que les paramètres facultatifs (`/:id?`) et les expressions régulières dans les routes ;

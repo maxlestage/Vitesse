@@ -35,6 +35,7 @@ If you know Express, you already know most of Vitesse: the same routes, the same
 | `express.Router()` | `Router::new()` |
 | `app.use('/api', router)` | `app.mount("/api", router)` |
 | `router.use(mw)` | `router.middleware(mw)`, which also runs for the `404`s under the router's prefix |
+| `app.ws('/echo', (ws, req) => …)` (express-ws) | `app.ws("/echo", \|req, socket\| async move { … })`: the request comes first, and a loop replaces `ws.on('message')` (see [WebSocket](websocket.md)) |
 
 ### Request
 

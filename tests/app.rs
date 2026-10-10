@@ -699,6 +699,23 @@ async fn router_middleware_covers_its_whole_prefix() {
     // Hors du préfixe : pas de middleware du routeur.
     assert_eq!(c.get("/apix").await.header("x-api"), None);
     assert_eq!(c.get("/other").await.header("x-api"), None);
+
+    // Préfixe avec paramètre : le segment `:user` accepte n'importe quelle
+    // valeur.
+    let mut posts = Router::new();
+    posts.middleware(|req: Request, next: Next| async move {
+        next.run(req).await.header("x-posts", "1")
+    });
+    posts.get("/", |req: Request| async move {
+        format!("posts de {}", req.param("user").unwrap_or("?"))
+    });
+    let mut app = App::new();
+    app.mount("/users/:user/posts", posts);
+    let c = TestClient::new(app);
+    assert_eq!(c.get("/users/42/posts").await.text(), "posts de 42");
+    let r = c.get("/users/42/posts/nope").await;
+    assert_eq!((r.status().as_u16(), r.header("x-posts")), (404, Some("1")));
+    assert_eq!(c.get("/users/42/other").await.header("x-posts"), None);
 }
 
 #[tokio::test]

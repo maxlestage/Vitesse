@@ -84,7 +84,7 @@ A few details:
 - The prefix is matched segment by segment: a router mounted at `/api` covers `/api` and `/api/...`, but not `/apix`.
 - Global middleware (`app.middleware`) still runs first, for every request. With nested routers, the outer router's middleware then runs first, followed by the inner router's.
 - If a router middleware rewrites the path of such a request with `req.set_uri(...)`, routing runs again on the new path.
-- Only prefixes made of fixed segments are covered this way: under a prefix that contains a parameter (`/users/:user_id/posts`), router middleware only runs for the router's own routes.
+- A prefix can contain parameters: a router mounted at `/users/:user_id/posts` covers `/users/42/posts/...` whatever the value of `:user_id`.
 
 ## Nesting routers
 

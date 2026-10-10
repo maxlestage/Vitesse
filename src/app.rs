@@ -291,13 +291,21 @@ impl Handler for Dispatcher {
     }
 }
 
-/// `path` est sous `prefix`, segment par segment (`/api` couvre `/api` et
-/// `/api/x`, pas `/apix`).
+/// `path` est sous `prefix`, segment par segment : `/api` couvre `/api` et
+/// `/api/x` (pas `/apix`), un segment `:param` du préfixe accepte n'importe
+/// quel segment, et un joker `*` tout le reste.
 fn under(path: &str, prefix: &str) -> bool {
-    prefix == "/"
-        || path
-            .strip_prefix(prefix)
-            .is_some_and(|rest| rest.is_empty() || rest.starts_with('/'))
+    let mut segments = path.split('/').filter(|s| !s.is_empty());
+    for expected in prefix.split('/').filter(|s| !s.is_empty()) {
+        if expected.starts_with('*') {
+            return true;
+        }
+        match segments.next() {
+            Some(segment) if expected.starts_with(':') || segment == expected => {}
+            _ => return false,
+        }
+    }
+    true
 }
 
 /// Pour chaque préfixe, la chaîne de tous les middlewares qui le couvrent :
@@ -308,7 +316,8 @@ fn build_scopes(scopes: Vec<Scope>, core: &Arc<Core>) -> Box<[(Box<str>, Chain)]
     let mut ordered: Vec<(usize, Scope)> = scopes.into_iter().enumerate().collect();
     ordered.sort_by_key(|(i, (prefix, _))| (depth(prefix), *i));
     let mut prefixes: Vec<&str> = ordered.iter().map(|(_, (p, _))| p.as_str()).collect();
-    prefixes.sort_by_key(|p| std::cmp::Reverse(p.len()));
+    // Le préfixe le plus précis d'abord : le plus de segments.
+    prefixes.sort_by_key(|p| std::cmp::Reverse((depth(p), p.len())));
     prefixes.dedup();
     prefixes
         .into_iter()

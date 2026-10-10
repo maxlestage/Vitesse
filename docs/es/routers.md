@@ -84,7 +84,7 @@ Algunos detalles:
 - El prefijo se compara segmento a segmento: un router montado en `/api` cubre `/api` y `/api/...`, pero no `/apix`.
 - Los middlewares globales (`app.middleware`) siguen ejecutándose primero, para todas las peticiones. Con routers anidados, vienen después los middlewares del router exterior y luego los del interior.
 - Si un middleware del router reescribe la ruta de una de estas peticiones con `req.set_uri(...)`, el enrutamiento se repite con la nueva ruta.
-- Solo se cubren así los prefijos formados por segmentos fijos: bajo un prefijo que contiene un parámetro (`/users/:user_id/posts`), los middlewares del router solo se ejecutan para sus propias rutas.
+- Un prefijo puede contener parámetros: un router montado en `/users/:user_id/posts` cubre `/users/42/posts/...`, sea cual sea el valor de `:user_id`.
 
 ## Anidar routers
 

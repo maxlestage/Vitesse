@@ -84,7 +84,7 @@ Quelques précisions :
 - Le préfixe est comparé segment par segment : un routeur monté sur `/api` couvre `/api` et `/api/...`, mais pas `/apix`.
 - Les middlewares globaux (`app.middleware`) passent toujours en premier, pour chaque requête. Avec des routeurs imbriqués, viennent ensuite les middlewares du routeur extérieur, puis ceux du routeur intérieur.
 - Si un middleware du routeur réécrit le chemin d'une telle requête avec `req.set_uri(...)`, le routage est refait sur le nouveau chemin.
-- Seuls les préfixes faits de segments fixes sont couverts ainsi : sous un préfixe qui contient un paramètre (`/users/:user_id/posts`), les middlewares du routeur ne s'exécutent que pour ses propres routes.
+- Un préfixe peut contenir des paramètres : un routeur monté sur `/users/:user_id/posts` couvre `/users/42/posts/...`, quelle que soit la valeur de `:user_id`.
 
 ## Imbriquer des routeurs
 

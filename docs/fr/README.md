@@ -1,6 +1,6 @@
 # Documentation de Vitesse
 
-Tout ce qu'il faut pour créer des applications web rapides avec Vitesse, le framework à la Express.js pour Rust : de votre première route jusqu'au déploiement en production. Vous pouvez aussi lire ces pages sur le site : https://maxlestage.github.io/Vitesse/#/docs
+Tout ce qu'il faut pour créer des applications web rapides avec Vitesse, le framework à la Express.js pour Rust : de votre première route jusqu'au déploiement en production. Vous pouvez aussi lire ces pages sur le site : https://maxlestage.github.io/Vitesse/fr/docs/
 
 ## Premiers pas
 

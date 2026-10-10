@@ -1,5 +1,5 @@
-//! Les réponses HTTP : [`Response`], le trait [`IntoResponse`] et les helpers
-//! façon Express du module [`res`].
+//! HTTP responses: [`Response`], the [`IntoResponse`] trait and the
+//! Express-style helpers of the [`res`] module.
 
 use std::borrow::Cow;
 use std::cell::RefCell;
@@ -15,8 +15,8 @@ use serde::Serialize;
 use crate::body::Body;
 use crate::error::Error;
 
-/// Les types de contenu les plus courants : ils sont mémorisés sous forme d'un
-/// simple code et écrits d'un bloc, sans passer par une `HeaderMap`.
+/// The most common content types: they are stored as a simple code and
+/// written in one block, without going through a `HeaderMap`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u8)]
 pub(crate) enum Ctype {
@@ -49,15 +49,15 @@ impl Ctype {
         Self::VALUES[self as usize]
     }
 
-    /// La ligne d'en-tête complète, prête à être écrite.
+    /// The complete header line, ready to be written.
     #[inline]
     pub(crate) fn line(self) -> &'static [u8] {
         Self::LINES[self as usize]
     }
 }
 
-/// Les en-têtes vus par [`Response::headers`] quand seul un type de contenu
-/// courant est défini.
+/// The headers seen by [`Response::headers`] when only a common content type
+/// is set.
 static CTYPE_HEADERS: LazyLock<[HeaderMap; 5]> = LazyLock::new(|| {
     std::array::from_fn(|i| {
         let mut map = HeaderMap::new();
@@ -71,7 +71,7 @@ static CTYPE_HEADERS: LazyLock<[HeaderMap; 5]> = LazyLock::new(|| {
     })
 });
 
-/// Une réponse HTTP, construite comme avec Express :
+/// An HTTP response, built just like with Express:
 ///
 /// ```
 /// use vitesse::prelude::*;
@@ -84,9 +84,9 @@ static CTYPE_HEADERS: LazyLock<[HeaderMap; 5]> = LazyLock::new(|| {
 /// ```
 pub struct Response {
     pub(crate) status: StatusCode,
-    /// Type de contenu courant, tant qu'aucune `HeaderMap` n'existe.
+    /// Common content type, as long as no `HeaderMap` exists.
     pub(crate) ctype: Ctype,
-    /// Les en-têtes, créés au premier en-tête qui n'est pas un `ctype`.
+    /// The headers, created on the first header that is not a `ctype`.
     pub(crate) headers: Option<Box<HeaderMap>>,
     pub(crate) body: Body,
     pub(crate) extensions: http::Extensions,
@@ -110,7 +110,7 @@ impl fmt::Debug for Response {
 }
 
 impl Response {
-    /// Une réponse `200 OK` vide.
+    /// An empty `200 OK` response.
     #[inline]
     pub fn new() -> Self {
         Response {
@@ -123,15 +123,15 @@ impl Response {
         }
     }
 
-    /// Change le statut (`res.status(404)` en Express).
+    /// Changes the status (`res.status(404)` in Express).
     #[inline]
     pub fn status(mut self, status: impl IntoStatus) -> Self {
         self.status = status.into_status();
         self
     }
 
-    /// Définit un en-tête (remplace la valeur existante). Les noms ou valeurs
-    /// invalides sont ignorés.
+    /// Sets a header (replacing any existing value). Invalid names or values
+    /// are ignored.
     #[inline]
     pub fn header<K, V>(mut self, name: K, value: V) -> Self
     where
@@ -142,7 +142,7 @@ impl Response {
         self
     }
 
-    /// Ajoute un en-tête sans remplacer les valeurs existantes.
+    /// Adds a header without replacing existing values.
     pub fn append_header<K, V>(mut self, name: K, value: V) -> Self
     where
         K: TryInto<HeaderName>,
@@ -154,37 +154,37 @@ impl Response {
         self
     }
 
-    /// Définit le `Content-Type` (`res.type()` en Express).
+    /// Sets the `Content-Type` (`res.type()` in Express).
     pub fn content_type(self, value: &str) -> Self {
         self.header(header::CONTENT_TYPE, value)
     }
 
-    /// Définit le corps, sans toucher au `Content-Type`.
+    /// Sets the body, without touching the `Content-Type`.
     #[inline]
     pub fn send(mut self, body: impl Into<Body>) -> Self {
         self.body = body.into();
         self
     }
 
-    /// Corps texte (`text/plain; charset=utf-8`).
+    /// Text body (`text/plain; charset=utf-8`).
     #[inline]
     pub fn text(self, text: impl Into<Body>) -> Self {
         self.with_ctype(Ctype::Text).send(text)
     }
 
-    /// Corps HTML (`text/html; charset=utf-8`).
+    /// HTML body (`text/html; charset=utf-8`).
     #[inline]
     pub fn html(self, html: impl Into<Body>) -> Self {
         self.with_ctype(Ctype::Html).send(html)
     }
 
-    /// Sérialise `value` en JSON (`res.json()` en Express).
+    /// Serializes `value` as JSON (`res.json()` in Express).
     #[inline]
     pub fn json<T: Serialize>(self, value: T) -> Self {
         let mut buf = Vec::with_capacity(128);
         match serde_json::to_writer(&mut buf, &value) {
             Ok(()) => self.json_bytes(buf),
-            Err(e) => Error::internal("échec de la sérialisation JSON")
+            Err(e) => Error::internal("JSON serialization failed")
                 .with_source(e)
                 .into_response(),
         }
@@ -209,18 +209,18 @@ impl Response {
         self
     }
 
-    /// Ajoute un cookie (`res.cookie()` en Express).
+    /// Adds a cookie (`res.cookie()` in Express).
     pub fn cookie(self, cookie: Cookie) -> Self {
         self.append_header(header::SET_COOKIE, cookie.to_string())
     }
 
-    /// Supprime un cookie côté client (`res.clearCookie()` en Express).
+    /// Deletes a cookie on the client side (`res.clearCookie()` in Express).
     pub fn clear_cookie(self, name: &str) -> Self {
         self.cookie(Cookie::new(name, "").path("/").max_age(Duration::ZERO))
     }
 
-    /// Demande au navigateur de télécharger la réponse sous ce nom de fichier
-    /// (`res.attachment()` en Express).
+    /// Asks the browser to download the response under this file name
+    /// (`res.attachment()` in Express).
     pub fn attachment(self, filename: &str) -> Self {
         let safe: String = filename
             .chars()
@@ -250,19 +250,19 @@ impl Response {
         self.header(header::CONTENT_DISPOSITION, value)
     }
 
-    /// Le statut de la réponse.
+    /// The status of the response.
     #[inline]
     pub fn status_code(&self) -> StatusCode {
         self.status
     }
 
-    /// Modifie le statut en place.
+    /// Changes the status in place.
     pub fn set_status(&mut self, status: impl IntoStatus) -> &mut Self {
         self.status = status.into_status();
         self
     }
 
-    /// Les en-têtes.
+    /// The headers.
     #[inline]
     pub fn headers(&self) -> &HeaderMap {
         match &self.headers {
@@ -271,7 +271,7 @@ impl Response {
         }
     }
 
-    /// Les en-têtes, modifiables.
+    /// The headers, mutably.
     pub fn headers_mut(&mut self) -> &mut HeaderMap {
         if self.headers.is_none() {
             let mut map = header_pool::take();
@@ -286,16 +286,16 @@ impl Response {
         }
         match &mut self.headers {
             Some(map) => map,
-            None => unreachable!("en-têtes créés ci-dessus"),
+            None => unreachable!("headers created above"),
         }
     }
 
-    /// Lit un en-tête.
+    /// Reads a header.
     pub fn get_header(&self, name: &str) -> Option<&str> {
         self.headers().get(name).and_then(|v| v.to_str().ok())
     }
 
-    /// Définit un en-tête en place. Les noms ou valeurs invalides sont ignorés.
+    /// Sets a header in place. Invalid names or values are ignored.
     #[inline]
     pub fn set_header<K, V>(&mut self, name: K, value: V) -> &mut Self
     where
@@ -308,53 +308,53 @@ impl Response {
         self
     }
 
-    /// Le corps.
+    /// The body.
     pub fn body(&self) -> &Body {
         &self.body
     }
 
-    /// Le corps, modifiable.
+    /// The body, mutably.
     pub fn body_mut(&mut self) -> &mut Body {
         &mut self.body
     }
 
-    /// Consomme la réponse et renvoie son corps.
+    /// Consumes the response and returns its body.
     pub fn into_body(self) -> Body {
         self.body
     }
 
-    /// Les extensions (données typées attachées à la réponse).
+    /// The extensions (typed data attached to the response).
     pub fn extensions(&self) -> &http::Extensions {
         &self.extensions
     }
 
-    /// Les extensions, modifiables.
+    /// The extensions, mutably.
     pub fn extensions_mut(&mut self) -> &mut http::Extensions {
         &mut self.extensions
     }
 
-    /// L'erreur à l'origine de cette réponse, si elle vient d'une [`Error`].
+    /// The error behind this response, if it was produced from an [`Error`].
     pub fn error(&self) -> Option<&Error> {
         self.error.as_deref()
     }
 
-    /// Retire l'erreur attachée à la réponse.
+    /// Removes the error attached to the response.
     pub fn take_error(&mut self) -> Option<Error> {
         self.error.take().map(|e| *e)
     }
 
-    /// Journalise la cause d'une erreur 5xx non traitée.
+    /// Logs the cause of an unhandled 5xx error.
     pub(crate) fn log_server_error(&self) {
         if let Some(err) = &self.error {
             if err.status().is_server_error() {
                 if let Some(source) = err.source() {
-                    eprintln!("[vitesse] erreur {} : {source}", err.status().as_u16());
+                    eprintln!("[vitesse] error {}: {source}", err.status().as_u16());
                 }
             }
         }
     }
 
-    /// Convertit en [`http::Response`].
+    /// Converts into an [`http::Response`].
     pub fn into_http(self) -> http::Response<Body> {
         self.log_server_error();
         let headers = match self.headers {
@@ -368,7 +368,7 @@ impl Response {
         res
     }
 
-    /// Construit à partir d'une [`http::Response`].
+    /// Builds from an [`http::Response`].
     pub fn from_http(res: http::Response<Body>) -> Self {
         let (parts, body) = res.into_parts();
         Response {
@@ -382,8 +382,8 @@ impl Response {
     }
 }
 
-/// Réserve de `HeaderMap` déjà allouées, par thread : une réponse réutilise
-/// les tables d'une réponse précédente au lieu d'en allouer de nouvelles.
+/// Per-thread pool of already allocated `HeaderMap`s: a response reuses the
+/// maps of a previous response instead of allocating new ones.
 // Les boîtes sont voulues : une réponse reçoit la boîte elle-même.
 #[allow(clippy::vec_box)]
 pub(crate) mod header_pool {
@@ -418,10 +418,10 @@ pub(crate) mod header_pool {
     }
 }
 
-/// Convertit un code (`404`, `StatusCode::NOT_FOUND`…) en [`StatusCode`].
-/// Un code invalide devient `500`.
+/// Converts a code (`404`, `StatusCode::NOT_FOUND`…) into a [`StatusCode`].
+/// An invalid code becomes `500`.
 pub trait IntoStatus {
-    /// Effectue la conversion.
+    /// Performs the conversion.
     fn into_status(self) -> StatusCode;
 }
 
@@ -446,22 +446,22 @@ impl IntoStatus for i32 {
     }
 }
 
-/// Tout ce qu'un handler peut renvoyer.
+/// Anything a handler can return.
 ///
-/// | Type renvoyé | Réponse |
+/// | Return type | Response |
 /// |---|---|
 /// | `&'static str`, `String` | `200`, `text/plain` |
 /// | [`Json<T>`], `serde_json::Value` | `200`, `application/json` |
 /// | [`Html<T>`] | `200`, `text/html` |
 /// | `Bytes`, `Vec<u8>` | `200`, `application/octet-stream` |
-/// | `()` | `200`, corps vide |
-/// | [`StatusCode`] | ce statut, avec sa raison en texte |
-/// | `(statut, T)` | `T` avec ce statut (ex. `(201, Json(user))`) |
-/// | `Option<T>` | `T`, ou `404` si `None` |
-/// | `Result<T, E>` | `T` ou l'erreur `E` |
-/// | [`Error`] | le statut de l'erreur et `{"error": "..."}` |
+/// | `()` | `200`, empty body |
+/// | [`StatusCode`] | that status, with its reason phrase as text |
+/// | `(status, T)` | `T` with that status (e.g. `(201, Json(user))`) |
+/// | `Option<T>` | `T`, or `404` if `None` |
+/// | `Result<T, E>` | `T` or the error `E` |
+/// | [`Error`] | the status of the error and `{"error": "..."}` |
 pub trait IntoResponse {
-    /// Effectue la conversion.
+    /// Performs the conversion.
     fn into_response(self) -> Response;
 }
 
@@ -576,7 +576,7 @@ impl<T: IntoResponse> IntoResponse for Option<T> {
     }
 }
 
-/// Réponse JSON : `Json(valeur)`.
+/// JSON response: `Json(value)`.
 ///
 /// ```
 /// use vitesse::prelude::*;
@@ -595,7 +595,7 @@ impl<T: Serialize> IntoResponse for Json<T> {
     }
 }
 
-/// Réponse HTML : `Html("<h1>Salut</h1>")`.
+/// HTML response: `Html("<h1>Hello</h1>")`.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Html<T>(pub T);
 
@@ -606,7 +606,7 @@ impl<T: Into<Body>> IntoResponse for Html<T> {
     }
 }
 
-/// Redirection HTTP.
+/// HTTP redirect.
 #[derive(Debug, Clone)]
 pub struct Redirect {
     status: StatusCode,
@@ -614,7 +614,7 @@ pub struct Redirect {
 }
 
 impl Redirect {
-    /// `302 Found` (le défaut d'Express).
+    /// `302 Found` (Express's default).
     pub fn to(location: impl Into<String>) -> Self {
         Redirect {
             status: StatusCode::FOUND,
@@ -630,7 +630,7 @@ impl Redirect {
         }
     }
 
-    /// `303 See Other` (typiquement après un POST).
+    /// `303 See Other` (typically after a POST).
     pub fn see_other(location: impl Into<String>) -> Self {
         Redirect {
             status: StatusCode::SEE_OTHER,
@@ -638,7 +638,7 @@ impl Redirect {
         }
     }
 
-    /// `307 Temporary Redirect` (conserve la méthode).
+    /// `307 Temporary Redirect` (keeps the method).
     pub fn temporary(location: impl Into<String>) -> Self {
         Redirect {
             status: StatusCode::TEMPORARY_REDIRECT,
@@ -653,23 +653,23 @@ impl IntoResponse for Redirect {
             Ok(location) => Response::new()
                 .status(self.status)
                 .header(header::LOCATION, location),
-            Err(_) => Error::internal("URL de redirection invalide").into_response(),
+            Err(_) => Error::internal("invalid redirect URL").into_response(),
         }
     }
 }
 
-/// Attribut `SameSite` d'un cookie.
+/// The `SameSite` attribute of a cookie.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SameSite {
     /// `SameSite=Strict`
     Strict,
     /// `SameSite=Lax`
     Lax,
-    /// `SameSite=None` (nécessite `Secure`)
+    /// `SameSite=None` (requires `Secure`)
     None,
 }
 
-/// Un cookie à envoyer avec [`Response::cookie`].
+/// A cookie to send with [`Response::cookie`].
 ///
 /// ```
 /// use vitesse::{Cookie, SameSite};
@@ -694,7 +694,7 @@ pub struct Cookie {
 }
 
 impl Cookie {
-    /// Crée un cookie avec `Path=/`.
+    /// Creates a cookie with `Path=/`.
     pub fn new(name: impl Into<String>, value: impl Into<String>) -> Self {
         Cookie {
             name: name.into(),
@@ -708,37 +708,37 @@ impl Cookie {
         }
     }
 
-    /// Attribut `Path`.
+    /// The `Path` attribute.
     pub fn path(mut self, path: impl Into<String>) -> Self {
         self.path = Some(path.into());
         self
     }
 
-    /// Attribut `Domain`.
+    /// The `Domain` attribute.
     pub fn domain(mut self, domain: impl Into<String>) -> Self {
         self.domain = Some(domain.into());
         self
     }
 
-    /// Attribut `Max-Age`.
+    /// The `Max-Age` attribute.
     pub fn max_age(mut self, max_age: Duration) -> Self {
         self.max_age = Some(max_age);
         self
     }
 
-    /// Attribut `Secure`.
+    /// The `Secure` attribute.
     pub fn secure(mut self, secure: bool) -> Self {
         self.secure = secure;
         self
     }
 
-    /// Attribut `HttpOnly`.
+    /// The `HttpOnly` attribute.
     pub fn http_only(mut self, http_only: bool) -> Self {
         self.http_only = http_only;
         self
     }
 
-    /// Attribut `SameSite`.
+    /// The `SameSite` attribute.
     pub fn same_site(mut self, same_site: SameSite) -> Self {
         self.same_site = Some(same_site);
         self
@@ -773,7 +773,7 @@ impl fmt::Display for Cookie {
     }
 }
 
-/// Les raccourcis `res.*` d'Express, sous forme de fonctions.
+/// Express's `res.*` shortcuts, as functions.
 ///
 /// ```
 /// use vitesse::prelude::*;
@@ -799,13 +799,13 @@ pub mod res {
         Response::new().send(body)
     }
 
-    /// Réponse texte.
+    /// A text response.
     #[inline]
     pub fn text(text: impl Into<Body>) -> Response {
         Response::new().text(text)
     }
 
-    /// Réponse HTML.
+    /// An HTML response.
     #[inline]
     pub fn html(html: impl Into<Body>) -> Response {
         Response::new().html(html)
@@ -822,7 +822,7 @@ pub mod res {
         Redirect::to(location).into_response()
     }
 
-    /// `res.sendStatus(code)` : le statut et sa raison en texte.
+    /// `res.sendStatus(code)`: the status, with its reason phrase as text.
     pub fn send_status(status: impl IntoStatus) -> Response {
         let status = status.into_status();
         Response::new()
@@ -830,12 +830,12 @@ pub mod res {
             .text(status.canonical_reason().unwrap_or(""))
     }
 
-    /// `res.sendFile(path)` : envoie un fichier (404 s'il n'existe pas).
+    /// `res.sendFile(path)`: sends a file (404 if it does not exist).
     pub async fn file(path: impl AsRef<Path>) -> Response {
         crate::static_files::send_file(path.as_ref(), None).await
     }
 
-    /// `res.download(path, name)` : envoie un fichier en pièce jointe.
+    /// `res.download(path, name)`: sends a file as an attachment.
     pub async fn download(path: impl AsRef<Path>, filename: &str) -> Response {
         let res = file(path).await;
         if res.status_code().is_success() {

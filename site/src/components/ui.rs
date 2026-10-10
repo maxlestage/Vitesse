@@ -10,6 +10,7 @@ use yew::prelude::*;
 
 use crate::dom::{self, RafLoop};
 use crate::highlight::{self, Kind};
+use crate::i18n::{self, use_lang};
 
 // ----- Bouton magnétique ----------------------------------------------------
 
@@ -85,6 +86,14 @@ pub struct ScrambleProps {
 pub fn Scramble(props: &ScrambleProps) -> Html {
     let shown = use_state(|| props.text.to_string());
     let timer: Rc<RefCell<Option<Interval>>> = use_mut_ref(|| None);
+    {
+        // Le texte change avec la langue.
+        let (shown, timer) = (shown.clone(), timer.clone());
+        use_effect_with(props.text.clone(), move |text| {
+            timer.borrow_mut().take();
+            shown.set(text.to_string());
+        });
+    }
     let onmouseenter = {
         let shown = shown.clone();
         let timer = timer.clone();
@@ -130,26 +139,6 @@ pub fn Scramble(props: &ScrambleProps) -> Html {
 
 // ----- Compteur animé -------------------------------------------------------
 
-/// Formate un nombre à la française : `2 781 541`, `6,1`.
-pub fn fr_number(value: f64, decimals: usize) -> String {
-    let s = format!("{value:.decimals$}");
-    let (int, frac) = s
-        .split_once('.')
-        .map_or((s.as_str(), None), |(i, f)| (i, Some(f)));
-    let mut grouped = String::new();
-    let digits: Vec<char> = int.chars().collect();
-    for (i, c) in digits.iter().enumerate() {
-        if i > 0 && (digits.len() - i).is_multiple_of(3) {
-            grouped.push('\u{202f}');
-        }
-        grouped.push(*c);
-    }
-    match frac {
-        Some(f) => format!("{grouped},{f}"),
-        None => grouped,
-    }
-}
-
 #[derive(Properties, PartialEq)]
 pub struct CounterProps {
     pub value: f64,
@@ -166,19 +155,20 @@ pub struct CounterProps {
 /// Un nombre qui défile jusqu'à sa valeur quand il apparaît à l'écran.
 #[component]
 pub fn Counter(props: &CounterProps) -> Html {
+    let lang = use_lang().lang;
     let node = use_node_ref();
     let anim: Rc<RefCell<Option<RafLoop>>> = use_mut_ref(|| None);
     {
         let node = node.clone();
         let (value, decimals, duration) = (props.value, props.decimals, props.duration);
         let (prefix, suffix) = (props.prefix.to_string(), props.suffix.to_string());
-        use_effect_with(value.to_bits(), move |_| {
+        use_effect_with((value.to_bits(), lang), move |_| {
             let mut observer = None;
             if let Some(el) = node.cast::<HtmlElement>() {
                 let render = move |el: &HtmlElement, v: f64| {
                     el.set_text_content(Some(&format!(
                         "{prefix}{}{suffix}",
-                        fr_number(v, decimals)
+                        i18n::number(lang, v, decimals)
                     )));
                 };
                 if dom::reduced_motion() {
@@ -222,6 +212,7 @@ pub struct CopyProps {
 
 #[component]
 pub fn CopyButton(props: &CopyProps) -> Html {
+    let t = use_lang().lang.texts();
     let copied = use_state(|| false);
     let onclick = {
         let copied = copied.clone();
@@ -235,8 +226,8 @@ pub fn CopyButton(props: &CopyProps) -> Html {
     };
     html! {
         <button class={classes!("copy", copied.then_some("copy--done"))} {onclick}
-                data-cursor="Copier" aria-label="Copier la commande">
-            if *copied { { "Copié !" } } else { { "Copier" } }
+                data-cursor={t.copy} aria-label={t.copy_aria}>
+            if *copied { { t.copied } } else { { t.copy } }
         </button>
     }
 }
@@ -351,6 +342,23 @@ pub fn Icon(props: &IconProps) -> Html {
         ],
         "arrow" => &["M5 12h14", "m13 6 6 6-6 6"],
         "up" => &["M12 19V5", "m6 11 6-6 6 6"],
+        "search" => &["M11 4a7 7 0 1 0 0 14 7 7 0 0 0 0-14z", "m20 20-4.2-4.2"],
+        "edit" => &["M4 20h4L19 9l-4-4L4 16z", "m13.5 6.5 4 4"],
+        "book" => &[
+            "M4 5.5A2.5 2.5 0 0 1 6.5 3H20v15H6.5A2.5 2.5 0 0 0 4 20.5z",
+            "M4 20.5A2.5 2.5 0 0 0 6.5 23H20v-5",
+            "M8 7h8",
+        ],
+        "phone" => &[
+            "M8 2h8a2 2 0 0 1 2 2v16a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2z",
+            "M11 18h2",
+        ],
+        "menu" => &["M4 7h16", "M4 12h16", "M4 17h10"],
+        "globe" => &[
+            "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18z",
+            "M3 12h18",
+            "M12 3c2.5 2.5 3.8 5.5 3.8 9s-1.3 6.5-3.8 9c-2.5-2.5-3.8-5.5-3.8-9S9.5 5.5 12 3z",
+        ],
         _ => &[],
     };
     html! {

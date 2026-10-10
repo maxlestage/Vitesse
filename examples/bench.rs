@@ -1,7 +1,7 @@
-//! Serveur utilisé par `bench/run.sh` (mêmes routes que `bench/express/server.js`).
+//! Server used by `bench/run.sh` (same routes as `bench/express/server.js`).
 //!
-//! Variables d'environnement : `PORT`, `WORKERS`, et `VITESSE_MODE=mt` pour
-//! utiliser le runtime multi-thread de tokio au lieu d'un thread par cœur.
+//! Environment variables: `PORT`, `WORKERS`, and `VITESSE_MODE=mt` to use
+//! tokio's multi-threaded runtime instead of one thread per core.
 
 use vitesse::prelude::*;
 

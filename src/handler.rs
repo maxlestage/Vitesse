@@ -1,4 +1,4 @@
-//! Handlers, middlewares et la chaîne `next`.
+//! Handlers, middlewares and the `next` chain.
 
 use std::future::Future;
 use std::panic::{AssertUnwindSafe, catch_unwind};
@@ -9,19 +9,19 @@ use std::task::{Context, Poll};
 use crate::request::Request;
 use crate::response::{IntoResponse, Response};
 
-/// Un `Future` alloué sur le tas, envoyable entre threads.
+/// A heap-allocated `Future` that can be sent between threads.
 pub type BoxFuture<T> = Pin<Box<dyn Future<Output = T> + Send + 'static>>;
 
-/// Ce qui répond à une requête.
+/// Something that responds to a request.
 ///
-/// Toute fonction ou closure `async` qui prend une [`Request`] et renvoie un
-/// [`IntoResponse`] est un `Handler` :
+/// Any `async` function or closure that takes a [`Request`] and returns an
+/// [`IntoResponse`] is a `Handler`:
 ///
 /// ```
 /// use vitesse::prelude::*;
 ///
 /// async fn hello(_req: Request) -> &'static str {
-///     "Salut !"
+///     "Hello!"
 /// }
 ///
 /// let mut app = App::new();
@@ -31,11 +31,11 @@ pub type BoxFuture<T> = Pin<Box<dyn Future<Output = T> + Send + 'static>>;
 /// });
 /// ```
 ///
-/// Les handlers vivent aussi longtemps que l'application, d'où le
-/// `&'static self` : un handler peut emprunter ses propres champs depuis son
-/// `Future` sans `Arc` ni clone.
+/// Handlers live as long as the application, hence the `&'static self`: a
+/// handler can borrow its own fields from its `Future` without an `Arc` or a
+/// clone.
 pub trait Handler: Send + Sync + 'static {
-    /// Traite la requête.
+    /// Handles the request.
     fn call(&'static self, req: Request) -> BoxFuture<Response>;
 }
 
@@ -55,8 +55,8 @@ where
 }
 
 pin_project_lite::pin_project! {
-    /// Convertit la sortie d'un handler en [`Response`] et transforme une
-    /// panique en `500` (sans allocation supplémentaire).
+    /// Converts the output of a handler into a [`Response`] and turns a
+    /// panic into a `500` (with no extra allocation).
     struct HandlerFuture<Fut> {
         #[pin]
         fut: Fut,
@@ -85,10 +85,11 @@ pub(crate) fn panic_response() -> Response {
     crate::Error::internal("Internal Server Error").into_response()
 }
 
-/// Un middleware : il reçoit la requête et la suite de la chaîne ([`Next`]).
+/// A middleware: it receives the request and the rest of the chain
+/// ([`Next`]).
 ///
-/// Il peut modifier la requête, court-circuiter la chaîne en répondant
-/// lui-même, ou modifier la réponse produite par la suite :
+/// It can modify the request, short-circuit the chain by responding itself,
+/// or modify the response produced by the rest of the chain:
 ///
 /// ```
 /// use vitesse::prelude::*;
@@ -96,14 +97,14 @@ pub(crate) fn panic_response() -> Response {
 /// let mut app = App::new();
 /// app.middleware(|req: Request, next: Next| async move {
 ///     if req.header("x-api-key") != Some("secret") {
-///         return Error::unauthorized("clé manquante").into_response();
+///         return Error::unauthorized("missing key").into_response();
 ///     }
 ///     let res = next.run(req).await;
 ///     res.header("x-checked", "1")
 /// });
 /// ```
 pub trait Middleware: Send + Sync + 'static {
-    /// Traite la requête, en appelant `next.run(req)` pour continuer.
+    /// Handles the request, calling `next.run(req)` to continue.
     fn handle(&'static self, req: Request, next: Next) -> BoxFuture<Response>;
 }
 
@@ -120,13 +121,13 @@ where
     }
 }
 
-/// Une suite de middlewares terminée par un handler.
+/// A sequence of middlewares ending with a handler.
 pub(crate) struct Chain {
     pub(crate) middlewares: Box<[Arc<dyn Middleware>]>,
     pub(crate) endpoint: Arc<dyn Handler>,
 }
 
-/// La suite de la chaîne de middlewares (`next()` en Express).
+/// The rest of the middleware chain (`next()` in Express).
 pub struct Next {
     chain: &'static Chain,
     index: usize,
@@ -138,7 +139,7 @@ impl Next {
         Next { chain, index: 0 }
     }
 
-    /// Passe la requête au middleware suivant, ou au handler final.
+    /// Passes the request to the next middleware, or to the final handler.
     #[inline]
     pub fn run(mut self, req: Request) -> BoxFuture<Response> {
         let chain = self.chain;
@@ -152,7 +153,7 @@ impl Next {
     }
 }
 
-/// Un handler précédé de middlewares, créé par [`HandlerExt::with`].
+/// A handler preceded by middlewares, created by [`HandlerExt::with`].
 pub struct Chained {
     chain: Chain,
 }
@@ -167,7 +168,7 @@ impl Chained {
         }
     }
 
-    /// Ajoute un middleware, exécuté après ceux déjà présents.
+    /// Adds a middleware, run after the ones already present.
     pub fn with<M: Middleware>(self, middleware: M) -> Chained {
         let mut middlewares = self.chain.middlewares.into_vec();
         middlewares.push(Arc::new(middleware));
@@ -182,7 +183,7 @@ impl Handler for Chained {
     }
 }
 
-/// Ajoute des middlewares à une seule route.
+/// Adds middlewares to a single route.
 ///
 /// ```
 /// use vitesse::prelude::*;
@@ -190,19 +191,19 @@ impl Handler for Chained {
 /// async fn auth(req: Request, next: Next) -> Response {
 ///     match req.header("authorization") {
 ///         Some(_) => next.run(req).await,
-///         None => Error::unauthorized("connectez-vous").into_response(),
+///         None => Error::unauthorized("please log in").into_response(),
 ///     }
 /// }
 ///
 /// async fn admin(_req: Request) -> &'static str {
-///     "zone admin"
+///     "admin area"
 /// }
 ///
 /// let mut app = App::new();
 /// app.get("/admin", admin.with(auth));
 /// ```
 pub trait HandlerExt: Handler + Sized {
-    /// Exécute `middleware` avant ce handler.
+    /// Runs `middleware` before this handler.
     fn with<M: Middleware>(self, middleware: M) -> Chained {
         Chained::new(vec![Arc::new(middleware)], Arc::new(self))
     }

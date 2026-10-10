@@ -12,11 +12,11 @@ use web_sys::{
 };
 
 pub fn window() -> Window {
-    web_sys::window().expect("pas de fenêtre")
+    web_sys::window().expect("no window")
 }
 
 pub fn document() -> web_sys::Document {
-    window().document().expect("pas de document")
+    window().document().expect("no document")
 }
 
 /// L'utilisateur a demandé à réduire les animations.
@@ -103,9 +103,21 @@ pub fn on_first_visible(
     observer
 }
 
-/// Ajoute la classe `in` à chaque élément `[data-reveal]` qui entre à l'écran
-/// (les animations elles-mêmes sont en CSS).
-pub fn reveal_on_scroll() {
+/// Fait apparaître les éléments `[data-reveal]` tant qu'elle est gardée.
+pub struct Reveal {
+    observer: IntersectionObserver,
+    _callback: Closure<dyn FnMut(js_sys::Array, IntersectionObserver)>,
+}
+
+impl Drop for Reveal {
+    fn drop(&mut self) {
+        self.observer.disconnect();
+    }
+}
+
+/// Ajoute la classe `in` à chaque élément `[data-reveal]` présent qui entre
+/// à l'écran (les animations elles-mêmes sont en CSS).
+pub fn reveal_on_scroll() -> Option<Reveal> {
     let callback = Closure::<dyn FnMut(js_sys::Array, IntersectionObserver)>::new(
         |entries: js_sys::Array, observer: IntersectionObserver| {
             for entry in entries.iter() {
@@ -123,12 +135,8 @@ pub fn reveal_on_scroll() {
     let options = IntersectionObserverInit::new();
     options.set_threshold(&0.0.into());
     options.set_root_margin("0px 0px -8% 0px");
-    let Ok(observer) =
-        IntersectionObserver::new_with_options(callback.as_ref().unchecked_ref(), &options)
-    else {
-        return;
-    };
-    callback.forget();
+    let observer =
+        IntersectionObserver::new_with_options(callback.as_ref().unchecked_ref(), &options).ok()?;
     if let Ok(nodes) = document().query_selector_all("[data-reveal]:not(.in)") {
         for i in 0..nodes.length() {
             if let Some(node) = nodes.item(i).and_then(|n| n.dyn_into::<Element>().ok()) {
@@ -136,6 +144,10 @@ pub fn reveal_on_scroll() {
             }
         }
     }
+    Some(Reveal {
+        observer,
+        _callback: callback,
+    })
 }
 
 /// Définit une variable CSS sur un élément.

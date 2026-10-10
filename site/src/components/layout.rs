@@ -12,6 +12,7 @@ use yew::prelude::*;
 use super::ui::{Icon, Logo, Magnetic, Scramble};
 use crate::data::GITHUB;
 use crate::dom;
+use crate::i18n::{Lang, use_lang};
 
 // ----- Écran de chargement --------------------------------------------------
 
@@ -152,15 +153,39 @@ pub fn Cursor() -> Html {
 
 // ----- Navigation ------------------------------------------------------------
 
-const LINKS: [(&str, &str); 4] = [
-    ("#performances", "Performances"),
-    ("#fonctionnalites", "Fonctionnalités"),
-    ("#express", "D'Express à Vitesse"),
-    ("#demarrer", "Démarrer"),
-];
+const SECTIONS: [&str; 4] = ["#performances", "#fonctionnalites", "#express", "#demarrer"];
+
+/// Le sélecteur de langue : `EN FR ES`.
+#[component]
+fn LangSwitch() -> Html {
+    let ctx = use_lang();
+    let t = ctx.lang.texts();
+    html! {
+        <div class="lang" role="group" aria-label={t.lang_aria}>
+            <Icon name="globe" />
+            { for Lang::ALL.iter().map(|&l| {
+                let set = ctx.set.clone();
+                html! {
+                    <button class={classes!("lang__btn", (l == ctx.lang).then_some("is-active"))}
+                            lang={l.code()} title={l.name()} aria-pressed={(l == ctx.lang).to_string()}
+                            onclick={Callback::from(move |_: MouseEvent| set.emit(l))}>
+                        { l.code().to_uppercase() }
+                    </button>
+                }
+            }) }
+        </div>
+    }
+}
+
+#[derive(Properties, PartialEq)]
+pub struct NavProps {
+    /// Vrai sur les pages de documentation.
+    pub docs: bool,
+}
 
 #[component]
-pub fn Nav() -> Html {
+pub fn Nav(props: &NavProps) -> Html {
+    let t = use_lang().lang.texts();
     let open = use_state(|| false);
     let toggle = {
         let open = open.clone();
@@ -174,32 +199,39 @@ pub fn Nav() -> Html {
         <>
             <div class="progress" id="progress" aria-hidden="true"></div>
             <header class={classes!("nav", open.then_some("nav--open"))} id="nav">
-                <a class="nav__brand" href="#top" aria-label="Vitesse, retour en haut">
+                <a class="nav__brand" href="#top" aria-label={t.brand_aria}>
                     <Logo />
                     <span>{ "Vitesse" }</span>
                 </a>
-                <nav class="nav__links" aria-label="Navigation principale">
-                    { for LINKS.iter().map(|(href, text)| html! {
+                <nav class="nav__links" aria-label={t.nav_aria}>
+                    { for SECTIONS.iter().zip(t.nav_links.iter()).map(|(href, text)| html! {
                         <a href={*href} class="nav__link"><Scramble text={*text} /></a>
                     }) }
+                    <a href="#/docs" class={classes!("nav__link", "nav__link--docs", props.docs.then_some("is-active"))}>
+                        <Icon name="book" /><Scramble text={t.nav_docs} />
+                    </a>
                 </nav>
+                <LangSwitch />
                 <Magnetic href={GITHUB} external=true class={classes!("btn", "btn--ghost", "nav__cta")} strength={0.25}>
                     <Icon name="github" />
                     <span>{ "GitHub" }</span>
                 </Magnetic>
-                <button class="nav__burger" onclick={toggle} aria-label="Menu" aria-expanded={(*open).to_string()}>
+                <button class="nav__burger" onclick={toggle} aria-label={t.menu} aria-expanded={(*open).to_string()}>
                     <span></span><span></span>
                 </button>
             </header>
             <div class={classes!("menu", open.then_some("menu--open"))} aria-hidden={(!*open).to_string()}>
                 <nav>
-                    { for LINKS.iter().enumerate().map(|(i, (href, text))| html! {
+                    { for SECTIONS.iter().zip(t.nav_links.iter()).enumerate().map(|(i, (href, text))| html! {
                         <a href={*href} style={format!("--i:{i}")} onclick={close.clone()}>
                             <span class="menu__num">{ format!("0{}", i + 1) }</span>{ *text }
                         </a>
                     }) }
-                    <a href={GITHUB} target="_blank" rel="noopener" style="--i:4" onclick={close.clone()}>
-                        <span class="menu__num">{ "05" }</span>{ "GitHub" }
+                    <a href="#/docs" style="--i:4" onclick={close.clone()}>
+                        <span class="menu__num">{ "05" }</span>{ t.docs_title }
+                    </a>
+                    <a href={GITHUB} target="_blank" rel="noopener" style="--i:5" onclick={close.clone()}>
+                        <span class="menu__num">{ "06" }</span>{ "GitHub" }
                     </a>
                 </nav>
             </div>
@@ -211,89 +243,76 @@ pub fn Nav() -> Html {
 
 #[component]
 fn Clock() -> Html {
-    let now = use_state(|| {
+    let lang = use_lang().lang;
+    let time = move || {
         js_sys::Date::new_0()
-            .to_locale_time_string("fr-FR")
+            .to_locale_time_string(lang.locale())
             .as_string()
             .unwrap_or_default()
-    });
+    };
+    let now = use_state(time);
     {
         let now = now.clone();
-        use_effect_with((), move |_| {
-            let interval = Interval::new(1000, move || {
-                now.set(
-                    js_sys::Date::new_0()
-                        .to_locale_time_string("fr-FR")
-                        .as_string()
-                        .unwrap_or_default(),
-                );
-            });
+        use_effect_with(lang, move |_| {
+            now.set(time());
+            let interval = Interval::new(1000, move || now.set(time()));
             move || drop(interval)
         });
     }
-    html! { <span class="clock"><span class="clock__dot"></span>{ format!("Heure locale {}", *now) }</span> }
+    html! { <span class="clock"><span class="clock__dot"></span>{ format!("{} {}", lang.texts().clock, *now) }</span> }
 }
 
 #[component]
 pub fn Footer() -> Html {
+    let t = use_lang().lang.texts();
     let to_top = Callback::from(|e: MouseEvent| {
         e.prevent_default();
         dom::window().scroll_to_with_x_and_y(0.0, 0.0);
     });
-    let columns: [(&str, [(&str, String); 4]); 3] = [
-        (
-            "Projet",
-            [
-                ("Code source", GITHUB.to_string()),
-                ("Benchmark", format!("{GITHUB}/tree/master/bench")),
-                ("Exemples", format!("{GITHUB}/tree/master/examples")),
-                ("Ce site (Yew)", format!("{GITHUB}/tree/master/site")),
-            ],
-        ),
-        (
-            "Documentation",
-            [
-                ("Guide", format!("{GITHUB}#guide")),
-                (
-                    "D'Express à Vitesse",
-                    format!("{GITHUB}#dexpress-à-vitesse"),
-                ),
-                (
-                    "Pourquoi c'est rapide",
-                    format!("{GITHUB}#pourquoi-cest-rapide"),
-                ),
-                ("Limites actuelles", format!("{GITHUB}#limites-actuelles")),
-            ],
-        ),
-        (
-            "Communauté",
-            [
-                ("Signaler un bug", format!("{GITHUB}/issues/new")),
-                ("Issues", format!("{GITHUB}/issues")),
-                ("Pull requests", format!("{GITHUB}/pulls")),
-                ("Historique", format!("{GITHUB}/commits/master")),
-            ],
-        ),
+    // (texte, lien, externe)
+    let project = [
+        GITHUB.to_string(),
+        format!("{GITHUB}/tree/master/bench"),
+        format!("{GITHUB}/tree/master/examples"),
+        format!("{GITHUB}/tree/master/site"),
+    ];
+    let docs = [
+        "#/docs".to_string(),
+        "#/docs/from-express".to_string(),
+        "#/docs/performance".to_string(),
+        "#/docs/heroku-mobile".to_string(),
+    ];
+    let community = [
+        format!("{GITHUB}/issues/new"),
+        format!("{GITHUB}/issues"),
+        format!("{GITHUB}/pulls"),
+        format!("{GITHUB}/commits/master"),
+    ];
+    let columns: [(&str, &[&str; 4], [String; 4], bool); 3] = [
+        (t.footer_cols[0], &t.footer_project, project, true),
+        (t.footer_cols[1], &t.footer_docs, docs, false),
+        (t.footer_cols[2], &t.footer_community, community, true),
     ];
     html! {
         <footer class="footer">
             <div class="footer__glow" aria-hidden="true"></div>
             <div class="footer__top">
                 <div class="footer__pitch" data-reveal="">
-                    <p class="eyebrow">{ "Le framework web Rust à la Express" }</p>
-                    <p class="footer__lead">{ "Écrivez du code comme avec Express. Servez-le à la vitesse du métal." }</p>
-                    <Magnetic href="#demarrer" class={classes!("btn", "btn--primary")}>
-                        <span>{ "Commencer maintenant" }</span>
+                    <p class="eyebrow">{ t.footer_eyebrow }</p>
+                    <p class="footer__lead">{ t.footer_lead }</p>
+                    <Magnetic href="#/docs/installation" class={classes!("btn", "btn--primary")}>
+                        <span>{ t.footer_cta }</span>
                         <Icon name="arrow" />
                     </Magnetic>
                 </div>
                 <div class="footer__cols">
-                    { for columns.iter().enumerate().map(|(c, (title, links))| html! {
+                    { for columns.iter().enumerate().map(|(c, (title, texts, hrefs, external))| html! {
                         <div class="footer__col" data-reveal="" style={format!("--d:{}ms", c * 90)}>
                             <h4>{ *title }</h4>
                             <ul>
-                                { for links.iter().map(|(text, href)| html! {
-                                    <li><a href={href.clone()} target="_blank" rel="noopener" class="footer__link">
+                                { for texts.iter().zip(hrefs.iter()).map(|(text, href)| html! {
+                                    <li><a href={href.clone()} class="footer__link"
+                                           target={external.then_some("_blank")} rel={external.then_some("noopener")}>
                                         <span>{ *text }</span><Icon name="arrow" />
                                     </a></li>
                                 }) }
@@ -308,12 +327,14 @@ pub fn Footer() -> Html {
                 }) }
             </div>
             <div class="footer__bottom">
-                <span>{ "© 2026 Vitesse. Fait en Rust avec Yew et WebAssembly." }</span>
+                <span>{ t.footer_copyright }</span>
                 <Clock />
-                <a href="#top" class="totop" onclick={to_top} data-cursor="Haut" aria-label="Retour en haut">
+                <a href="#top" class="totop" onclick={to_top} data-cursor={t.totop_cursor} aria-label={t.totop_aria}>
                     <svg viewBox="0 0 100 100" class="totop__text" aria-hidden="true">
                         <defs><path id="totop-circle" d="M50 50 m-38 0 a38 38 0 1 1 76 0 a38 38 0 1 1 -76 0" /></defs>
-                        <text><textPath href="#totop-circle">{ "RETOUR EN HAUT • RETOUR EN HAUT • " }</textPath></text>
+                        // La longueur du texte épouse exactement le cercle, quelle que
+                        // soit la langue.
+                        <text><textPath href="#totop-circle" textLength="236" lengthAdjust="spacing">{ t.totop }</textPath></text>
                     </svg>
                     <Icon name="up" />
                 </a>

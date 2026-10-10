@@ -1,4 +1,4 @@
-//! La requête HTTP reçue par les handlers et les middlewares.
+//! The HTTP request received by handlers and middlewares.
 
 use std::any::{Any, TypeId};
 use std::borrow::Cow;
@@ -21,13 +21,13 @@ use crate::error::Error;
 use crate::tree::{Captures, Tree};
 use crate::util::percent_decode;
 
-/// Données partagées par toute l'application (état, configuration).
+/// Data shared by the whole application (state, configuration).
 pub(crate) struct Shared {
     pub(crate) state: StateMap,
     pub(crate) body_limit: usize,
 }
 
-/// Stockage typé de l'état global (`app.state(...)`).
+/// Typed storage for the global state (`app.state(...)`).
 #[derive(Default)]
 pub(crate) struct StateMap(HashMap<TypeId, Box<dyn Any + Send + Sync>>);
 
@@ -50,8 +50,8 @@ pub(crate) enum ReqBody {
     Taken,
 }
 
-/// Valeur d'un paramètre de route : une tranche du chemin, ou une chaîne
-/// décodée si le segment contenait des `%XX`.
+/// The value of a route parameter: a slice of the path, or a decoded string
+/// if the segment contained `%XX` escapes.
 enum ParamValue {
     Slice(u32, u32),
     Owned(Box<str>),
@@ -63,7 +63,7 @@ pub(crate) struct Params {
     values: Vec<ParamValue>,
 }
 
-/// Position d'un en-tête (nom et valeur) dans les octets bruts de la requête.
+/// Position of a header (name and value) in the raw bytes of the request.
 #[derive(Clone, Copy, Default)]
 struct Slot {
     name: u16,
@@ -74,8 +74,8 @@ struct Slot {
 
 const INLINE_SLOTS: usize = 12;
 
-/// Les en-têtes tels que reçus : de simples positions, sans copie ni
-/// allocation (au-delà de 12 en-têtes, les suivants vont dans un `Vec`).
+/// The headers as received: plain positions, with no copy or allocation
+/// (beyond 12 headers, the remaining ones go into a `Vec`).
 #[derive(Default)]
 pub(crate) struct RawHeaders {
     len: usize,
@@ -84,7 +84,7 @@ pub(crate) struct RawHeaders {
 }
 
 impl RawHeaders {
-    /// Ajoute un en-tête ; les positions doivent tenir sur 16 bits.
+    /// Adds a header; positions must fit in 16 bits.
     #[inline]
     pub(crate) fn push(&mut self, name: usize, name_len: usize, value: usize, value_len: usize) {
         let slot = Slot {
@@ -123,14 +123,14 @@ impl RawHeaders {
     }
 }
 
-/// Le chemin d'une cible `/chemin?query`.
+/// The path of a `/path?query` target.
 #[inline]
 fn path_of(head: &[u8], target: (u32, u32), path_end: u32) -> &str {
     std::str::from_utf8(&head[target.0 as usize..path_end as usize]).unwrap_or("/")
 }
 
-/// Réserve de requêtes par thread : la boîte d'une requête terminée (et ses
-/// tampons) sert à la suivante, sans passer par l'allocateur.
+/// Per-thread pool of requests: the box of a finished request (and its
+/// buffers) is reused by the next one, without going through the allocator.
 // Les boîtes sont voulues : c'est la boîte elle-même qu'on rend à une requête,
 // sans recopier son contenu.
 #[allow(clippy::vec_box)]
@@ -161,10 +161,10 @@ mod pool {
     }
 }
 
-/// Une requête HTTP (`req` en Express).
+/// An HTTP request (`req` in Express).
 ///
-/// Toutes les méthodes prennent `&self`, y compris la lecture du corps : on
-/// peut donc garder un paramètre emprunté pendant qu'on lit le JSON.
+/// All methods take `&self`, including the ones that read the body, so you
+/// can keep a borrowed parameter while reading the JSON.
 ///
 /// ```
 /// use vitesse::prelude::*;
@@ -178,27 +178,27 @@ mod pool {
 /// }
 /// ```
 pub struct Request {
-    /// Rendue à la réserve du thread par `Drop`.
+    /// Returned to the thread's pool by `Drop`.
     inner: ManuallyDrop<Box<Inner>>,
 }
 
-/// Le contenu de la requête, derrière un pointeur : la requête traverse les
-/// middlewares et les handlers en ne déplaçant que 8 octets.
+/// The contents of the request, behind a pointer: the request travels
+/// through middlewares and handlers by moving only 8 bytes.
 struct Inner {
     method: Method,
     version: Version,
-    /// Les octets bruts de la tête, référencés par `target` et `raw_headers`.
+    /// The raw bytes of the head, referenced by `target` and `raw_headers`.
     head: Vec<u8>,
-    /// Position de la cible (`/chemin?query`) dans `head`, et du `?`.
+    /// Position of the target (`/path?query`) in `head`, and of the `?`.
     target: (u32, u32),
     path_end: u32,
     raw_headers: RawHeaders,
-    /// Construits seulement si on les demande.
+    /// Only built when asked for.
     headers: OnceLock<Box<HeaderMap>>,
     uri: OnceLock<Box<Uri>>,
     extensions: Extensions,
     body: Mutex<ReqBody>,
-    /// Positions trouvées par le routeur (tampon réutilisé).
+    /// Positions found by the router (reused buffer).
     captures: Captures,
     params: Params,
     remote: Option<SocketAddr>,
@@ -225,7 +225,7 @@ impl Inner {
         }
     }
 
-    /// Une boîte de la réserve, ou une nouvelle.
+    /// A box from the pool, or a new one.
     #[inline]
     fn take(shared: &'static Shared) -> Box<Inner> {
         match pool::take() {
@@ -237,7 +237,7 @@ impl Inner {
         }
     }
 
-    /// Vide la requête pour la réutiliser (en gardant ses tampons).
+    /// Clears the request so it can be reused (keeping its buffers).
     fn reset(&mut self) {
         if self.head.capacity() > 16 * 1024 {
             self.head = Vec::new();
@@ -255,7 +255,7 @@ impl Inner {
         self.remote = None;
     }
 
-    /// Ajoute la cible à la fin de `head` et la désigne.
+    /// Appends the target to the end of `head` and points to it.
     fn push_target(&mut self, target: &[u8]) {
         let start = self.head.len();
         self.head
@@ -312,8 +312,8 @@ impl fmt::Debug for Request {
 }
 
 impl Request {
-    /// Construit une requête lue sur le réseau ; `head` est la tête brute,
-    /// copiée dans une boîte recyclée.
+    /// Builds a request read from the network; `head` is the raw head,
+    /// copied into a recycled box.
     #[inline]
     pub(crate) fn from_wire(
         head: &[u8],
@@ -352,7 +352,7 @@ impl Request {
         }
     }
 
-    /// Construit une requête à partir d'une [`http::Request`] (client de test).
+    /// Builds a request from an [`http::Request`] (test client).
     pub(crate) fn from_parts(
         parts: http::request::Parts,
         body: ReqBody,
@@ -374,7 +374,7 @@ impl Request {
         }
     }
 
-    /// Donne son corps à la requête.
+    /// Gives the request its body.
     #[inline]
     pub(crate) fn put_body(&mut self, body: ReqBody) {
         *self
@@ -384,8 +384,8 @@ impl Request {
             .unwrap_or_else(PoisonError::into_inner) = body;
     }
 
-    /// Cherche la route de la requête dans l'arbre ; les positions des
-    /// paramètres sont gardées pour [`Request::set_params`].
+    /// Looks up the route of the request in the tree; the positions of the
+    /// parameters are kept for [`Request::set_params`].
     #[inline]
     pub(crate) fn find_route<T>(&mut self, tree: &'static Tree<T>) -> Option<&'static T> {
         let inner = &mut **self.inner;
@@ -393,7 +393,7 @@ impl Request {
         tree.find(path, &mut inner.captures)
     }
 
-    /// Enregistre les paramètres de la route trouvée par le routeur.
+    /// Records the parameters of the route found by the router.
     #[inline]
     pub(crate) fn set_params(&mut self, names: &'static [Box<str>]) {
         let inner = &mut **self.inner;
@@ -410,13 +410,13 @@ impl Request {
 
     // ----- Ligne de requête -------------------------------------------------
 
-    /// La méthode HTTP (`req.method`).
+    /// The HTTP method (`req.method`).
     #[inline]
     pub fn method(&self) -> &Method {
         &self.inner.method
     }
 
-    /// L'URI complète (chemin + query string).
+    /// The full URI (path + query string).
     pub fn uri(&self) -> &Uri {
         self.inner.uri.get_or_init(|| {
             Box::new(
@@ -425,13 +425,13 @@ impl Request {
         })
     }
 
-    /// Le chemin, sans la query string (`req.path`).
+    /// The path, without the query string (`req.path`).
     #[inline]
     pub fn path(&self) -> &str {
         self.inner.path()
     }
 
-    /// Remplace l'URI (ex. réécriture d'URL dans un middleware global).
+    /// Replaces the URI (e.g. URL rewriting in a global middleware).
     pub fn set_uri(&mut self, uri: Uri) {
         // Les paramètres pointent dans l'ancien chemin : on les rend autonomes.
         let inner = &mut **self.inner;
@@ -450,7 +450,7 @@ impl Request {
         inner.uri = OnceLock::from(Box::new(uri));
     }
 
-    /// La version HTTP.
+    /// The HTTP version.
     #[inline]
     pub fn version(&self) -> Version {
         self.inner.version
@@ -466,7 +466,7 @@ impl Request {
         &self.inner.head[slot.value as usize..][..slot.value_len as usize]
     }
 
-    /// Tous les en-têtes (construits à la première demande).
+    /// All headers (built on first access).
     pub fn headers(&self) -> &HeaderMap {
         self.inner.headers.get_or_init(|| {
             let mut map = HeaderMap::with_capacity(self.inner.raw_headers.len);
@@ -481,19 +481,26 @@ impl Request {
         })
     }
 
-    /// Tous les en-têtes, modifiables.
+    /// All headers, mutably.
     pub fn headers_mut(&mut self) -> &mut HeaderMap {
         self.headers();
-        self.inner.headers.get_mut().expect("en-têtes initialisés")
+        self.inner
+            .headers
+            .get_mut()
+            .expect("headers are initialized")
     }
 
-    /// Un en-tête sous forme de texte (`req.get('host')`), sans tenir compte
-    /// de la casse du nom.
+    /// A header as text (`req.get('host')`); the name is matched
+    /// case-insensitively.
     #[inline]
     pub fn header(&self, name: impl AsRef<str>) -> Option<&str> {
         let name = name.as_ref();
         if let Some(map) = self.inner.headers.get() {
-            return map.get(name).and_then(|v| v.to_str().ok());
+            // Comme le chemin rapide ci-dessous : tout UTF-8 valide est accepté
+            // (`HeaderValue::to_str` refuserait les accents).
+            return map
+                .get(name)
+                .and_then(|v| std::str::from_utf8(v.as_bytes()).ok());
         }
         self.inner
             .raw_headers
@@ -502,12 +509,12 @@ impl Request {
             .and_then(|slot| std::str::from_utf8(self.raw_value(slot)).ok())
     }
 
-    /// Toutes les valeurs d'un en-tête répété.
+    /// All the values of a repeated header.
     pub fn header_all<'a>(&'a self, name: &'a str) -> impl Iterator<Item = &'a str> + 'a {
         let from_map = self.inner.headers.get().map(|map| {
             map.get_all(name)
                 .into_iter()
-                .filter_map(|v| v.to_str().ok())
+                .filter_map(|v| std::str::from_utf8(v.as_bytes()).ok())
         });
         let from_raw = if from_map.is_none() {
             Some(
@@ -526,13 +533,13 @@ impl Request {
             .chain(from_raw.into_iter().flatten())
     }
 
-    /// Le `Content-Type`.
+    /// The `Content-Type`.
     pub fn content_type(&self) -> Option<&str> {
         self.header(header::CONTENT_TYPE)
     }
 
-    /// Vérifie le type du corps (`req.is('json')`) : accepte un type complet
-    /// (`application/json`), un sous-type (`json`) ou un joker (`text/*`).
+    /// Checks the type of the body (`req.is('json')`): accepts a full type
+    /// (`application/json`), a subtype (`json`) or a wildcard (`text/*`).
     pub fn is(&self, ty: &str) -> bool {
         let Some(ct) = self.content_type() else {
             return false;
@@ -553,7 +560,7 @@ impl Request {
         }
     }
 
-    /// L'hôte demandé, sans le port (`req.hostname`).
+    /// The requested host, without the port (`req.hostname`).
     pub fn hostname(&self) -> Option<&str> {
         let host = match self.header(header::HOST) {
             Some(host) => host,
@@ -565,7 +572,7 @@ impl Request {
         Some(host.rsplit_once(':').map_or(host, |(h, _)| h))
     }
 
-    /// La valeur d'un cookie (`req.cookies.name`).
+    /// The value of a cookie (`req.cookies.name`).
     pub fn cookie(&self, name: &str) -> Option<&str> {
         for s in self.header_all("cookie") {
             for pair in s.split(';') {
@@ -586,9 +593,10 @@ impl Request {
 
     // ----- Paramètres de route et query string ------------------------------
 
-    /// Un paramètre de route (`req.params.id` pour la route `/users/:id`).
+    /// A route parameter (`req.params.id` for the route `/users/:id`).
     ///
-    /// Pour un joker `*chemin`, le nom est `chemin` (ou `*` pour un joker anonyme).
+    /// For a wildcard `*path`, the name is `path` (or `*` for an anonymous
+    /// wildcard).
     #[inline]
     pub fn param(&self, name: &str) -> Option<&str> {
         let i = self.inner.params.names.iter().position(|n| &**n == name)?;
@@ -598,7 +606,7 @@ impl Request {
         })
     }
 
-    /// Un paramètre de route converti dans le type voulu ; `400` en cas d'échec.
+    /// A route parameter converted to the desired type; `400` on failure.
     ///
     /// ```
     /// # use vitesse::prelude::*;
@@ -610,12 +618,12 @@ impl Request {
     pub fn param_as<T: FromStr>(&self, name: &str) -> Result<T, Error> {
         let raw = self
             .param(name)
-            .ok_or_else(|| Error::bad_request(format!("paramètre « {name} » manquant")))?;
+            .ok_or_else(|| Error::bad_request(format!("missing parameter '{name}'")))?;
         raw.parse()
-            .map_err(|_| Error::bad_request(format!("paramètre « {name} » invalide : « {raw} »")))
+            .map_err(|_| Error::bad_request(format!("invalid parameter '{name}': '{raw}'")))
     }
 
-    /// Tous les paramètres de route, sous forme de paires `(nom, valeur)`.
+    /// All route parameters, as `(name, value)` pairs.
     pub fn params(&self) -> impl Iterator<Item = (&str, &str)> {
         self.inner
             .params
@@ -624,15 +632,15 @@ impl Request {
             .filter_map(|n| Some((&**n, self.param(n)?)))
     }
 
-    /// La query string brute (`a=1&b=2`).
+    /// The raw query string (`a=1&b=2`).
     #[inline]
     pub fn query_string(&self) -> Option<&str> {
         self.inner.query()
     }
 
-    /// Un paramètre de query string décodé (`req.query.page`).
+    /// A decoded query string parameter (`req.query.page`).
     ///
-    /// N'alloue que si la valeur contient des caractères encodés.
+    /// Only allocates if the value contains encoded characters.
     pub fn query(&self, name: &str) -> Option<Cow<'_, str>> {
         let q = self.inner.query()?;
         form_urlencoded::parse(q.as_bytes())
@@ -640,12 +648,12 @@ impl Request {
             .map(|(_, v)| v)
     }
 
-    /// Toutes les paires de la query string.
+    /// All the pairs of the query string.
     pub fn query_pairs(&self) -> impl Iterator<Item = (Cow<'_, str>, Cow<'_, str>)> {
         form_urlencoded::parse(self.inner.query().unwrap_or("").as_bytes())
     }
 
-    /// Désérialise la query string dans une structure ; `400` en cas d'échec.
+    /// Deserializes the query string into a struct; `400` on failure.
     ///
     /// ```
     /// # use vitesse::prelude::*;
@@ -659,19 +667,19 @@ impl Request {
     /// ```
     pub fn query_as<T: DeserializeOwned>(&self) -> Result<T, Error> {
         serde_urlencoded::from_str(self.inner.query().unwrap_or(""))
-            .map_err(|e| Error::bad_request(format!("query string invalide : {e}")))
+            .map_err(|e| Error::bad_request(format!("invalid query string: {e}")))
     }
 
     // ----- Connexion --------------------------------------------------------
 
-    /// L'adresse du client (IP + port).
+    /// The client's address (IP + port).
     #[inline]
     pub fn remote_addr(&self) -> Option<SocketAddr> {
         self.inner.remote
     }
 
-    /// L'IP du client (`req.ip`). Derrière un proxy, voyez plutôt
-    /// l'en-tête `X-Forwarded-For`.
+    /// The client's IP (`req.ip`). Behind a proxy, look at the
+    /// `X-Forwarded-For` header instead.
     #[inline]
     pub fn ip(&self) -> Option<IpAddr> {
         self.inner.remote.map(|a| a.ip())
@@ -679,45 +687,45 @@ impl Request {
 
     // ----- État global et données locales -----------------------------------
 
-    /// L'état global enregistré avec `app.state(valeur)` (`app.locals`).
+    /// The global state registered with `app.state(value)` (`app.locals`).
     ///
-    /// # Panique
-    /// Si aucun état de ce type n'a été enregistré (la panique est convertie
-    /// en `500`). Voir [`Request::try_state`].
+    /// # Panics
+    /// If no state of this type was registered (the panic is turned into a
+    /// `500`). See [`Request::try_state`].
     #[inline]
     pub fn state<T: Send + Sync + 'static>(&self) -> &'static T {
         self.try_state().unwrap_or_else(|| {
             panic!(
-                "aucun état de type `{}` : appelez `app.state(...)` au démarrage",
+                "no state of type `{}`: call `app.state(...)` at startup",
                 std::any::type_name::<T>()
             )
         })
     }
 
-    /// Comme [`Request::state`], sans paniquer.
+    /// Like [`Request::state`], without panicking.
     #[inline]
     pub fn try_state<T: Send + Sync + 'static>(&self) -> Option<&'static T> {
         self.inner.shared.state.get::<T>()
     }
 
-    /// Lit une donnée attachée à cette requête par un middleware (`res.locals`).
+    /// Reads a value attached to this request by a middleware (`res.locals`).
     #[inline]
     pub fn get<T: Send + Sync + 'static>(&self) -> Option<&T> {
         self.inner.extensions.get::<T>()
     }
 
-    /// Attache une donnée à cette requête (ex. l'utilisateur authentifié).
+    /// Attaches a value to this request (e.g. the authenticated user).
     #[inline]
     pub fn set<T: Clone + Send + Sync + 'static>(&mut self, value: T) -> Option<T> {
         self.inner.extensions.insert(value)
     }
 
-    /// Les extensions de la requête.
+    /// The extensions of the request.
     pub fn extensions(&self) -> &Extensions {
         &self.inner.extensions
     }
 
-    /// Les extensions de la requête, modifiables.
+    /// The extensions of the request, mutably.
     pub fn extensions_mut(&mut self) -> &mut Extensions {
         &mut self.inner.extensions
     }
@@ -731,9 +739,9 @@ impl Request {
             .unwrap_or_else(PoisonError::into_inner)
     }
 
-    /// Lit tout le corps (limité par `app.body_limit`, `413` au-delà).
+    /// Reads the whole body (limited by `app.body_limit`, `413` beyond that).
     ///
-    /// Le résultat est mis en cache : on peut l'appeler plusieurs fois.
+    /// The result is cached, so this can be called several times.
     pub async fn bytes(&self) -> Result<Bytes, Error> {
         let limit = self.inner.shared.body_limit;
         let body = {
@@ -749,10 +757,10 @@ impl Request {
         };
         let bytes = match body {
             ReqBody::Stream(stream) => collect(stream, limit).await?,
-            ReqBody::Empty | ReqBody::Buffered(_) => unreachable!("traité ci-dessus"),
+            ReqBody::Empty | ReqBody::Buffered(_) => unreachable!("handled above"),
             ReqBody::Taken => {
                 return Err(Error::internal(
-                    "le corps de la requête a déjà été consommé",
+                    "the request body has already been consumed",
                 ));
             }
         };
@@ -760,30 +768,30 @@ impl Request {
         Ok(bytes)
     }
 
-    /// Lit le corps comme du texte UTF-8 ; `400` s'il est invalide.
+    /// Reads the body as UTF-8 text; `400` if it is invalid.
     pub async fn text(&self) -> Result<String, Error> {
         let bytes = self.bytes().await?;
         std::str::from_utf8(&bytes)
             .map(str::to_owned)
-            .map_err(|_| Error::bad_request("le corps n'est pas de l'UTF-8 valide"))
+            .map_err(|_| Error::bad_request("the body is not valid UTF-8"))
     }
 
-    /// Désérialise un corps JSON (`express.json()`) ; `400` s'il est invalide.
+    /// Deserializes a JSON body (`express.json()`); `400` if it is invalid.
     pub async fn json<T: DeserializeOwned>(&self) -> Result<T, Error> {
         let bytes = self.bytes().await?;
-        serde_json::from_slice(&bytes)
-            .map_err(|e| Error::bad_request(format!("JSON invalide : {e}")))
+        serde_json::from_slice(&bytes).map_err(|e| Error::bad_request(format!("invalid JSON: {e}")))
     }
 
-    /// Désérialise un formulaire `application/x-www-form-urlencoded`
-    /// (`express.urlencoded()`) ; `400` s'il est invalide.
+    /// Deserializes an `application/x-www-form-urlencoded` form
+    /// (`express.urlencoded()`); `400` if it is invalid.
     pub async fn form<T: DeserializeOwned>(&self) -> Result<T, Error> {
         let bytes = self.bytes().await?;
         serde_urlencoded::from_bytes(&bytes)
-            .map_err(|e| Error::bad_request(format!("formulaire invalide : {e}")))
+            .map_err(|e| Error::bad_request(format!("invalid form data: {e}")))
     }
 
-    /// Récupère le corps brut en flux, sans le lire (upload, proxy…).
+    /// Takes the raw body as a stream, without reading it (uploads,
+    /// proxies…).
     pub fn take_body(&self) -> Body {
         match std::mem::replace(&mut *self.lock_body(), ReqBody::Taken) {
             ReqBody::Empty => Body::empty(),
@@ -793,7 +801,7 @@ impl Request {
         }
     }
 
-    /// Remplace le corps (ex. un middleware qui décompresse).
+    /// Replaces the body (e.g. in a middleware that decompresses it).
     pub fn set_body(&mut self, body: impl Into<Body>) {
         *self
             .inner
@@ -803,7 +811,7 @@ impl Request {
     }
 }
 
-/// Lit un corps en mémoire, avec une taille maximale.
+/// Reads a body into memory, up to a maximum size.
 async fn collect<B>(body: B, limit: usize) -> Result<Bytes, Error>
 where
     B: http_body::Body<Data = Bytes>,
@@ -818,7 +826,7 @@ where
     let mut total = 0usize;
     while let Some(frame) = body.frame().await {
         let frame = frame.map_err(|e| {
-            Error::bad_request("lecture du corps de la requête impossible").with_source(e.into())
+            Error::bad_request("failed to read the request body").with_source(e.into())
         })?;
         let Ok(data) = frame.into_data() else {
             continue;

@@ -1,11 +1,11 @@
-//! Une API REST complète (CRUD de tâches) : routeur, middlewares, état
-//! partagé, validation et erreurs.
+//! A complete REST API (CRUD for tasks): router, middlewares, shared state,
+//! validation and errors.
 //!
 //! ```sh
 //! cargo run --release --example rest_api
 //!
 //! curl -X POST localhost:3000/api/todos -H 'content-type: application/json' \
-//!      -H 'authorization: Bearer secret' -d '{"title":"Apprendre Rust"}'
+//!      -H 'authorization: Bearer secret' -d '{"title":"Learn Rust"}'
 //! curl localhost:3000/api/todos
 //! curl -X PATCH localhost:3000/api/todos/1 -H 'authorization: Bearer secret' \
 //!      -H 'content-type: application/json' -d '{"done":true}'
@@ -42,25 +42,25 @@ struct ListQuery {
     done: Option<bool>,
 }
 
-/// La « base de données » : partagée entre toutes les requêtes.
+/// The "database": shared by all requests.
 #[derive(Default)]
 struct Db {
     next_id: AtomicU64,
     todos: RwLock<BTreeMap<u64, Todo>>,
 }
 
-/// Utilisateur authentifié, attaché à la requête par le middleware `auth`.
+/// The authenticated user, attached to the request by the `auth` middleware.
 #[derive(Clone)]
 struct User(String);
 
 async fn auth(mut req: Request, next: Next) -> Response {
-    // Les lectures sont publiques, les écritures demandent un jeton.
+    // Reads are public, writes require a token.
     if *req.method() != Method::GET {
         match req.header("authorization") {
             Some("Bearer secret") => {
                 req.set(User("ada".into()));
             }
-            _ => return Error::unauthorized("jeton manquant ou invalide").into_response(),
+            _ => return Error::unauthorized("missing or invalid token").into_response(),
         }
     }
     next.run(req).await
@@ -86,13 +86,13 @@ async fn show(req: Request) -> vitesse::Result<Json<Todo>> {
         .get(&id)
         .cloned()
         .map(Json)
-        .ok_or_else(|| Error::not_found(format!("tâche {id} introuvable")))
+        .ok_or_else(|| Error::not_found(format!("task {id} not found")))
 }
 
 async fn create(req: Request) -> vitesse::Result<Response> {
     let new: NewTodo = req.json().await?;
     if new.title.trim().is_empty() {
-        return Err(Error::unprocessable("le titre est obligatoire"));
+        return Err(Error::unprocessable("title is required"));
     }
     let db = req.state::<Db>();
     let id = db.next_id.fetch_add(1, Ordering::Relaxed) + 1;
@@ -115,7 +115,7 @@ async fn update(req: Request) -> vitesse::Result<Json<Todo>> {
     let mut todos = req.state::<Db>().todos.write().unwrap();
     let todo = todos
         .get_mut(&id)
-        .ok_or_else(|| Error::not_found(format!("tâche {id} introuvable")))?;
+        .ok_or_else(|| Error::not_found(format!("task {id} not found")))?;
     if let Some(title) = patch.title {
         todo.title = title;
     }
@@ -129,7 +129,7 @@ async fn remove(req: Request) -> vitesse::Result<StatusCode> {
     let id: u64 = req.param_as("id")?;
     match req.state::<Db>().todos.write().unwrap().remove(&id) {
         Some(_) => Ok(StatusCode::NO_CONTENT),
-        None => Err(Error::not_found(format!("tâche {id} introuvable"))),
+        None => Err(Error::not_found(format!("task {id} not found"))),
     }
 }
 
@@ -150,11 +150,11 @@ fn main() -> std::io::Result<()> {
     app.middleware(middleware::helmet());
 
     app.get("/", |_| async {
-        Html("<h1>API des tâches</h1><p>Essayez <a href=\"/api/todos\">/api/todos</a></p>")
+        Html("<h1>Task API</h1><p>Try <a href=\"/api/todos\">/api/todos</a></p>")
     });
     app.get("/health", |_| async { json!({ "status": "ok" }) });
     app.mount("/api/todos", todos);
 
-    println!("⚡ API sur http://localhost:3000/api/todos");
+    println!("⚡ API running at http://localhost:3000/api/todos");
     app.run(3000)
 }

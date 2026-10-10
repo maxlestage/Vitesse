@@ -1,15 +1,15 @@
-//! Le moteur HTTP/1.1 de Vitesse.
+//! Vitesse's HTTP/1.1 engine.
 //!
-//! Une connexion = une tâche, avec un tampon de lecture et un tampon
-//! d'écriture réutilisés d'une requête à l'autre :
+//! One connection = one task, with a read buffer and a write buffer that are
+//! reused from one request to the next:
 //!
-//! - la tête de la requête est analysée par `httparse` (SIMD) et les en-têtes
-//!   restent dans le tampon de lecture : seules leurs positions sont notées ;
-//! - un handler qui répond sans attendre écrit directement sa réponse dans le
-//!   tampon d'écriture : toutes les réponses d'un lot de requêtes
-//!   « pipelinées » partent en un seul appel système ;
-//! - un seul minuteur par connexion (et non par requête) gère l'inactivité ;
-//! - l'en-tête `Date` est mis en cache par thread.
+//! - the request head is parsed by `httparse` (SIMD) and the headers stay in
+//!   the read buffer: only their positions are recorded;
+//! - a handler that responds without waiting writes its response straight
+//!   into the write buffer: all the responses to a batch of pipelined
+//!   requests go out in a single system call;
+//! - a single timer per connection (not per request) handles inactivity;
+//! - the `Date` header is cached per thread.
 
 use std::cell::RefCell;
 use std::future::{Future, poll_fn};
@@ -39,30 +39,32 @@ use crate::response::{Response, header_pool};
 use crate::server::ResponseFuture;
 use crate::util::http_date;
 
-/// Nombre maximal d'en-têtes par requête.
+/// Maximum number of headers per request.
 const MAX_HEADERS: usize = 64;
-/// Taille maximale de la tête d'une requête (les positions tiennent sur 16 bits).
+/// Maximum size of a request head (positions fit in 16 bits).
 const MAX_HEAD: usize = 60 * 1024;
-/// Taille de lecture.
+/// Read size.
 const READ_SIZE: usize = 8 * 1024;
-/// Corps lus d'avance avant d'appeler le handler (au-delà : en flux).
+/// Bodies up to this size are read in full before calling the handler
+/// (larger ones are streamed).
 const EAGER_BODY: u64 = 64 * 1024;
-/// Corps de réponse plus petits : copiés dans le tampon d'écriture.
+/// Response bodies up to this size are copied into the write buffer.
 const INLINE_BODY: usize = 16 * 1024;
-/// Au-delà, on vide le tampon d'écriture même au milieu d'un lot.
+/// Beyond this size, the write buffer is flushed even in the middle of a
+/// batch.
 const WRITE_HIGH_WATER: usize = 64 * 1024;
-/// Période du minuteur d'inactivité.
+/// Period of the inactivity timer.
 const TICK: Duration = Duration::from_secs(15);
-/// Connexion fermée après ~60 s sans requête…
+/// The connection is closed after ~60 s without a request…
 const IDLE_TICKS: u32 = 4;
-/// … ou ~30 s sans tête complète.
+/// … or ~30 s without a complete head.
 const HEAD_TICKS: u32 = 2;
 
-/// État partagé entre la boucle d'acceptation et ses connexions.
+/// State shared between the accept loop and its connections.
 pub(crate) struct ServerState {
     pub(crate) shutdown: AtomicBool,
-    /// Lots de requêtes en cours, comptés par thread pour éviter toute
-    /// contention entre cœurs (la somme des compteurs fait foi).
+    /// Request batches in progress, counted per thread to avoid any
+    /// contention between cores (only the sum of the counters is meaningful).
     busy: [Shard; SHARDS],
 }
 
@@ -82,7 +84,7 @@ impl Default for ServerState {
 }
 
 impl ServerState {
-    /// Nombre de connexions en train de traiter des requêtes.
+    /// Number of connections currently processing requests.
     pub(crate) fn busy(&self) -> isize {
         self.busy.iter().map(|s| s.0.load(Relaxed)).sum()
     }
@@ -97,7 +99,7 @@ impl ServerState {
     }
 }
 
-/// Marque la connexion comme occupée (pour l'arrêt propre).
+/// Marks the connection as busy (for graceful shutdown).
 struct Busy(&'static ServerState);
 
 impl Busy {
@@ -115,7 +117,7 @@ impl Drop for Busy {
     }
 }
 
-/// Sert une connexion jusqu'à sa fermeture.
+/// Serves a connection until it is closed.
 pub(crate) async fn serve_connection(
     io: TcpStream,
     peer: SocketAddr,
@@ -144,13 +146,13 @@ struct Conn {
     peer: SocketAddr,
     app: &'static AppService,
     state: &'static ServerState,
-    /// Le client envoie encore un corps que personne n'a lu.
+    /// The client is still sending a body that nobody has read.
     linger: bool,
-    /// Positions des en-têtes de la requête en cours d'analyse.
+    /// Positions of the headers of the request being parsed.
     raw: RawHeaders,
 }
 
-/// Une requête dont la réponse est en préparation.
+/// A request whose response is being prepared.
 struct Job {
     fut: ResponseFuture,
     is_head: bool,
@@ -158,7 +160,7 @@ struct Job {
     keep_alive: bool,
 }
 
-/// Ce qu'il reste à envoyer après la tête de la réponse.
+/// What is left to send after the response head.
 enum Rest {
     None,
     Bytes(Bytes),
@@ -260,7 +262,8 @@ impl Conn {
         }
     }
 
-    /// Le corps de la requête s'il est déjà entièrement reçu (le cas courant).
+    /// The request body, if it has already been fully received (the common
+    /// case).
     #[inline]
     fn ready_body(&mut self, framing: Framing) -> Option<ReqBody> {
         match framing {
@@ -282,8 +285,8 @@ impl Conn {
         }
     }
 
-    /// Le handler attend (base de données…) : on envoie déjà les réponses
-    /// précédentes, puis on attend la sienne.
+    /// The handler is waiting (database…): send the previous responses
+    /// right away, then wait for its own.
     async fn finish(&mut self, mut job: Job) -> io::Result<bool> {
         self.flush().await?;
         let mut res = (&mut job.fut).await;
@@ -293,7 +296,7 @@ impl Conn {
         Ok(keep_alive)
     }
 
-    /// Requête dont le corps n'est pas encore (entièrement) arrivé.
+    /// A request whose body has not (fully) arrived yet.
     async fn handle_with_body(&mut self, mut req: Request, head: ParsedHead) -> io::Result<bool> {
         let framing = head.framing;
         if head.expect_continue {
@@ -356,7 +359,7 @@ impl Conn {
         Ok(keep_alive)
     }
 
-    /// Fait avancer le handler tout en lui transmettant le corps de la requête.
+    /// Drives the handler while feeding it the request body.
     async fn drive(&mut self, fut: &mut ResponseFuture, feeder: &mut Feeder) -> Response {
         if !self.wbuf.is_empty() {
             let _ = self.flush().await;
@@ -373,10 +376,10 @@ impl Conn {
         }
     }
 
-    /// Ferme proprement une connexion dont le client envoie encore des
-    /// données : fermer tout de suite provoquerait un `RST` qui pourrait
-    /// faire perdre la réponse au client. On ferme donc l'écriture et on
-    /// ignore ce qui arrive encore, pendant 2 s et 8 Mio au plus.
+    /// Gracefully closes a connection whose client is still sending data:
+    /// closing right away would trigger an `RST`, which could make the client
+    /// lose the response. So the write side is shut down and whatever still
+    /// arrives is ignored, for at most 2 s and 8 MiB.
     async fn linger_close(&mut self) {
         if self.io.shutdown().await.is_err() {
             return;
@@ -396,7 +399,7 @@ impl Conn {
         }
     }
 
-    /// Répond à une requête invalide puis ferme la connexion.
+    /// Responds to an invalid request, then closes the connection.
     async fn fail(&mut self, status: StatusCode) -> io::Result<()> {
         // Le client peut être en train d'envoyer la suite de sa requête.
         self.linger = true;
@@ -418,8 +421,8 @@ impl Conn {
         Ok(())
     }
 
-    /// Envoie le tampon d'écriture suivi de `data`, en un seul appel système
-    /// si possible.
+    /// Sends the write buffer followed by `data`, in a single system call if
+    /// possible.
     async fn write_with(&mut self, data: &[u8]) -> io::Result<()> {
         let mut head: &[u8] = &self.wbuf;
         let mut data = data;
@@ -445,9 +448,9 @@ impl Conn {
         Ok(())
     }
 
-    /// Sérialise la tête de la réponse (et un petit corps) dans le tampon
-    /// d'écriture. Renvoie s'il faut garder la connexion, et ce qu'il reste à
-    /// envoyer.
+    /// Serializes the response head (and a small body) into the write
+    /// buffer. Returns whether to keep the connection alive, and what is left
+    /// to send.
     fn encode(&mut self, res: &mut Response, job: &Job) -> (bool, Rest) {
         res.log_server_error();
         let status = res.status;
@@ -543,8 +546,8 @@ impl Conn {
         }
     }
 
-    /// Envoie un corps en flux, morceau par morceau (chaque morceau part tout
-    /// de suite : idéal pour les fichiers comme pour les événements).
+    /// Sends a streamed body, chunk by chunk (each chunk goes out right away:
+    /// ideal for files as well as for events).
     async fn write_stream<B>(&mut self, mut body: B, chunked: bool) -> io::Result<()>
     where
         B: http_body::Body<Data = Bytes, Error = BoxError> + Unpin,
@@ -581,7 +584,7 @@ impl Conn {
     }
 }
 
-/// Interroge un `Future` une seule fois.
+/// Polls a `Future` exactly once.
 #[inline]
 fn poll_once<F: Future + Unpin>(fut: &mut F) -> impl Future<Output = Option<F::Output>> + '_ {
     poll_fn(move |cx| match Pin::new(&mut *fut).poll(cx) {
@@ -600,7 +603,7 @@ enum Framing {
 }
 
 struct ParsedHead {
-    /// Taille de la tête dans le tampon de lecture.
+    /// Size of the head in the read buffer.
     len: usize,
     method: Method,
     version: Version,
@@ -610,8 +613,8 @@ struct ParsedHead {
     expect_continue: bool,
 }
 
-/// Analyse la tête d'une requête si elle est complète ; les positions des
-/// en-têtes sont écrites dans `raw`. Le tampon n'est pas modifié.
+/// Parses the head of a request if it is complete; the positions of the
+/// headers are written into `raw`. The buffer is not modified.
 fn parse_head(rbuf: &[u8], raw: &mut RawHeaders) -> Result<Option<ParsedHead>, StatusCode> {
     if rbuf.is_empty() {
         return Ok(None);
@@ -731,21 +734,21 @@ fn parse_decimal(value: &[u8]) -> Option<u64> {
 
 // ----- Corps des requêtes en flux ------------------------------------------
 
-/// Message transmis du moteur au corps lu par le handler.
+/// A message sent from the engine to the body read by the handler.
 enum Msg {
     Data(Bytes),
     End,
     Error(io::Error),
 }
 
-/// Lit le corps sur le réseau et le transmet au handler.
+/// Reads the body from the network and forwards it to the handler.
 struct Feeder {
     tx: Option<mpsc::Sender<Msg>>,
     decoder: Decoder,
 }
 
 impl Feeder {
-    /// Transmet un morceau (ou la fin) du corps.
+    /// Forwards a chunk (or the end) of the body.
     async fn feed(&mut self, io: &mut TcpStream, rbuf: &mut BytesMut) {
         let Some(tx) = &self.tx else { return };
         let msg = loop {
@@ -773,7 +776,7 @@ impl Feeder {
     }
 }
 
-/// Le corps d'une requête tel que vu par le handler.
+/// The body of a request, as seen by the handler.
 struct IncomingBody {
     rx: mpsc::Receiver<Msg>,
     remaining: Option<u64>,
@@ -811,7 +814,7 @@ impl http_body::Body for IncomingBody {
                 self.done = true;
                 Some(Err(io::Error::new(
                     io::ErrorKind::ConnectionAborted,
-                    "connexion interrompue",
+                    "connection aborted",
                 )))
             }
         })
@@ -835,7 +838,7 @@ enum Decoded {
     Done,
 }
 
-/// Décode un corps délimité par `Content-Length` ou envoyé en `chunked`.
+/// Decodes a body delimited by `Content-Length` or sent as `chunked`.
 #[derive(Debug)]
 enum Decoder {
     Length(u64),
@@ -861,7 +864,7 @@ impl Decoder {
 
     fn decode(&mut self, buf: &mut BytesMut) -> io::Result<Decoded> {
         fn invalid() -> io::Error {
-            io::Error::new(io::ErrorKind::InvalidData, "corps chunked invalide")
+            io::Error::new(io::ErrorKind::InvalidData, "invalid chunked body")
         }
         loop {
             match *self {
@@ -970,7 +973,7 @@ fn write_status(buf: &mut Vec<u8>, status: StatusCode) {
     buf.extend_from_slice(line);
 }
 
-/// Écrit `content-length: n` d'un seul bloc.
+/// Writes `content-length: n` in one block.
 fn push_content_length(buf: &mut Vec<u8>, n: u64) {
     const PREFIX: &[u8] = b"content-length: ";
     let mut line = [0u8; PREFIX.len() + 20 + 2];
@@ -1001,7 +1004,7 @@ fn push_hex(buf: &mut Vec<u8>, mut n: usize) {
     buf.extend_from_slice(&tmp[i..]);
 }
 
-/// L'en-tête `Date`, recalculé au plus une fois par seconde et par thread.
+/// The `Date` header, recomputed at most once per second and per thread.
 mod date {
     use super::*;
 
@@ -1014,7 +1017,7 @@ mod date {
         static CACHE: RefCell<Cache> = const { RefCell::new(Cache { secs: u64::MAX, line: [0; 37] }) };
     }
 
-    /// Met le cache à jour si la seconde a changé.
+    /// Updates the cache if the second has changed.
     pub(super) fn refresh() {
         let now = SystemTime::now();
         let secs = now

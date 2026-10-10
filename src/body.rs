@@ -1,4 +1,4 @@
-//! Le corps des réponses HTTP.
+//! HTTP response bodies.
 
 use std::fmt;
 use std::pin::Pin;
@@ -10,13 +10,13 @@ use http_body::{Frame, SizeHint};
 use http_body_util::BodyExt;
 use http_body_util::combinators::UnsyncBoxBody;
 
-/// Erreur générique, envoyable entre threads.
+/// A type-erased error that can be sent between threads.
 pub type BoxError = Box<dyn std::error::Error + Send + Sync>;
 
-/// Corps d'une réponse.
+/// The body of a response.
 ///
-/// Les cas courants (vide, texte, JSON, octets) sont stockés tels quels, sans
-/// allocation supplémentaire ; le streaming passe par [`Body::from_stream`] ou
+/// The common cases (empty, text, JSON, bytes) are stored as is, with no
+/// extra allocation; streaming goes through [`Body::from_stream`] or
 /// [`Body::wrap`].
 pub struct Body {
     kind: Kind,
@@ -29,14 +29,14 @@ pub(crate) enum Kind {
 }
 
 impl Body {
-    /// Un corps vide.
+    /// An empty body.
     #[inline]
     pub const fn empty() -> Self {
         Body { kind: Kind::Empty }
     }
 
-    /// Enveloppe n'importe quel [`http_body::Body`] (ex. le corps d'une requête
-    /// pour faire un proxy).
+    /// Wraps any [`http_body::Body`] (e.g. the body of a request, to build a
+    /// proxy).
     pub fn wrap<B>(body: B) -> Self
     where
         B: http_body::Body<Data = Bytes> + Send + 'static,
@@ -47,7 +47,7 @@ impl Body {
         }
     }
 
-    /// Crée un corps envoyé en flux (*chunked*) à partir d'un [`Stream`].
+    /// Creates a body sent as a stream (*chunked*) from a [`Stream`].
     pub fn from_stream<S, D, E>(stream: S) -> Self
     where
         S: Stream<Item = Result<D, E>> + Send + 'static,
@@ -59,18 +59,18 @@ impl Body {
         })
     }
 
-    /// Le contenu brut, pour le moteur HTTP.
+    /// The raw content, for the HTTP engine.
     #[inline]
     pub(crate) fn into_kind(self) -> Kind {
         self.kind
     }
 
-    /// Nombre d'octets si la taille est connue à l'avance.
+    /// The number of bytes, if the size is known in advance.
     pub fn size(&self) -> Option<u64> {
         http_body::Body::size_hint(self).exact()
     }
 
-    /// Lit tout le corps en mémoire.
+    /// Reads the whole body into memory.
     pub async fn to_bytes(self) -> Result<Bytes, BoxError> {
         match self.kind {
             Kind::Empty => Ok(Bytes::new()),
@@ -194,7 +194,7 @@ impl From<()> for Body {
     }
 }
 
-/// Adaptateur `Stream` -> `http_body::Body`.
+/// Adapter from `Stream` to `http_body::Body`.
 struct StreamBody<S> {
     stream: Pin<Box<S>>,
 }

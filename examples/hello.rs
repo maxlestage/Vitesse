@@ -1,4 +1,4 @@
-//! Le « Hello World » d'Express, version Vitesse.
+//! Express's "Hello World", Vitesse-style.
 //!
 //! ```sh
 //! cargo run --release --example hello
@@ -12,6 +12,6 @@ fn main() -> std::io::Result<()> {
 
     app.get("/", |_| async { "Hello World!" });
 
-    println!("⚡ Vitesse écoute sur http://localhost:3000");
+    println!("⚡ Vitesse listening on http://localhost:3000");
     app.run(3000)
 }

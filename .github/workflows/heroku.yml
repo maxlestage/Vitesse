@@ -1,0 +1,134 @@
+# Deploys the app to Heroku on every push to master (and on demand), without
+# the Heroku CLI: everything goes through the Heroku Platform API, so it can be
+# set up and triggered from a phone. Heroku builds the Docker image itself
+# from heroku.yml, exactly like the "Deploy to Heroku" button.
+#
+# Setup (see docs/en/heroku-mobile.md):
+#   - repository secret   HEROKU_API_KEY   a Heroku API key or authorization token
+#   - repository variable HEROKU_APP_NAME  the app name (created if missing)
+#   - optional variable   HEROKU_REGION    us (default) or eu
+# Without the secret, pushes simply skip the deployment.
+
+name: Deploy to Heroku
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - "src/**"
+      - "examples/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "Dockerfile"
+      - "heroku.yml"
+      - ".github/workflows/heroku.yml"
+  workflow_dispatch:
+    inputs:
+      app:
+        description: "Heroku app name (defaults to the HEROKU_APP_NAME variable)"
+        required: false
+
+concurrency:
+  group: heroku
+  cancel-in-progress: false
+
+jobs:
+  check:
+    name: Check configuration
+    runs-on: ubuntu-latest
+    outputs:
+      enabled: ${{ steps.check.outputs.enabled }}
+    steps:
+      - id: check
+        env:
+          HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}
+          APP: ${{ inputs.app || vars.HEROKU_APP_NAME }}
+        run: |
+          if [ -n "$HEROKU_API_KEY" ] && [ -n "$APP" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "enabled=false" >> "$GITHUB_OUTPUT"
+          message="Heroku deployment is not configured: add the HEROKU_API_KEY secret and the HEROKU_APP_NAME variable (Settings → Secrets and variables → Actions)."
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
+            echo "::error::$message"
+            exit 1
+          fi
+          echo "::notice::$message"
+
+  deploy:
+    name: Deploy
+    needs: check
+    if: needs.check.outputs.enabled == 'true'
+    runs-on: ubuntu-latest
+    environment:
+      name: heroku
+      url: ${{ steps.deploy.outputs.url }}
+    env:
+      HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}
+      APP: ${{ inputs.app || vars.HEROKU_APP_NAME }}
+      REGION: ${{ vars.HEROKU_REGION || 'us' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: deploy
+        name: Build and release on Heroku
+        run: |
+          set -euo pipefail
+          api() {
+            curl -fsS -H "Accept: application/vnd.heroku+json; version=3" \
+              -H "Authorization: Bearer $HEROKU_API_KEY" \
+              -H "Content-Type: application/json" "$@"
+          }
+          info="$RUNNER_TEMP/app-info.json"
+
+          echo "::group::App $APP"
+          status=$(curl -sS -o "$info" -w '%{http_code}' \
+            -H "Accept: application/vnd.heroku+json; version=3" \
+            -H "Authorization: Bearer $HEROKU_API_KEY" \
+            "https://api.heroku.com/apps/$APP")
+          case "$status" in
+            200) echo "The app already exists." ;;
+            404)
+              echo "Creating the app in region $REGION…"
+              api -X POST https://api.heroku.com/apps \
+                -d "{\"name\":\"$APP\",\"region\":\"$REGION\",\"stack\":\"container\"}" > "$info" ;;
+            401) echo "::error::Heroku rejected the API key (HEROKU_API_KEY)."; exit 1 ;;
+            403) echo "::error::This Heroku account cannot access the app \"$APP\" (the name may belong to someone else)."; exit 1 ;;
+            *) echo "::error::Unexpected Heroku response ($status): $(cat "$info")"; exit 1 ;;
+          esac
+          if [ "$(jq -r '.build_stack.name' "$info")" != "container" ]; then
+            echo "Switching the app to the container stack (Docker)…"
+            api -X PATCH "https://api.heroku.com/apps/$APP" -d '{"build_stack":"container"}' > /dev/null
+          fi
+          echo "::endgroup::"
+
+          echo "::group::Upload the source"
+          git archive --format=tar.gz -o "$RUNNER_TEMP/source.tgz" HEAD
+          sources=$(api -X POST https://api.heroku.com/sources)
+          curl -fsS -X PUT -H "Content-Type:" --data-binary @"$RUNNER_TEMP/source.tgz" \
+            "$(jq -r '.source_blob.put_url' <<< "$sources")"
+          echo "::endgroup::"
+
+          echo "Building on Heroku (the first build takes a few minutes)…"
+          build=$(api -X POST "https://api.heroku.com/apps/$APP/builds" \
+            -d "{\"source_blob\":{\"url\":\"$(jq -r '.source_blob.get_url' <<< "$sources")\",\"version\":\"$GITHUB_SHA\"}}")
+          id=$(jq -r '.id' <<< "$build")
+          # Streams the build log until the build ends.
+          curl -sSN "$(jq -r '.output_stream_url' <<< "$build")" || true
+
+          result=pending
+          for _ in $(seq 1 180); do
+            result=$(api "https://api.heroku.com/apps/$APP/builds/$id" | jq -r '.status')
+            [ "$result" != "pending" ] && break
+            sleep 5
+          done
+          if [ "$result" != "succeeded" ]; then
+            echo "::error::The Heroku build ended with status \"$result\"."
+            exit 1
+          fi
+
+          url=$(api "https://api.heroku.com/apps/$APP" | jq -r '.web_url')
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+          echo "### 🚀 Deployed to [$url]($url)" >> "$GITHUB_STEP_SUMMARY"
+          echo "Deployed: $url"

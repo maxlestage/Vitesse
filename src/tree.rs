@@ -1,10 +1,11 @@
-//! Arbre de routage par segments (trie) avec paramètres `:nom` et joker `*`.
+//! Segment-based routing tree (trie) with `:name` parameters and `*`
+//! wildcards.
 //!
-//! La recherche ne fait aucune allocation tant que la route n'a pas de
-//! paramètre : on parcourt le chemin segment par segment, avec la priorité
-//! *statique > paramètre > joker* et un retour arrière si une branche échoue.
+//! Lookups make no allocation as long as the route has no parameters: the
+//! path is walked segment by segment, with the priority
+//! *static > parameter > wildcard*, backtracking when a branch fails.
 
-/// Un segment de motif de route.
+/// A segment of a route pattern.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Segment<'a> {
     Static(&'a str),
@@ -12,10 +13,10 @@ pub(crate) enum Segment<'a> {
     Wildcard(&'a str),
 }
 
-/// Découpe un motif comme `/users/:id/files/*path` en segments.
+/// Splits a pattern such as `/users/:id/files/*path` into segments.
 pub(crate) fn parse_pattern(pattern: &str) -> Result<Vec<Segment<'_>>, String> {
     let Some(body) = pattern.strip_prefix('/') else {
-        return Err(format!("le chemin « {pattern} » doit commencer par '/'"));
+        return Err(format!("the path '{pattern}' must start with '/'"));
     };
     let body = body.strip_suffix('/').unwrap_or(body);
     if body.is_empty() {
@@ -26,19 +27,19 @@ pub(crate) fn parse_pattern(pattern: &str) -> Result<Vec<Segment<'_>>, String> {
     let mut segments = Vec::with_capacity(parts.len());
     for (i, part) in parts.into_iter().enumerate() {
         if part.is_empty() {
-            return Err(format!("le chemin « {pattern} » contient un segment vide"));
+            return Err(format!("the path '{pattern}' contains an empty segment"));
         }
         if let Some(name) = part.strip_prefix(':') {
             if name.is_empty() || !name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_') {
                 return Err(format!(
-                    "paramètre invalide « {part} » dans « {pattern} » (lettres, chiffres et _ uniquement)"
+                    "invalid parameter '{part}' in '{pattern}' (only letters, digits and _ are allowed)"
                 ));
             }
             segments.push(Segment::Param(name));
         } else if let Some(name) = part.strip_prefix('*') {
             if i != last {
                 return Err(format!(
-                    "le joker « {part} » doit être le dernier segment de « {pattern} »"
+                    "the wildcard '{part}' must be the last segment of '{pattern}'"
                 ));
             }
             segments.push(Segment::Wildcard(if name.is_empty() { "*" } else { name }));
@@ -49,7 +50,7 @@ pub(crate) fn parse_pattern(pattern: &str) -> Result<Vec<Segment<'_>>, String> {
     Ok(segments)
 }
 
-/// Les noms des paramètres d'un motif, dans l'ordre.
+/// The names of the parameters of a pattern, in order.
 pub(crate) fn param_names(segments: &[Segment<'_>]) -> Box<[Box<str>]> {
     segments
         .iter()
@@ -60,7 +61,7 @@ pub(crate) fn param_names(segments: &[Segment<'_>]) -> Box<[Box<str>]> {
         .collect()
 }
 
-/// Positions (début, fin) des valeurs de paramètres dans le chemin.
+/// Positions (start, end) of the parameter values in the path.
 pub(crate) type Captures = Vec<(usize, usize)>;
 
 pub(crate) struct Tree<T> {
@@ -84,7 +85,7 @@ impl<T> Tree<T> {
         }
     }
 
-    /// Renvoie la valeur associée au motif, en la créant au besoin.
+    /// Returns the value associated with the pattern, creating it if needed.
     pub(crate) fn entry(
         &mut self,
         segments: &[Segment<'_>],
@@ -123,9 +124,9 @@ impl<T> Tree<T> {
         &mut values[idx]
     }
 
-    /// Cherche la route correspondant au chemin `path` (qui commence par `/`).
-    /// Les positions des paramètres sont écrites dans `captures`, un tampon
-    /// fourni par l'appelant pour éviter toute allocation.
+    /// Looks up the route matching `path` (which starts with `/`). The
+    /// positions of the parameters are written into `captures`, a buffer
+    /// provided by the caller to avoid any allocation.
     #[inline]
     pub(crate) fn find(&self, path: &str, captures: &mut Captures) -> Option<&T> {
         captures.clear();

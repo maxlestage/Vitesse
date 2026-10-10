@@ -1,4 +1,4 @@
-//! Le serveur : sockets, boucle d'acceptation, arrêt propre et runtimes.
+//! The server: sockets, accept loop, graceful shutdown and runtimes.
 
 use std::future::{Future, pending};
 use std::io;
@@ -19,14 +19,14 @@ use crate::http1::{ServerState, serve_connection};
 use crate::request::Request;
 use crate::response::Response;
 
-/// Délai laissé aux requêtes en cours lors d'un arrêt propre.
+/// Time given to in-flight requests during a graceful shutdown.
 const SHUTDOWN_GRACE: Duration = Duration::from_secs(10);
 
-/// Une adresse d'écoute : `3000`, `"127.0.0.1:8080"`, `([0, 0, 0, 0], 80)`…
+/// An address to listen on: `3000`, `"127.0.0.1:8080"`, `([0, 0, 0, 0], 80)`…
 ///
-/// Un simple numéro de port écoute sur toutes les interfaces IPv4.
+/// A bare port number listens on all IPv4 interfaces.
 pub trait ListenAddr {
-    /// Résout l'adresse.
+    /// Resolves the address.
     fn socket_addrs(self) -> io::Result<Vec<SocketAddr>>;
 }
 
@@ -39,7 +39,7 @@ impl ListenAddr for u16 {
 impl ListenAddr for i32 {
     fn socket_addrs(self) -> io::Result<Vec<SocketAddr>> {
         u16::try_from(self)
-            .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "port invalide"))?
+            .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "invalid port"))?
             .socket_addrs()
     }
 }
@@ -77,7 +77,7 @@ impl<I: Into<IpAddr>> ListenAddr for (I, u16) {
     }
 }
 
-/// Crée un socket d'écoute non bloquant.
+/// Creates a non-blocking listening socket.
 fn listener(addr: SocketAddr, reuse_port: bool) -> io::Result<std::net::TcpListener> {
     let socket = Socket::new(Domain::for_address(addr), Type::STREAM, Some(Protocol::TCP))?;
     socket.set_reuse_address(true)?;
@@ -94,9 +94,9 @@ fn listener(addr: SocketAddr, reuse_port: bool) -> io::Result<std::net::TcpListe
     Ok(socket.into())
 }
 
-/// Ouvre la première adresse qui fonctionne.
+/// Opens the first address that works.
 pub(crate) fn bind(addrs: &[SocketAddr], reuse_port: bool) -> io::Result<std::net::TcpListener> {
-    let mut last = io::Error::new(io::ErrorKind::InvalidInput, "aucune adresse d'écoute");
+    let mut last = io::Error::new(io::ErrorKind::InvalidInput, "no address to listen on");
     for &addr in addrs {
         match listener(addr, reuse_port) {
             Ok(l) => return Ok(l),
@@ -106,7 +106,7 @@ pub(crate) fn bind(addrs: &[SocketAddr], reuse_port: bool) -> io::Result<std::ne
     Err(last)
 }
 
-/// Un serveur dont le port est ouvert, prêt à démarrer.
+/// A server whose port is open, ready to start.
 ///
 /// ```no_run
 /// # use vitesse::prelude::*;
@@ -115,7 +115,7 @@ pub(crate) fn bind(addrs: &[SocketAddr], reuse_port: bool) -> io::Result<std::ne
 /// app.get("/", |_| async { "ok" });
 ///
 /// let server = app.bind("127.0.0.1:0").await?;
-/// println!("écoute sur http://{}", server.local_addr());
+/// println!("listening on http://{}", server.local_addr());
 /// server.with_graceful_shutdown(async {
 ///     tokio::signal::ctrl_c().await.ok();
 /// }).await
@@ -137,18 +137,18 @@ impl Server {
         })
     }
 
-    /// L'adresse réellement écoutée.
+    /// The address actually being listened on.
     pub fn local_addr(&self) -> SocketAddr {
         self.addr
     }
 
-    /// Sert les requêtes indéfiniment.
+    /// Serves requests forever.
     pub async fn run(self) -> io::Result<()> {
         serve(self.listener, self.app, pending()).await
     }
 
-    /// Sert les requêtes jusqu'à ce que `signal` se termine, puis laisse aux
-    /// requêtes en cours le temps de finir (10 s maximum).
+    /// Serves requests until `signal` completes, then gives in-flight
+    /// requests time to finish (10 s at most).
     pub async fn with_graceful_shutdown<F>(self, signal: F) -> io::Result<()>
     where
         F: Future<Output = ()>,
@@ -157,7 +157,7 @@ impl Server {
     }
 }
 
-/// La boucle d'acceptation.
+/// The accept loop.
 pub(crate) async fn serve(
     listener: TcpListener,
     app: &'static AppService,
@@ -212,7 +212,7 @@ fn is_transient(e: &io::Error) -> bool {
     )
 }
 
-/// Attend `Ctrl+C` ou `SIGTERM`.
+/// Waits for `Ctrl+C` or `SIGTERM`.
 pub(crate) async fn shutdown_signal() {
     let ctrl_c = async {
         let _ = tokio::signal::ctrl_c().await;
@@ -234,7 +234,7 @@ pub(crate) async fn shutdown_signal() {
     }
 }
 
-/// Lance le serveur avec son propre runtime (voir [`App::run`](crate::App::run)).
+/// Runs the server on its own runtime (see [`App::run`](crate::App::run)).
 pub(crate) fn run(
     app: &'static AppService,
     addrs: &[SocketAddr],
@@ -258,9 +258,9 @@ pub(crate) fn run(
     })
 }
 
-/// Un runtime mono-thread par cœur, chacun avec son socket `SO_REUSEPORT` :
-/// le noyau répartit les connexions, et une requête ne quitte jamais son
-/// thread.
+/// One single-threaded runtime per core, each with its own `SO_REUSEPORT`
+/// socket: the kernel spreads connections across them, and a request never
+/// leaves its thread.
 #[cfg(target_os = "linux")]
 fn run_thread_per_core(
     app: &'static AppService,
@@ -307,13 +307,13 @@ fn run_thread_per_core(
         match thread.join() {
             Ok(Ok(())) => {}
             Ok(Err(e)) => result = Err(e),
-            Err(_) => result = Err(io::Error::other("un thread du serveur a paniqué")),
+            Err(_) => result = Err(io::Error::other("a server thread panicked")),
         }
     }
     result
 }
 
-/// Le `Future` d'une réponse, qui transforme une panique en `500`.
+/// The `Future` of a response, which turns a panic into a `500`.
 pub(crate) enum ResponseFuture {
     Pending(BoxFuture<Response>),
     Ready(Option<Box<Response>>),

@@ -1,4 +1,4 @@
-//! Les routeurs (`express.Router()`), à monter sur l'application.
+//! Routers (`express.Router()`), to be mounted on the application.
 
 use std::sync::Arc;
 
@@ -7,13 +7,13 @@ use http::Method;
 use crate::handler::{Chained, Handler, Middleware};
 use crate::tree::parse_pattern;
 
-/// Une route enregistrée.
+/// A registered route.
 pub(crate) struct Route {
     pub(crate) handler: Arc<dyn Handler>,
     pub(crate) names: Box<[Box<str>]>,
 }
 
-/// Les handlers d'un même chemin, par méthode HTTP.
+/// The handlers of a single path, by HTTP method.
 #[derive(Default)]
 pub(crate) struct MethodMap {
     get: Option<Route>,
@@ -28,7 +28,7 @@ pub(crate) struct MethodMap {
 }
 
 impl MethodMap {
-    /// Enregistre une route ; renvoie `Err` si elle existe déjà.
+    /// Registers a route; returns `Err` if it already exists.
     pub(crate) fn insert(&mut self, method: Option<Method>, route: Route) -> Result<(), ()> {
         let slot = match method {
             None => &mut self.any,
@@ -54,7 +54,7 @@ impl MethodMap {
         Ok(())
     }
 
-    /// Le handler pour cette méthode (`HEAD` se rabat sur `GET`).
+    /// The handler for this method (`HEAD` falls back to `GET`).
     #[inline]
     pub(crate) fn find(&self, method: &Method) -> Option<&Route> {
         let route = match *method {
@@ -70,7 +70,7 @@ impl MethodMap {
         route.or(self.any.as_ref())
     }
 
-    /// La valeur de l'en-tête `Allow`.
+    /// The value of the `Allow` header.
     pub(crate) fn allow(&self) -> String {
         if self.any.is_some() {
             return "GET, HEAD, POST, PUT, PATCH, DELETE, OPTIONS".into();
@@ -100,7 +100,7 @@ impl MethodMap {
     }
 }
 
-/// Concatène un préfixe de montage et un chemin de route.
+/// Joins a mount prefix and a route path.
 pub(crate) fn join_paths(prefix: &str, path: &str) -> String {
     let prefix = prefix.trim_end_matches('/');
     let mut out = String::with_capacity(prefix.len() + path.len() + 1);
@@ -114,10 +114,10 @@ pub(crate) fn join_paths(prefix: &str, path: &str) -> String {
     out
 }
 
-/// Génère les méthodes de routage communes à [`App`](crate::App) et [`Router`].
+/// Generates the routing methods shared by [`App`](crate::App) and [`Router`].
 macro_rules! routing_methods {
     () => {
-        /// Route `GET` (`app.get(path, handler)`).
+        /// Adds a `GET` route (`app.get(path, handler)`).
         #[track_caller]
         pub fn get<H: $crate::Handler>(&mut self, path: &str, handler: H) -> &mut Self {
             self.add_route(
@@ -128,7 +128,7 @@ macro_rules! routing_methods {
             self
         }
 
-        /// Route `POST`.
+        /// Adds a `POST` route.
         #[track_caller]
         pub fn post<H: $crate::Handler>(&mut self, path: &str, handler: H) -> &mut Self {
             self.add_route(
@@ -139,7 +139,7 @@ macro_rules! routing_methods {
             self
         }
 
-        /// Route `PUT`.
+        /// Adds a `PUT` route.
         #[track_caller]
         pub fn put<H: $crate::Handler>(&mut self, path: &str, handler: H) -> &mut Self {
             self.add_route(
@@ -150,7 +150,7 @@ macro_rules! routing_methods {
             self
         }
 
-        /// Route `PATCH`.
+        /// Adds a `PATCH` route.
         #[track_caller]
         pub fn patch<H: $crate::Handler>(&mut self, path: &str, handler: H) -> &mut Self {
             self.add_route(
@@ -161,7 +161,7 @@ macro_rules! routing_methods {
             self
         }
 
-        /// Route `DELETE`.
+        /// Adds a `DELETE` route.
         #[track_caller]
         pub fn delete<H: $crate::Handler>(&mut self, path: &str, handler: H) -> &mut Self {
             self.add_route(
@@ -172,7 +172,8 @@ macro_rules! routing_methods {
             self
         }
 
-        /// Route `HEAD` (par défaut, `HEAD` utilise déjà la route `GET`).
+        /// Adds a `HEAD` route (by default, `HEAD` already uses the `GET`
+        /// route).
         #[track_caller]
         pub fn head<H: $crate::Handler>(&mut self, path: &str, handler: H) -> &mut Self {
             self.add_route(
@@ -183,7 +184,8 @@ macro_rules! routing_methods {
             self
         }
 
-        /// Route `OPTIONS` (par défaut, `OPTIONS` répond `204` avec `Allow`).
+        /// Adds an `OPTIONS` route (by default, `OPTIONS` answers `204` with
+        /// `Allow`).
         #[track_caller]
         pub fn options<H: $crate::Handler>(&mut self, path: &str, handler: H) -> &mut Self {
             self.add_route(
@@ -194,14 +196,14 @@ macro_rules! routing_methods {
             self
         }
 
-        /// Route pour toutes les méthodes (`app.all(path, handler)`).
+        /// Adds a route for every method (`app.all(path, handler)`).
         #[track_caller]
         pub fn all<H: $crate::Handler>(&mut self, path: &str, handler: H) -> &mut Self {
             self.add_route(None, path, ::std::sync::Arc::new(handler));
             self
         }
 
-        /// Route pour une méthode quelconque.
+        /// Adds a route for an arbitrary method.
         #[track_caller]
         pub fn route<H: $crate::Handler>(
             &mut self,
@@ -213,9 +215,9 @@ macro_rules! routing_methods {
             self
         }
 
-        /// Monte un [`Router`](crate::Router) sous un préfixe
-        /// (`app.use('/api', router)`). Ses middlewares ne s'appliquent qu'à
-        /// ses propres routes.
+        /// Mounts a [`Router`](crate::Router) under a prefix
+        /// (`app.use('/api', router)`). Its middlewares only apply to its own
+        /// routes.
         #[track_caller]
         pub fn mount(&mut self, prefix: &str, router: $crate::Router) -> &mut Self {
             for (method, path, handler) in router.into_routes() {
@@ -224,10 +226,10 @@ macro_rules! routing_methods {
             self
         }
 
-        /// Sert les fichiers d'un dossier sous un préfixe
+        /// Serves the files of a directory under a prefix
         /// (`app.use('/static', express.static('public'))`).
         ///
-        /// Pour plus d'options, montez un [`ServeDir`](crate::ServeDir) avec
+        /// For more options, mount a [`ServeDir`](crate::ServeDir) with
         /// [`serve_dir`](Self::serve_dir).
         #[track_caller]
         pub fn static_dir(
@@ -238,7 +240,7 @@ macro_rules! routing_methods {
             self.serve_dir(prefix, $crate::ServeDir::new(dir))
         }
 
-        /// Sert les fichiers d'un [`ServeDir`](crate::ServeDir) configuré.
+        /// Serves the files of a configured [`ServeDir`](crate::ServeDir).
         #[track_caller]
         pub fn serve_dir(&mut self, prefix: &str, dir: $crate::ServeDir) -> &mut Self {
             let path = $crate::router::join_paths(prefix, "/*");
@@ -252,7 +254,7 @@ macro_rules! routing_methods {
 
 pub(crate) use routing_methods;
 
-/// Un groupe de routes avec ses propres middlewares (`express.Router()`).
+/// A group of routes with its own middlewares (`express.Router()`).
 ///
 /// ```
 /// use vitesse::prelude::*;
@@ -276,14 +278,14 @@ pub struct Router {
 }
 
 impl Router {
-    /// Un routeur vide.
+    /// Creates an empty router.
     pub fn new() -> Self {
         Router::default()
     }
 
     routing_methods!();
 
-    /// Ajoute un middleware à toutes les routes de ce routeur.
+    /// Adds a middleware to every route of this router.
     pub fn middleware<M: Middleware>(&mut self, middleware: M) -> &mut Self {
         self.middlewares.push(Arc::new(middleware));
         self
@@ -292,12 +294,12 @@ impl Router {
     #[track_caller]
     fn add_route(&mut self, method: Option<Method>, path: &str, handler: Arc<dyn Handler>) {
         if let Err(e) = parse_pattern(path) {
-            panic!("route invalide : {e}");
+            panic!("invalid route: {e}");
         }
         self.routes.push((method, path.to_owned(), handler));
     }
 
-    /// Les routes, enveloppées dans les middlewares du routeur.
+    /// The routes, wrapped in the router's middlewares.
     pub(crate) fn into_routes(self) -> Vec<(Option<Method>, String, Arc<dyn Handler>)> {
         let Router {
             routes,

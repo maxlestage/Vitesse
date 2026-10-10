@@ -104,6 +104,8 @@ Los reproductores de vídeo y audio, y los gestores de descargas, piden trozos d
 | un rango más allá del final del archivo | `416 Range Not Satisfiable` con `Content-Range: bytes */1234` |
 | varios rangos (`bytes=0-1,5-6`) | el archivo completo, `200` |
 
+Para reanudar una descarga, un cliente puede añadir `If-Range`: el rango solo se sirve si `If-Range` es igual a la fecha `Last-Modified` del archivo. Si no, el archivo ha cambiado y se envía completo con un `200`. Los ETag de Vitesse son débiles, así que un ETag en `If-Range` nunca coincide y también recibe el archivo completo.
+
 ## Archivos grandes
 
 Los archivos de hasta 256 KiB se leen de una vez; los más grandes se envían por partes de 64 KiB, con su `Content-Length` exacto. Así, el uso de memoria se mantiene constante, incluso con un vídeo de varios gigabytes. Para una petición `HEAD`, solo se envían las cabeceras.
@@ -141,7 +143,7 @@ Vitesse no comprime las respuestas (gzip, brotli). En producción, pon un proxy 
 
 ## Enviar un archivo concreto
 
-Para enviar un archivo concreto desde un handler, usa `res::file(ruta).await`, o `res::download(ruta, nombre).await` para forzar una descarga (ver [Responder](responses.md)). A diferencia de `ServeDir`, estos helpers no conocen la petición: siempre envían el archivo completo con un `200` e ignoran las cabeceras `Range`, `If-None-Match` e `If-Modified-Since`.
+Para enviar un archivo concreto desde un handler, usa `res::file(ruta).await`, o `res::download(ruta, nombre).await` para forzar una descarga (ver [Responder](responses.md)). Como `res.sendFile` en Express, estos helpers gestionan la caché y los rangos exactamente igual que `ServeDir`: cabeceras `ETag` y `Last-Modified`, `304 Not Modified`, `206 Partial Content` (con `If-Range`) y `416`, como se describe más arriba. `res::download` conserva su cabecera `Content-Disposition: attachment` también en las respuestas parciales. Solo la duración de la caché no se puede configurar: siempre envían `max-age=0`.
 
 ## Aplicaciones de una sola página (SPA)
 

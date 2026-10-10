@@ -105,7 +105,7 @@ app.get("/config", |_| async {
 | Corps plus gros que `app.body_limit` | `413 Payload Too Large` |
 | Aucune route ne correspond | `404`, `{"error":"Cannot GET /chemin"}` |
 | Le chemin existe, mais pas pour cette méthode | `405 Method Not Allowed`, avec un en-tête `Allow` |
-| Un handler panique | `500 Internal Server Error` |
+| Un handler ou un middleware panique | `500 Internal Server Error` |
 | `middleware::timeout` expire | `503`, `request timed out` |
 
 ## Vos propres types d'erreur
@@ -234,13 +234,16 @@ app.fallback(|req: Request| async move {
 });
 ```
 
-Les middlewares globaux s'exécutent aussi pour le handler de repli. Il n'est pas appelé quand le chemin existe avec une autre méthode (c'est un `405`). S'il renvoie une `Error`, la réponse passe par `on_error`. Pour les applications monopages, voir [Fichiers statiques](static-files.md).
+Les middlewares globaux s'exécutent aussi pour le handler de repli, tout comme ceux d'un [routeur](routers.md) dont le préfixe couvre le chemin. Il n'est pas appelé quand le chemin existe avec une autre méthode (c'est un `405`). S'il renvoie une `Error`, la réponse passe par `on_error`. Pour les applications monopages, voir [Fichiers statiques](static-files.md).
 
 ## Les paniques
 
-Une panique dans un handler (un `unwrap()` sur `None`, un indice hors limites, `req.state::<T>()` pour un type jamais enregistré…) ne fait pas tomber le serveur : Vitesse la rattrape et répond `500 {"error":"Internal Server Error"}`. Rust affiche le message de la panique sur la sortie d'erreur, les autres requêtes continuent normalement, et le `500` traverse vos middlewares et `on_error` comme n'importe quelle autre erreur.
+Une panique dans un handler ou dans un middleware (un `unwrap()` sur `None`, un indice hors limites, `req.state::<T>()` pour un type jamais enregistré…) ne fait pas tomber le serveur : Vitesse la rattrape et répond `500 {"error":"Internal Server Error"}`. Rust affiche le message de la panique sur la sortie d'erreur, les autres requêtes continuent normalement, et le `500` repasse par les middlewares qui l'entourent (les en-têtes CORS, par exemple, sont conservés) et par `on_error`, comme n'importe quelle autre erreur.
 
 Préférez malgré tout `?` et des erreurs explicites : une panique est un bug, pas une façon de répondre.
 
 > [!WARNING]
-> Les paniques ne peuvent être rattrapées qu'avec la stratégie par défaut (*unwinding*). Avec `panic = "abort"` dans un `[profile]` de votre `Cargo.toml`, une panique arrête tout le processus. Par ailleurs, une panique survenue dans un *middleware* est rattrapée tout en haut de la chaîne : le client reçoit bien un `500`, mais les middlewares extérieurs et `on_error` ne s'exécutent pas pour cette requête.
+> Les paniques ne peuvent être rattrapées qu'avec la stratégie par défaut (*unwinding*). Avec `panic = "abort"` dans un `[profile]` de votre `Cargo.toml`, une panique arrête tout le processus.
+
+> [!NOTE]
+> Cela vaut pour les middlewares écrits sous forme de closure ou d'`async fn`, qu'ils soient ajoutés avec `app.middleware`, `router.middleware` ou `.with`. Seule exception : un `impl Middleware for MonType` écrit à la main qui panique. La panique est alors rattrapée plus haut, tout en haut de la chaîne si aucun middleware closure ou `async fn` ne l'entoure, et le client reçoit un simple `500 {"error":"Internal Server Error"}` qui ne passe pas par `on_error`.

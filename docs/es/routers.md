@@ -42,7 +42,7 @@ Las rutas se combinan como esperas: la `/` del router se convierte en `/users`, 
 
 ## Los middlewares de un router
 
-`router.middleware(...)` añade un middleware a **todas las rutas de ese router**, y solo a ellas:
+`router.middleware(...)` añade un middleware a **todas las rutas de ese router** y, como `router.use()` en Express, a cualquier otra petición bajo su prefijo:
 
 ```rust
 async fn require_token(req: Request, next: Next) -> Response {
@@ -62,8 +62,29 @@ app.get("/", |_| async { "página de inicio pública" }); // no afectado
 
 Para una petición, el orden es: middlewares globales (`app.middleware`), luego los middlewares del router en el orden en que se añadieron, luego los de la ruta (`.with`) y por último el handler. El middleware de un router se aplica a todas sus rutas, se haya añadido antes o después de ellas, siempre que se añada antes de `mount`.
 
-> [!NOTE]
-> Los middlewares de un router solo se ejecutan para las peticiones que coinciden con una de sus rutas. Una petición a `/admin/desconocido` recibe el `404` de la aplicación sin pasar por `require_token`, mientras que en Express un middleware añadido con `router.use()` se ejecuta para toda petición que entra en el router.
+### Peticiones a las que no responde ninguna ruta
+
+Los middlewares de un router también se ejecutan para las peticiones bajo su prefijo a las que no responde ninguna de sus rutas: el `404` (o tu `app.fallback`), el `405 Method Not Allowed` y la respuesta automática a `OPTIONS` (`204` con `Allow`). En el ejemplo anterior, `GET /admin/desconocido` también pasa por `require_token`: sin token, el visitante recibe un `401` y ni siquiera sabe si la página existe.
+
+Gracias a esto, un logger o CORS en un router funcionan como cabe esperar:
+
+```rust
+let mut api = Router::new();
+api.middleware(middleware::logger()); // registra también los 404 bajo /api
+api.middleware(middleware::cors());   // responde también a las peticiones preliminares de /api/users
+api.post("/users", |_| async { (201, "creado") });
+
+app.mount("/api", api);
+```
+
+Antes de un `POST /api/users` desde otro origen, el navegador envía una petición preliminar `OPTIONS /api/users`: `cors()` la responde con un `204` y las cabeceras CORS. Un `GET /api/nope` se registra y luego recibe su `404`.
+
+Algunos detalles:
+
+- El prefijo se compara segmento a segmento: un router montado en `/api` cubre `/api` y `/api/...`, pero no `/apix`.
+- Los middlewares globales (`app.middleware`) siguen ejecutándose primero, para todas las peticiones. Con routers anidados, vienen después los middlewares del router exterior y luego los del interior.
+- Si un middleware del router reescribe la ruta de una de estas peticiones con `req.set_uri(...)`, el enrutamiento se repite con la nueva ruta.
+- Un prefijo puede contener parámetros: un router montado en `/users/:user_id/posts` cubre `/users/42/posts/...`, sea cual sea el valor de `:user_id`.
 
 ## Anidar routers
 

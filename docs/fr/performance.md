@@ -18,7 +18,10 @@ Requêtes par seconde, et entre parenthèses le temps CPU consommé par le serve
 - **Contre actix-web**, le framework Rust réputé le plus rapide : jusqu'à **+62 %** de débit avec une vraie requête de navigateur, +45 à +49 % avec des paramètres ou un corps JSON, **2,2 fois plus** en pipeline, et 15 à 59 % de CPU en moins par requête.
 - **Contre axum** : de 1,7 à 2,4 fois plus de requêtes par seconde, deux fois moins de CPU par requête, et 13 fois plus en pipeline.
 - **Contre Drogon (C++)** : de 1,4 à 3,8 fois plus rapide.
-- **Contre Express** : environ 50 fois plus rapide (et toujours 25 fois plus face à Express en cluster sur les mêmes 2 cœurs).
+- **Contre Express** : environ 50 fois plus rapide.
+
+> [!NOTE]
+> Les chiffres d'Express (Express 5.3.0 sur Node 22.22) ont été mesurés dans la même session que les autres. Le serveur Express a depuis été retiré du dépôt pour que le projet reste 100 % Rust, sans JavaScript : il reste dans l'historique git (`git show 484eed3:bench/express/server.js`), et l'outil de benchmark compare désormais Drogon, axum, actix-web et Vitesse.
 
 ### Pourquoi l'écart avec actix est-il plus faible sur `GET /` ?
 
@@ -36,15 +39,15 @@ Les mesures varient de quelques pourcents d'une exécution à l'autre.
 
 ## Reproduire le benchmark
 
-Le script et le code de chaque serveur se trouvent dans [`bench/`](https://github.com/maxlestage/Vitesse/blob/master/bench/run.sh) (le serveur Vitesse est [`examples/bench.rs`](https://github.com/maxlestage/Vitesse/blob/master/examples/bench.rs)). Il vous faut Linux (le script utilise `taskset` et `/proc`), Rust, [wrk](https://github.com/wg/wrk), Node.js, `curl` et Python 3. Drogon est facultatif : s'il n'est pas installé, il est ignoré (indiquez son dossier d'installation avec `DROGON_PREFIX` si besoin).
+L'outil de benchmark est un petit programme Rust, [`bench/runner`](https://github.com/maxlestage/Vitesse/blob/master/bench/runner/src/main.rs), et le code de chaque serveur se trouve dans [`bench/`](https://github.com/maxlestage/Vitesse/tree/master/bench) (le serveur Vitesse est [`examples/bench.rs`](https://github.com/maxlestage/Vitesse/blob/master/examples/bench.rs)). Il vous faut Linux (l'outil utilise `taskset` et lit `/proc`), Rust et [wrk](https://github.com/wg/wrk). Drogon est facultatif : s'il est installé, l'outil compile son serveur depuis `bench/drogon` avec CMake (indiquez son dossier d'installation avec `DROGON_PREFIX` si besoin) ; sinon, il est ignoré.
 
 ```sh
-bench/run.sh               # 10 s par scénario, 128 connexions
-bench/run.sh 30s 256       # durée et nombre de connexions personnalisés
-SERVER_CPUS=0,1,2,3 CLIENT_CPUS=4,5,6,7 bench/run.sh   # sur une machine à 8 cœurs
+cargo run --release --manifest-path bench/runner/Cargo.toml              # 10 s par scénario, 128 connexions
+cargo run --release --manifest-path bench/runner/Cargo.toml -- 30s 256   # durée et nombre de connexions personnalisés
+SERVER_CPUS=0-3 CLIENT_CPUS=4-7 cargo run --release --manifest-path bench/runner/Cargo.toml   # sur une machine à 8 cœurs
 ```
 
-Le script compile tout en mode release, lance chaque serveur à tour de rôle (Express, Express en cluster, Drogon, axum, actix-web, Vitesse) et affiche les résultats sous forme de tableau Markdown. Listez les processeurs en les séparant par des virgules : leur nombre fixe aussi le nombre de threads des serveurs.
+L'outil compile chaque serveur en mode release, les lance l'un après l'autre (Drogon, axum, actix-web, Vitesse) en épinglant le serveur et wrk sur des cœurs distincts, joue les six scénarios (les scripts wrk sont dans `bench/lua/`) et affiche les résultats sous forme de tableau Markdown, avec le temps CPU du serveur par requête lu dans `/proc`. `SERVER_CPUS` (par défaut `0,1`) et `CLIENT_CPUS` (par défaut `2,3`) acceptent des listes au format de `taskset`, comme `0,1`, `0-3` ou `0-1,4` ; le nombre de processeurs du serveur fixe aussi le nombre de threads du serveur et de wrk. Pour utiliser un autre binaire wrk, indiquez `WRK=/chemin/vers/wrk`.
 
 Pour essayer rapidement Vitesse seul :
 

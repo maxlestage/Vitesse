@@ -27,7 +27,7 @@ Si Rust était déjà installé, mettez-le à jour :
 rustup update
 ```
 
-`cargo` est l'outil de build et le gestionnaire de paquets de Rust. Il fait le travail de `npm` (dépendances, lancement du projet) et pilote aussi le compilateur.
+`cargo` est l'outil de build et le gestionnaire de paquets de Rust : comme le gestionnaire de paquets d'un projet Node.js, il gère les dépendances et lance le projet, et il pilote aussi le compilateur.
 
 ## Créer un projet
 

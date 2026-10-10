@@ -53,8 +53,7 @@ each request (lower is better):
 - **Against axum**: 1.7 to 2.4 times more requests per second, half the CPU
   per request, and 13 times more with pipelining.
 - **Against Drogon (C++)**: 1.4 to 3.8 times faster.
-- **Against Express**: about 50 times faster (and still 25 times faster than
-  Express in cluster mode on the same 2 cores).
+- **Against Express**: about 50 times faster.
 
 **Why is the gap with actix smaller on `GET /`?** On the simplest request,
 every fast server hits the same floor: about 4.7 µs of kernel work per
@@ -73,7 +72,12 @@ and same session for all. Node 22.22 / Express 5.3.0, Drogon 1.9.13 (GCC 13,
 Without pipelining, the fastest servers saturate wrk: the CPU time per
 request, measured on the server side, is then the most reliable judge.
 Results vary by a few percent from one run to the next. To reproduce:
-`bench/run.sh` (server code in `bench/`).</sub>
+`cargo run --release --manifest-path bench/runner/Cargo.toml` (server
+code in `bench/`). The Express server, measured in the same session, has
+since been removed from the repository to keep the project 100% Rust, with
+no JavaScript: it is still in the git history
+(`git show 484eed3:bench/express/server.js`), and the runner now compares
+Drogon, axum, actix-web and Vitesse.</sub>
 
 ## Installation
 
@@ -235,7 +239,7 @@ cargo run --release --example hello      # Hello World
 cargo run --release --example rest_api   # complete CRUD API
 cargo run --release --example demo       # the demo app deployed on Heroku (reads $PORT)
 cargo test                               # unit, integration and doc tests
-bench/run.sh                             # benchmark (wrk, Node.js, and Drogon if installed)
+cargo run --release --manifest-path bench/runner/Cargo.toml   # benchmark (Linux, wrk, and Drogon if installed)
 docker build -t vitesse-demo . && docker run --rm -p 8080:8080 vitesse-demo
 ```
 
@@ -265,6 +269,10 @@ cargo fmt --check
 cargo clippy --all-targets -- -D warnings
 cargo test
 ```
+
+The benchmark runner ([`bench/runner`](bench/runner)) and the website
+([`site/`](site)) are separate crates, outside the main build: if you change
+them, also run `cargo test` in their folder.
 
 The documentation lives in [`docs/`](docs) in English, French and Spanish:
 when you change a page, please update the other languages too, or mention

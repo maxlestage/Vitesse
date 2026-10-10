@@ -208,16 +208,15 @@ Un reinicio dura una fracción de segundo, pero las conexiones que lleguen en es
 
 ## Apagado ordenado
 
-`app.run` vigila `Ctrl+C` (`SIGINT`) y `SIGTERM`, que systemd, Docker, Kubernetes o Heroku envían antes de detener una aplicación. Entonces Vitesse:
+`app.run`, `app.listen(port).await` y `Server::run` vigilan `Ctrl+C` (`SIGINT`) y `SIGTERM`, que systemd, Docker, Kubernetes o Heroku envían antes de detener una aplicación. Entonces Vitesse:
 
 1. deja de aceptar conexiones nuevas;
 2. deja terminar las peticiones en curso durante **10 segundos** como máximo;
-3. cierra las conexiones restantes y `app.run` retorna.
+3. cierra las conexiones restantes y `app.run` (o `app.listen`) retorna.
 
 Este periodo de gracia de 10 segundos es fijo. Asegúrate de que tu plataforma espera algo más antes de matar el proceso: systemd espera 90 segundos por defecto (`TimeoutStopSec`), Kubernetes 30 segundos (`terminationGracePeriodSeconds`), Heroku 30 segundos, pero Docker solo 10 segundos (usa `--stop-timeout 15`).
 
-> [!NOTE]
-> `app.listen(port).await`, usado dentro de tu propio runtime de tokio, **no** vigila las señales: sirve indefinidamente. En ese caso, abre el puerto con `app.bind` y pasa tu propia señal de apagado a `with_graceful_shutdown`.
+Para ejecutar tu propio código cuando llega la señal (una línea de registro, vaciar un búfer), o para detenerte con otro evento, abre el puerto con `app.bind` y pasa tu propio futuro a `with_graceful_shutdown`. Sustituye a `Ctrl+C` y `SIGTERM`, así que inclúyelos si todavía los necesitas:
 
 ```rust
 use tokio::signal::unix::{SignalKind, signal};
@@ -260,7 +259,7 @@ Si la aplicación depende de una base de datos, añade una ruta aparte (por ejem
 
 - `middleware::logger()` escribe una línea por petición en la salida estándar, como `GET /users/42 200 0.084 ms`. Solo usa colores cuando la salida es una terminal, así los registros de journald, Docker y las plataformas quedan limpios.
 - Cuando un error `5xx` tiene una causa (un error de Rust convertido con `?`, o `Error::with_source`), esa causa se imprime en la salida de error con el prefijo `[vitesse]`; el cliente solo recibe un mensaje genérico.
-- Un pánico en un handler se convierte en un `500`, y Rust imprime el mensaje del pánico en la salida de error.
+- Un pánico en un handler o en un middleware se convierte en un `500`, y Rust imprime el mensaje del pánico en la salida de error.
 
 ¿Necesitas registros JSON para un recolector? Escribe tu propio middleware (consulta [Middlewares](middleware.md)):
 

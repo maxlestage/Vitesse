@@ -42,7 +42,7 @@ Paths are joined the way you'd expect: the router's `/` becomes `/users`, `/:id`
 
 ## Router middleware
 
-`router.middleware(...)` adds a middleware to **all the routes of that router**, and only to them:
+`router.middleware(...)` adds a middleware to **all the routes of that router** and, as with `router.use()` in Express, to every other request under its prefix:
 
 ```rust
 async fn require_token(req: Request, next: Next) -> Response {
@@ -62,8 +62,29 @@ app.get("/", |_| async { "public home page" });  // not affected
 
 For a request, the order is: global middleware (`app.middleware`), then router middleware in the order it was added, then route middleware (`.with`), then the handler. A router's middleware applies to all its routes, whether it was added before or after them, as long as it's added before `mount`.
 
-> [!NOTE]
-> Router middleware only runs for requests that match one of its routes. A request to `/admin/unknown` gets the application's `404` without going through `require_token`, whereas in Express a middleware added with `router.use()` runs for every request that enters the router.
+### Requests that no route answers
+
+Router middleware also runs for the requests under the router's prefix that none of its routes answers: the `404` (or your `app.fallback`), the `405 Method Not Allowed` and the automatic `OPTIONS` response (`204` with `Allow`). In the example above, `GET /admin/unknown` goes through `require_token` too: without a token, the visitor gets a `401` and doesn't even learn whether the page exists.
+
+This is what makes a logger or CORS on a router work as you would expect:
+
+```rust
+let mut api = Router::new();
+api.middleware(middleware::logger()); // also logs the 404s under /api
+api.middleware(middleware::cors());   // also answers the preflights of /api/users
+api.post("/users", |_| async { (201, "created") });
+
+app.mount("/api", api);
+```
+
+Before a cross-origin `POST /api/users`, the browser sends an `OPTIONS /api/users` preflight: `cors()` answers it with a `204` and the CORS headers. A `GET /api/nope` is logged, then gets its `404`.
+
+A few details:
+
+- The prefix is matched segment by segment: a router mounted at `/api` covers `/api` and `/api/...`, but not `/apix`.
+- Global middleware (`app.middleware`) still runs first, for every request. With nested routers, the outer router's middleware then runs first, followed by the inner router's.
+- If a router middleware rewrites the path of such a request with `req.set_uri(...)`, routing runs again on the new path.
+- A prefix can contain parameters: a router mounted at `/users/:user_id/posts` covers `/users/42/posts/...` whatever the value of `:user_id`.
 
 ## Nesting routers
 

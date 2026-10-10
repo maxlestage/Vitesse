@@ -104,6 +104,8 @@ Les lecteurs vidéo et audio, ainsi que les gestionnaires de téléchargement, d
 | une plage au-delà de la fin du fichier | `416 Range Not Satisfiable` avec `Content-Range: bytes */1234` |
 | plusieurs plages (`bytes=0-1,5-6`) | le fichier entier, `200` |
 
+Pour reprendre un téléchargement, un client peut ajouter `If-Range` : la plage n'est alors servie que si `If-Range` est égal à la date `Last-Modified` du fichier. Sinon, le fichier a changé, et il est envoyé en entier avec un `200`. Les ETag de Vitesse sont faibles : un ETag dans `If-Range` ne correspond donc jamais, et donne lui aussi le fichier entier.
+
 ## Les gros fichiers
 
 Les fichiers jusqu'à 256 Kio sont lus d'un coup ; les plus gros sont envoyés en flux, par morceaux de 64 Kio, avec leur `Content-Length` exact. La mémoire utilisée reste donc constante, même pour une vidéo de plusieurs gigaoctets. Pour une requête `HEAD`, seuls les en-têtes sont envoyés.
@@ -141,7 +143,7 @@ Vitesse ne compresse pas les réponses (gzip, brotli). En production, placez un 
 
 ## Envoyer un fichier précis
 
-Pour envoyer un fichier précis depuis un handler, utilisez `res::file(chemin).await`, ou `res::download(chemin, nom).await` pour déclencher un téléchargement (voir [Répondre](responses.md)). Contrairement à `ServeDir`, ces helpers ne connaissent pas la requête : ils envoient toujours le fichier entier avec un `200`, et ignorent les en-têtes `Range`, `If-None-Match` et `If-Modified-Since`.
+Pour envoyer un fichier précis depuis un handler, utilisez `res::file(chemin).await`, ou `res::download(chemin, nom).await` pour déclencher un téléchargement (voir [Répondre](responses.md)). Comme `res.sendFile` en Express, ces helpers gèrent le cache et les plages exactement comme `ServeDir` : en-têtes `ETag` et `Last-Modified`, `304 Not Modified`, `206 Partial Content` (avec `If-Range`) et `416`, comme décrit plus haut. `res::download` conserve son en-tête `Content-Disposition: attachment` sur les réponses partielles aussi. Seule la durée de cache n'est pas configurable : ils envoient toujours `max-age=0`.
 
 ## Les applications monopages (SPA)
 

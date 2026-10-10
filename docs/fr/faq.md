@@ -10,6 +10,15 @@ Vitesse est jeune (version 0.1), mais son moteur a été pensé pour la producti
 
 D'ici la version 1.0, l'API peut encore évoluer d'une version mineure à l'autre. Dépendez de `vitesse = "0.1"` (Cargo n'installe alors que les mises à jour compatibles `0.1.x`), lisez le [journal des modifications](https://github.com/maxlestage/Vitesse/blob/master/CHANGELOG.md) avant de mettre à jour, placez un reverse proxy devant pour le HTTPS (voir [Production](production.md)), et faites des tests de charge avec votre propre trafic.
 
+### Le projet est-il vraiment 100 % Rust ?
+
+Oui : le framework, les exemples, l'outil de benchmark (`bench/runner`) et le site (écrit avec [Yew](https://yew.rs) et compilé en WebAssembly) sont en Rust, et le dépôt ne contient ni JavaScript ni TypeScript. Deux nuances, pour être précis :
+
+- un navigateur ne peut pas démarrer du WebAssembly sans quelques lignes de JavaScript : la compilation du site (Trunk et wasm-bindgen) génère donc automatiquement un petit fichier de chargement, qui n'est ni écrit à la main ni stocké dans le dépôt ;
+- la documentation montre des extraits Express (JavaScript), mais uniquement en guise de comparaison avant/après pour les personnes qui viennent d'Express.
+
+Le benchmark mesure aussi des serveurs écrits dans d'autres langages, puisque c'est tout l'intérêt de la comparaison : le serveur Drogon est en C++ (`bench/drogon`), et wrk, qui génère la charge, exécute des scripts de scénario écrits en Lua (`bench/lua`).
+
 ### Pourquoi pas actix-web ou axum ?
 
 Ce sont deux excellents frameworks, matures. Vitesse est un bon choix si :
@@ -33,7 +42,7 @@ Rust 1.85 ou plus récent (l'édition 2024), comme l'indique `rust-version` dans
 
 ### Fonctionne-t-il sous Windows et macOS ?
 
-Oui : la suite de tests tourne sous Linux, macOS et Windows. Le mode un thread par cœur (une boucle d'événements et un socket `SO_REUSEPORT` par cœur) est une optimisation propre à Linux ; sur les autres systèmes, `app.run` utilise le runtime multi-thread de tokio, un peu moins rapide mais avec exactement la même API. `Ctrl+C` arrête proprement le serveur partout, `SIGTERM` sous Unix. Le script de benchmark (`bench/run.sh`) ne fonctionne que sous Linux.
+Oui : la suite de tests tourne sous Linux, macOS et Windows. Le mode un thread par cœur (une boucle d'événements et un socket `SO_REUSEPORT` par cœur) est une optimisation propre à Linux ; sur les autres systèmes, `app.run` utilise le runtime multi-thread de tokio, un peu moins rapide mais avec exactement la même API. `Ctrl+C` arrête proprement le serveur partout, `SIGTERM` sous Unix. L'outil de benchmark (`bench/runner`) ne fonctionne que sous Linux.
 
 ## Fonctionnalités
 
@@ -55,7 +64,7 @@ Non intégrés, comme Express sans moteur de vues. Utilisez le crate de template
 
 ### Comment utiliser une base de données ?
 
-Avec n'importe quel pilote asynchrone (par exemple [sqlx](https://crates.io/crates/sqlx)). Créez le pool de connexions une seule fois au démarrage, enregistrez-le avec `app.state(pool)` et lisez-le dans les handlers avec `req.state::<Pool>()`. La création d'un pool étant généralement asynchrone, démarrez le serveur avec `#[tokio::main]` et `app.listen` (ou `app.bind` pour un arrêt propre), comme le montre [Configuration du serveur](server.md).
+Avec n'importe quel pilote asynchrone (par exemple [sqlx](https://crates.io/crates/sqlx)). Créez le pool de connexions une seule fois au démarrage, enregistrez-le avec `app.state(pool)` et lisez-le dans les handlers avec `req.state::<Pool>()`. La création d'un pool étant généralement asynchrone, démarrez le serveur avec `#[tokio::main]` et `app.listen` (qui s'arrête proprement, tout comme `app.run`), comme le montre [Configuration du serveur](server.md).
 
 ### Les envois de fichiers (multipart) ?
 

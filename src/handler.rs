@@ -55,8 +55,9 @@ where
 }
 
 pin_project_lite::pin_project! {
-    /// Converts the output of a handler into a [`Response`] and turns a
-    /// panic into a `500` (with no extra allocation).
+    /// Converts the output of a handler (or of a middleware) into a
+    /// [`Response`] and turns a panic into a `500` (with no extra
+    /// allocation).
     struct HandlerFuture<Fut> {
         #[pin]
         fut: Fut,
@@ -116,8 +117,12 @@ where
 {
     #[inline]
     fn handle(&'static self, req: Request, next: Next) -> BoxFuture<Response> {
-        let fut = self(req, next);
-        Box::pin(async move { fut.await.into_response() })
+        // Comme pour les handlers : une panique devient une réponse 500, qui
+        // repasse par les middlewares extérieurs et par `app.on_error`.
+        match catch_unwind(AssertUnwindSafe(|| self(req, next))) {
+            Ok(fut) => Box::pin(HandlerFuture { fut }),
+            Err(_) => Box::pin(std::future::ready(panic_response())),
+        }
     }
 }
 

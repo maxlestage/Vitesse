@@ -101,7 +101,7 @@ app.get("/", handler);
 // a (aller) → b (aller) → handler → b (retour) → a (retour)
 ```
 
-La chaîne complète d'une requête est : **middlewares globaux → middlewares du [routeur](routers.md) → middlewares de la route (`.with`) → handler**.
+La chaîne complète d'une requête est : **middlewares globaux → middlewares du [routeur](routers.md) → middlewares de la route (`.with`) → handler**. Les middlewares d'un routeur s'exécutent aussi, après les middlewares globaux, pour les requêtes sous son préfixe auxquelles aucune route ne répond : le `404`, le `405` et l'`OPTIONS` automatique (voir [Routeurs et sous-applications](routers.md#les-requêtes-auxquelles-aucune-route-ne-répond)).
 
 > [!IMPORTANT]
 > Contrairement à `app.use()` en Express, la position de `app.middleware(...)` par rapport à vos routes n'a pas d'importance : un middleware global enveloppe **toutes** les requêtes, y compris les routes déclarées avant lui, les `404` et les `405`. Le gestionnaire [`app.on_error`](errors.md) est toujours la couche la plus externe.
@@ -137,7 +137,7 @@ app.get("/dashboard", dashboard.with(auth));
 app.get("/health", (|_| async { "ok" }).with(auth));
 ```
 
-- **Un groupe de routes** : placez-les dans un `Router` et appelez `router.middleware(...)` (voir [Routeurs et sous-applications](routers.md)).
+- **Un groupe de routes** : placez-les dans un `Router` et appelez `router.middleware(...)`. Comme `router.use()` en Express, il couvre tout le préfixe du routeur, `404` compris (voir [Routeurs et sous-applications](routers.md)).
 - **Un préfixe de chemin** : testez le chemin dans un middleware global :
 
 ```rust
@@ -208,7 +208,7 @@ Quand l'origine de la requête fait partie de la liste, Vitesse la renvoie dans 
 > [!IMPORTANT]
 > Les navigateurs refusent les requêtes avec identifiants (cookies, `Authorization`) quand la réponse est `*`. Pour utiliser des cookies ou une authentification entre origines, listez explicitement vos origines de confiance avec `.allow_origin(...)`, une fois par origine. Vitesse ne renvoie volontairement jamais une origine quelconque : n'importe quel site pourrait alors lire les réponses d'un utilisateur connecté.
 
-Les requêtes sans en-tête `Origin` passent sans être modifiées. Les requêtes préliminaires (`OPTIONS` avec `Access-Control-Request-Method`) reçoivent directement un `204`, sans atteindre vos routes. Quand une origine n'est pas autorisée, Vitesse n'ajoute aucun en-tête CORS et le navigateur bloque la réponse : CORS protège les navigateurs des utilisateurs, il ne remplace pas une authentification.
+Les requêtes sans en-tête `Origin` passent sans être modifiées. Les requêtes préliminaires (`OPTIONS` avec `Access-Control-Request-Method`) reçoivent directement un `204`, sans atteindre vos routes. Ajoutez `cors()` à l'application ou à un [routeur](routers.md), qui couvre aussi les requêtes préliminaires de ses routes ; sur une seule route (`.with`), il ne voit jamais la requête préliminaire, à laquelle l'`OPTIONS` automatique répond sans en-têtes CORS. Quand une origine n'est pas autorisée, Vitesse n'ajoute aucun en-tête CORS et le navigateur bloque la réponse : CORS protège les navigateurs des utilisateurs, il ne remplace pas une authentification.
 
 > [!TIP]
 > Ajoutez `cors()` avant votre middleware d'authentification : ainsi, les réponses d'erreur (un `401`, par exemple) portent aussi les en-têtes CORS, et le JavaScript de votre front-end peut les lire.
@@ -283,3 +283,6 @@ app.middleware(RequestCounter { total: AtomicU64::new(0) });
 ```
 
 `next.run(req)` renvoie déjà un `BoxFuture<Response>` : quand vous n'avez pas besoin de toucher à la réponse, renvoyez-le directement, sans `Box::pin`.
+
+> [!NOTE]
+> Une panique dans un middleware écrit sous forme de closure ou d'`async fn` devient un `500` qui repasse par les middlewares extérieurs et par `app.on_error`, exactement comme une panique dans un handler. Un `impl Middleware` écrit à la main n'a pas ce traitement : ses paniques sont rattrapées plus haut dans la chaîne (voir [Les paniques](errors.md#les-paniques)).

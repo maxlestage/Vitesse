@@ -209,7 +209,7 @@ app.get("/facture", |_| async {
 });
 ```
 
-`res::file` devine le `Content-Type` d'après l'extension, envoie les gros fichiers en flux, et répond `404 {"error":"Not Found"}` si le fichier n'existe pas. `res::download` ajoute en plus `Content-Disposition: attachment` pour que le navigateur enregistre le fichier sous le nom donné (les noms non ASCII sont gérés). `.attachment("export.csv")` fait la même chose sur n'importe quelle réponse, ce qui est pratique pour un contenu généré. Les chemins relatifs partent du dossier depuis lequel le serveur a été lancé. Pour servir un dossier entier, voir [Fichiers statiques](static-files.md).
+`res::file` devine le `Content-Type` d'après l'extension, envoie les gros fichiers en flux, et répond `404 {"error":"Not Found"}` si le fichier n'existe pas. Comme Express, il envoie aussi `ETag` et `Last-Modified`, répond `304 Not Modified` quand le navigateur a déjà le fichier, et `206 Partial Content` aux requêtes `Range` des lecteurs vidéo et des gestionnaires de téléchargement (voir [Fichiers statiques](static-files.md#les-requêtes-partielles)). `res::download` ajoute en plus `Content-Disposition: attachment` pour que le navigateur enregistre le fichier sous le nom donné (les noms non ASCII sont gérés). `.attachment("export.csv")` fait la même chose sur n'importe quelle réponse, ce qui est pratique pour un contenu généré. Les chemins relatifs partent du dossier depuis lequel le serveur a été lancé. Pour servir un dossier entier, voir [Fichiers statiques](static-files.md).
 
 ## Streaming
 

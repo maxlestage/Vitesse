@@ -202,8 +202,16 @@ struct Inner {
     captures: Captures,
     params: Params,
     remote: Option<SocketAddr>,
+    /// The request carries `Range`, `If-Range`, `If-None-Match` or
+    /// `If-Modified-Since` (spotted while parsing, at no extra cost).
+    conditional: bool,
     shared: &'static Shared,
 }
+
+/// The headers that make [`res::file`](crate::res::file) answer `304` or
+/// `206` instead of `200`.
+pub(crate) const CONDITIONAL_HEADERS: [&str; 4] =
+    ["range", "if-range", "if-none-match", "if-modified-since"];
 
 impl Inner {
     fn new(shared: &'static Shared) -> Self {
@@ -221,6 +229,7 @@ impl Inner {
             captures: Vec::new(),
             params: Params::default(),
             remote: None,
+            conditional: false,
             shared,
         }
     }
@@ -253,6 +262,7 @@ impl Inner {
         self.params.names = &[];
         self.params.values.clear();
         self.remote = None;
+        self.conditional = false;
     }
 
     /// Appends the target to the end of `head` and points to it.
@@ -364,6 +374,9 @@ impl Request {
         inner.version = parts.version;
         let pq = parts.uri.path_and_query().map_or("/", |pq| pq.as_str());
         inner.push_target(pq.as_bytes());
+        inner.conditional = CONDITIONAL_HEADERS
+            .iter()
+            .any(|name| parts.headers.contains_key(*name));
         inner.headers = OnceLock::from(Box::new(parts.headers));
         inner.uri = OnceLock::from(Box::new(parts.uri));
         inner.extensions = parts.extensions;
@@ -372,6 +385,18 @@ impl Request {
         Request {
             inner: ManuallyDrop::new(inner),
         }
+    }
+
+    /// Notes that the request carries a conditional or partial header.
+    #[inline]
+    pub(crate) fn mark_conditional(&mut self) {
+        self.inner.conditional = true;
+    }
+
+    /// See [`CONDITIONAL_HEADERS`].
+    #[inline]
+    pub(crate) fn is_conditional(&self) -> bool {
+        self.inner.conditional
     }
 
     /// Gives the request its body.

@@ -29,7 +29,7 @@ fn main() -> std::io::Result<()> {
 |---|---|
 | `App::new()` | An empty application (`express()`) |
 | `app.run(addr)` | Starts the server with its own runtime; blocks; stops cleanly on `Ctrl+C` / `SIGTERM` |
-| `app.listen(addr).await` | Starts the server on the current tokio runtime; serves forever |
+| `app.listen(addr).await` | Starts the server on the current tokio runtime; stops cleanly on `Ctrl+C` / `SIGTERM` |
 | `app.bind(addr).await?` | Opens the port and returns a `Server`, without serving yet |
 | `app.middleware(mw)` | Global middleware (`app.use`): every request, in order, before routing |
 | `app.fallback(handler)` | Handler called when no route matches (default: `404 {"error":"Cannot GET /x"}`) |
@@ -166,8 +166,8 @@ The body is read on demand and cached: the reading methods can be called more th
 | `res::send(body)`, `res::text(t)`, `res::html(h)`, `res::json(v)` | A `200` response with that body |
 | `res::redirect(url)` | `302` redirect |
 | `res::send_status(code)` | The status and its reason as text (`res.sendStatus()`) |
-| `res::file(path).await` | Sends a file; `404` if it does not exist (`res.sendFile()`) |
-| `res::download(path, name).await` | Sends a file as an attachment (`res.download()`) |
+| `res::file(path).await` | Sends a file with `ETag`, `304` and `Range` (`206`); `404` if it does not exist (`res.sendFile()`) |
+| `res::download(path, name).await` | Same, as an attachment (`res.download()`) |
 
 ### Redirects, cookies and bodies
 
@@ -205,7 +205,7 @@ See [Responses](responses.md).
 | `err.status()`, `err.message()`, `err.source()` | Read the error |
 | `vitesse::Result<T>` | Alias for `Result<T, vitesse::Error>` |
 | `?` on any standard error | `500 {"error":"Internal Server Error"}`; the cause is only logged |
-| Panic in a handler | `500`; the server keeps running |
+| Panic in a handler or a middleware | `500`; the server keeps running |
 
 See [Errors](errors.md).
 
@@ -218,7 +218,7 @@ See [Errors](errors.md).
 | `next.run(req).await` | Continues the chain and returns the `Response` (`next()`) |
 | Return a response without calling `next` | Stops the chain (authentication, cache…) |
 | `app.middleware(mw)` | For every request |
-| `router.middleware(mw)` | For the routes of that router only |
+| `router.middleware(mw)` | For that router's routes, and the `404`, `405` and `OPTIONS` responses under its prefix |
 | `handler.with(mw)` | For a single route |
 | `impl Middleware for MyType` | `fn handle(&'static self, req: Request, next: Next) -> BoxFuture<Response>` |
 
@@ -245,7 +245,7 @@ See [Middleware](middleware.md).
 | `router.get(…)`, `.post(…)`, … `.route(…)` | Same routing methods as `App` |
 | `router.mount(prefix, other)` | Nested routers |
 | `router.static_dir(…)`, `router.serve_dir(…)` | Static files inside a router |
-| `router.middleware(mw)` | Middleware for this router's routes only |
+| `router.middleware(mw)` | Middleware for this router: its routes and every other request under its prefix (`router.use`) |
 | `app.mount("/api", router)` | Mounts it; the prefix can contain parameters (`/users/:id/posts`) |
 
 See [Routers](routers.md).
@@ -272,8 +272,8 @@ Built in: MIME types, `index.html`, `ETag` and `Last-Modified` (`304`), `Range` 
 | `"127.0.0.1:8080"`, `"[::]:3000"`, `"localhost:3000"` | Listens on that address |
 | `String`, `SocketAddr`, `([127, 0, 0, 1], 8080)` | Other accepted forms (`ListenAddr`) |
 | `server.local_addr()` | The address actually used (port `0`) |
-| `server.run().await` | Serves forever |
-| `server.with_graceful_shutdown(signal).await` | Serves until `signal` completes; in-progress requests get 10 s to finish |
+| `server.run().await` | Serves until `Ctrl+C` / `SIGTERM`, then stops cleanly |
+| `server.with_graceful_shutdown(signal).await` | Serves until `signal` completes, instead of `Ctrl+C` / `SIGTERM`; in-progress requests get 10 s to finish |
 
 See [Server configuration](server.md).
 

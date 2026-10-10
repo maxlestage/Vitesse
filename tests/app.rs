@@ -616,6 +616,203 @@ async fn utf8_header_values_are_read_the_same_way_everywhere() {
     }
 }
 
+#[tokio::test]
+async fn panics_in_middleware_go_through_on_error_and_outer_middleware() {
+    let mut app = App::new();
+    app.middleware(
+        |req: Request, next: Next| async move { next.run(req).await.header("x-outer", "1") },
+    );
+    app.middleware(|req: Request, next: Next| async move {
+        if req.path() == "/boom" {
+            panic!("boum dans un middleware");
+        }
+        next.run(req).await
+    });
+    app.on_error(|err: Error| res::status(err.status()).text(format!("custom: {}", err.message())));
+    app.get("/boom", |_| async { "jamais" });
+    app.get("/ok", |_| async { "ok" });
+
+    let c = TestClient::new(app);
+    let r = c.get("/boom").await;
+    assert_eq!(r.status(), 500);
+    assert_eq!(r.header("x-outer"), Some("1"));
+    assert_eq!(r.text(), "custom: Internal Server Error");
+    assert_eq!(c.get("/ok").await.text(), "ok");
+}
+
+#[tokio::test]
+async fn router_middleware_covers_its_whole_prefix() {
+    let mut admin = Router::new();
+    admin.middleware(|req: Request, next: Next| async move {
+        next.run(req).await.header("x-admin", "1")
+    });
+    admin.get("/stats", |_| async { "stats" });
+
+    let mut api = Router::new();
+    api.middleware(
+        |req: Request, next: Next| async move { next.run(req).await.header("x-api", "1") },
+    );
+    api.middleware(middleware::cors());
+    api.get("/users", |_| async { "users" });
+    api.mount("/admin", admin);
+
+    let mut app = App::new();
+    app.mount("/api", api);
+    app.get("/other", |_| async { "other" });
+    let c = TestClient::new(app);
+
+    // Une route du routeur : comme avant.
+    let r = c.get("/api/users").await;
+    assert_eq!((r.status().as_u16(), r.header("x-api")), (200, Some("1")));
+    // Chemin inconnu sous le préfixe : le middleware passe, puis le 404.
+    let r = c.get("/api/nope").await;
+    assert_eq!(r.status(), 404);
+    assert_eq!(r.header("x-api"), Some("1"));
+    assert_eq!(r.header("x-admin"), None);
+    assert_eq!(c.get("/api").await.header("x-api"), Some("1"));
+    // Mauvaise méthode : 405 avec `Allow`, après le middleware.
+    let r = c.post("/api/users").await;
+    assert_eq!(r.status(), 405);
+    assert_eq!(r.header("x-api"), Some("1"));
+    assert_eq!(r.header("allow"), Some("GET, HEAD, OPTIONS"));
+    // Pré-vol CORS sur une route du routeur : le middleware CORS répond.
+    let r = c
+        .request(Method::OPTIONS, "/api/users")
+        .header("origin", "https://app.example")
+        .header("access-control-request-method", "POST")
+        .await;
+    assert_eq!(r.status(), 204);
+    assert_eq!(r.header("access-control-allow-origin"), Some("*"));
+    // Routeurs imbriqués : les deux chaînes, l'extérieure d'abord.
+    let r = c.get("/api/admin/nope").await;
+    assert_eq!(r.status(), 404);
+    assert_eq!(
+        (r.header("x-api"), r.header("x-admin")),
+        (Some("1"), Some("1"))
+    );
+    let r = c.get("/api/admin/stats").await;
+    assert_eq!(r.text(), "stats");
+    assert_eq!(
+        (r.header("x-api"), r.header("x-admin")),
+        (Some("1"), Some("1"))
+    );
+    // Hors du préfixe : pas de middleware du routeur.
+    assert_eq!(c.get("/apix").await.header("x-api"), None);
+    assert_eq!(c.get("/other").await.header("x-api"), None);
+
+    // Préfixe avec paramètre : le segment `:user` accepte n'importe quelle
+    // valeur.
+    let mut posts = Router::new();
+    posts.middleware(|req: Request, next: Next| async move {
+        next.run(req).await.header("x-posts", "1")
+    });
+    posts.get("/", |req: Request| async move {
+        format!("posts de {}", req.param("user").unwrap_or("?"))
+    });
+    let mut app = App::new();
+    app.mount("/users/:user/posts", posts);
+    let c = TestClient::new(app);
+    assert_eq!(c.get("/users/42/posts").await.text(), "posts de 42");
+    let r = c.get("/users/42/posts/nope").await;
+    assert_eq!((r.status().as_u16(), r.header("x-posts")), (404, Some("1")));
+    assert_eq!(c.get("/users/42/other").await.header("x-posts"), None);
+}
+
+#[tokio::test]
+async fn send_file_answers_304_and_206_like_express() {
+    let dir = std::env::temp_dir().join(format!("vitesse-sendfile-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("digits.txt");
+    std::fs::write(&file, "0123456789").unwrap();
+
+    let mut app = App::new();
+    let path = file.clone();
+    app.get("/f", move |_| {
+        let path = path.clone();
+        async move { res::file(path).await }
+    });
+    let path = file.clone();
+    app.get("/d", move |_| {
+        let path = path.clone();
+        async move { res::download(path, "chiffres.txt").await }
+    });
+    let c = TestClient::new(app);
+
+    let r = c.get("/f").await;
+    assert_eq!(r.status(), 200);
+    assert_eq!(r.text(), "0123456789");
+    let etag = r.header("etag").unwrap().to_owned();
+    let last_modified = r.header("last-modified").unwrap().to_owned();
+
+    let r = c.get("/f").header("if-none-match", &etag).await;
+    assert_eq!(r.status(), 304);
+    assert!(r.bytes().is_empty());
+    let r = c
+        .get("/f")
+        .header("if-modified-since", &last_modified)
+        .await;
+    assert_eq!(r.status(), 304);
+
+    let r = c.get("/f").header("range", "bytes=2-5").await;
+    assert_eq!(r.status(), 206);
+    assert_eq!(r.header("content-range"), Some("bytes 2-5/10"));
+    assert_eq!(r.text(), "2345");
+    assert_eq!(c.get("/f").header("range", "bytes=50-").await.status(), 416);
+
+    // `If-Range` : la plage n'est servie que si le fichier n'a pas changé.
+    let r = c
+        .get("/f")
+        .header("range", "bytes=0-1")
+        .header("if-range", "Wed, 21 Oct 2015 07:28:00 GMT")
+        .await;
+    assert_eq!(
+        (r.status().as_u16(), r.text().as_str()),
+        (200, "0123456789")
+    );
+    let r = c
+        .get("/f")
+        .header("range", "bytes=0-1")
+        .header("if-range", &last_modified)
+        .await;
+    assert_eq!((r.status().as_u16(), r.text().as_str()), (206, "01"));
+
+    let r = c.get("/d").header("range", "bytes=8-").await;
+    assert_eq!(r.status(), 206);
+    assert_eq!(r.text(), "89");
+    assert_eq!(
+        r.header("content-disposition"),
+        Some("attachment; filename=\"chiffres.txt\"")
+    );
+
+    // Par le vrai moteur HTTP : les en-têtes sont repérés à l'analyse.
+    let mut app = App::new();
+    let path = file.clone();
+    app.get("/f", move |_| {
+        let path = path.clone();
+        async move { res::file(path).await }
+    });
+    let server = app.bind("127.0.0.1:0").await.unwrap();
+    let addr = server.local_addr();
+    tokio::spawn(server.run());
+    let res = raw(
+        addr,
+        "GET /f HTTP/1.1\r\nhost: x\r\nrange: bytes=7-\r\nconnection: close\r\n\r\n",
+    )
+    .await;
+    assert!(res.starts_with("HTTP/1.1 206"), "{res}");
+    assert!(res.ends_with("789"), "{res}");
+    let res = raw(
+        addr,
+        &format!(
+            "GET /f HTTP/1.1\r\nhost: x\r\nif-none-match: {etag}\r\nconnection: close\r\n\r\n"
+        ),
+    )
+    .await;
+    assert!(res.starts_with("HTTP/1.1 304"), "{res}");
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
 /// Envoie des requêtes HTTP brutes sur une connexion TCP.
 async fn raw(addr: std::net::SocketAddr, request: &str) -> String {
     let mut stream = tokio::net::TcpStream::connect(addr).await.unwrap();

@@ -197,6 +197,9 @@ impl Conn {
                     Some(self.peer),
                     &self.app.shared,
                 );
+                if head.conditional {
+                    req.mark_conditional();
+                }
                 self.rbuf.advance(head.len);
                 let keep_alive = match self.ready_body(head.framing) {
                     Some(body) => {
@@ -611,6 +614,8 @@ struct ParsedHead {
     framing: Framing,
     keep_alive: bool,
     expect_continue: bool,
+    /// `Range`, `If-Range`, `If-None-Match` or `If-Modified-Since` present.
+    conditional: bool,
 }
 
 /// Parses the head of a request if it is complete; the positions of the
@@ -652,6 +657,7 @@ fn parse_head(rbuf: &[u8], raw: &mut RawHeaders) -> Result<Option<ParsedHead>, S
     let mut chunked = false;
     let (mut close, mut keep) = (false, false);
     let mut expect_continue = false;
+    let mut conditional = false;
     for h in req.headers.iter() {
         let name = h.name;
         raw.push(
@@ -677,6 +683,10 @@ fn parse_head(rbuf: &[u8], raw: &mut RawHeaders) -> Result<Option<ParsedHead>, S
                     .next()
                     .is_some_and(|last| last.trim_ascii().eq_ignore_ascii_case(b"chunked"));
             }
+            17 if name.eq_ignore_ascii_case("if-modified-since") => conditional = true,
+            13 if name.eq_ignore_ascii_case("if-none-match") => conditional = true,
+            8 if name.eq_ignore_ascii_case("if-range") => conditional = true,
+            5 if name.eq_ignore_ascii_case("range") => conditional = true,
             10 if name.eq_ignore_ascii_case("connection") => {
                 for token in h.value.split(|&b| b == b',') {
                     let token = token.trim_ascii();
@@ -719,6 +729,7 @@ fn parse_head(rbuf: &[u8], raw: &mut RawHeaders) -> Result<Option<ParsedHead>, S
         framing,
         keep_alive,
         expect_continue,
+        conditional,
     }))
 }
 

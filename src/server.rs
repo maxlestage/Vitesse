@@ -142,9 +142,13 @@ impl Server {
         self.addr
     }
 
-    /// Serves requests forever.
+    /// Serves requests until `Ctrl+C` or `SIGTERM`, then gives in-flight
+    /// requests time to finish (10 s at most), like [`App::run`](crate::App::run).
+    ///
+    /// To stop on another signal, use
+    /// [`with_graceful_shutdown`](Self::with_graceful_shutdown).
     pub async fn run(self) -> io::Result<()> {
-        serve(self.listener, self.app, pending()).await
+        serve(self.listener, self.app, shutdown_signal()).await
     }
 
     /// Serves requests until `signal` completes, then gives in-flight

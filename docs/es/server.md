@@ -8,7 +8,7 @@ Esta página cubre todo lo relacionado con el propio servidor: las tres formas d
 |---|---|---|---|
 | Necesita `#[tokio::main]` | No | Sí | Sí |
 | Hilos | Uno por núcleo, ver `workers` y `thread_per_core` | Los de tu runtime | Los de tu runtime |
-| Se detiene limpiamente con `Ctrl+C` / `SIGTERM` | Sí | No | Sí, con `with_graceful_shutdown` |
+| Se detiene limpiamente con `Ctrl+C` / `SIGTERM` | Sí | Sí | Sí con `run()`, o con tu propia señal con `with_graceful_shutdown` |
 | Conoce el puerto antes de servir | No | No | Sí, con `local_addr()` |
 | Uso típico | La mayoría de las aplicaciones, producción | Una aplicación tokio existente | Pruebas, apagado personalizado, puerto `0` |
 
@@ -45,14 +45,14 @@ async fn main() -> std::io::Result<()> {
     app.state(greeting);
     app.get("/", |req: Request| async move { req.state::<String>().clone() });
 
-    app.listen(3000).await // se ejecuta para siempre, en el runtime actual
+    app.listen(3000).await // hasta Ctrl+C / SIGTERM, en el runtime actual
 }
 ```
 
 Para esto necesitas tokio en tu `Cargo.toml` (`tokio = { version = "1", features = ["full"] }`).
 
-> [!WARNING]
-> `listen` sirve para siempre: no captura `Ctrl+C` ni `SIGTERM`, así que el proceso muere sin más, junto con las peticiones en curso. `app.workers` y `app.thread_per_core` tampoco tienen efecto: los hilos son los de tu runtime. Para un apagado limpio en tu propio runtime, usa `bind` y `with_graceful_shutdown`.
+> [!NOTE]
+> Igual que `run`, `listen` se detiene limpiamente con `Ctrl+C` o `SIGTERM` y deja terminar las peticiones en curso (consulta [Apagado ordenado](#apagado-ordenado)). En cambio, `app.workers` y `app.thread_per_core` no tienen efecto: los hilos son los de tu runtime.
 
 ### `app.bind` y `Server`: control total
 
@@ -69,37 +69,17 @@ async fn main() -> std::io::Result<()> {
     let server = app.bind("127.0.0.1:0").await?; // puerto 0: el sistema elige uno libre
     println!("Escuchando en http://{}", server.local_addr());
 
-    server.with_graceful_shutdown(shutdown_signal()).await
-}
-
-/// Termina con Ctrl+C o, en Unix, con SIGTERM.
-async fn shutdown_signal() {
-    let ctrl_c = async {
-        tokio::signal::ctrl_c().await.ok();
-    };
-    #[cfg(unix)]
-    let terminate = async {
-        use tokio::signal::unix::{SignalKind, signal};
-        signal(SignalKind::terminate())
-            .expect("no se puede escuchar SIGTERM")
-            .recv()
-            .await;
-    };
-    #[cfg(not(unix))]
-    let terminate = std::future::pending::<()>();
-
-    tokio::select! {
-        _ = ctrl_c => {}
-        _ = terminate => {}
-    }
+    server.run().await // hasta Ctrl+C / SIGTERM, como app.run
 }
 ```
 
 | Método de `Server` | Función |
 |---|---|
 | `server.local_addr()` | La dirección que se usa de verdad (útil con el puerto `0`) |
-| `server.run().await` | Sirve para siempre |
+| `server.run().await` | Sirve hasta `Ctrl+C` / `SIGTERM` y luego se detiene limpiamente |
 | `server.with_graceful_shutdown(signal).await` | Sirve hasta que termina el futuro `signal` y luego se detiene limpiamente |
+
+`with_graceful_shutdown` sustituye `Ctrl+C` / `SIGTERM` por el futuro que elijas: un canal en las [pruebas](testing.md), o las señales de siempre seguidas de tu propio código, como en [Puesta en producción](production.md#apagado-ordenado).
 
 Es el modo que se usa en las [pruebas de integración](testing.md) sobre un puerto real.
 
@@ -204,7 +184,7 @@ El motor HTTP/1.1 protege el servidor de peticiones mal formadas o abusivas. Est
 | Cuerpo grande que el handler no lee | La respuesta sale con `connection: close` y después se descarta el resto del envío (2 s y 8 MiB como máximo) para que el cliente reciba la respuesta |
 | Peticiones en pipeline | Se responden en orden; las respuestas de un lote salen en una sola llamada al sistema |
 | HTTP/1.0 | Conexión cerrada tras la respuesta, salvo que el cliente pida keep-alive |
-| Pánico en un handler | `500`, y el servidor sigue funcionando |
+| Pánico en un handler o en un middleware | `500`, y el servidor sigue funcionando |
 
 En las respuestas, el motor calcula `content-length`, añade la cabecera `date`, envía los cuerpos de tamaño desconocido (flujos) en `chunked`, no envía cuerpo en las respuestas `204`, `304` ni en las peticiones `HEAD`, y cierra la conexión tras la respuesta si tu handler pone una cabecera `connection: close`.
 
@@ -217,13 +197,13 @@ app.middleware(middleware::timeout(Duration::from_secs(30))); // std::time::Dura
 
 ## Apagado ordenado
 
-Con `app.run`, `Ctrl+C` (SIGINT) y, en Unix, `SIGTERM` inician un apagado ordenado:
+Con `app.run`, `app.listen` y `Server::run`, `Ctrl+C` (SIGINT) y, en Unix, `SIGTERM` inician un apagado ordenado:
 
 1. el servidor deja de aceptar conexiones nuevas;
 2. las peticiones en curso tienen hasta **10 segundos** para terminar, y sus respuestas llevan `connection: close`;
-3. las conexiones restantes (keep-alive inactivas, peticiones que siguen en curso tras 10 s) se cierran y `run` devuelve `Ok(())`.
+3. las conexiones restantes (keep-alive inactivas, peticiones que siguen en curso tras 10 s) se cierran y `run` (o `listen`) devuelve `Ok(())`.
 
-Es justo lo que esperan Docker, Kubernetes o Heroku: envían `SIGTERM` y esperan un rato antes de forzar la parada del proceso. Con `bind`, `with_graceful_shutdown(signal)` sigue los mismos pasos en cuanto termina tu futuro `signal`, así que tú decides qué provoca el apagado. `app.listen()` y `Server::run()` nunca se detienen por sí solos. El periodo de gracia de 10 segundos no se puede configurar.
+Es justo lo que esperan Docker, Kubernetes o Heroku: envían `SIGTERM` y esperan un rato antes de forzar la parada del proceso. Con `bind`, `with_graceful_shutdown(signal)` sigue los mismos pasos en cuanto termina tu futuro `signal`, así que tú decides qué provoca el apagado. `Ctrl+C` y `SIGTERM` dejan entonces de vigilarse: inclúyelos en tu futuro si todavía los necesitas. El periodo de gracia de 10 segundos no se puede configurar.
 
 ## Solo HTTP/1.1
 

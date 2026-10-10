@@ -57,6 +57,10 @@ ws = ["dep:tokio-tungstenite", "dep:futures-util"]
 http3 = ["dep:quinn", "dep:h3", "dep:h3-quinn", "dep:rustls"]
 
 [[example]]
+name = "chat"
+required-features = ["ws"]
+
+[[example]]
 name = "http3"
 required-features = ["http3"]
 

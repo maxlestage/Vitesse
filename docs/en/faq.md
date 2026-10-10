@@ -12,9 +12,9 @@ Until version 1.0, the API may still change between minor versions. Depend on `v
 
 ### Is the project really 100% Rust?
 
-Yes: the framework, the examples, the benchmark runner (`bench/runner`) and the website (written with [Yew](https://yew.rs) and compiled to WebAssembly) are all Rust, and the repository contains no JavaScript or TypeScript. Two caveats, to be precise:
+Yes: the framework, the examples, the benchmark runner (`bench/runner`) and the website (served by Vitesse itself, with pages and WebAssembly islands written with [active](https://github.com/maxlestage/Active)) are all Rust, and the repository contains no JavaScript or TypeScript. Two caveats, to be precise:
 
-- browsers cannot start WebAssembly without a few lines of JavaScript, so the website build (Trunk and wasm-bindgen) generates a small loader file automatically; it is neither written by hand nor stored in the repository;
+- browsers cannot start WebAssembly without a few lines of JavaScript, and they only run service workers (what makes the website work offline) as scripts: the website build (wasm-bindgen) generates a small loader file, and the website's server generates its service worker; neither is written by hand nor stored in the repository;
 - the documentation shows Express (JavaScript) snippets, but only as before/after comparisons for people coming from Express.
 
 The benchmark also measures servers written in other languages, since comparing them is the whole point: the Drogon server is in C++ (`bench/drogon`), and wrk, which generates the load, runs scenario scripts written in Lua (`bench/lua`).

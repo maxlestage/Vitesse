@@ -4,6 +4,7 @@ use std::any::{Any, TypeId};
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::fmt;
+use std::mem::ManuallyDrop;
 use std::net::{IpAddr, SocketAddr};
 use std::pin::pin;
 use std::str::FromStr;
@@ -17,7 +18,7 @@ use serde::de::DeserializeOwned;
 
 use crate::body::{Body, BoxError};
 use crate::error::Error;
-use crate::tree::Captures;
+use crate::tree::{Captures, Tree};
 use crate::util::percent_decode;
 
 /// Données partagées par toute l'application (état, configuration).
@@ -101,6 +102,19 @@ impl RawHeaders {
     }
 
     #[inline]
+    pub(crate) fn clear(&mut self) {
+        self.len = 0;
+        self.extra.clear();
+    }
+
+    #[inline]
+    fn copy_from(&mut self, other: &RawHeaders) {
+        self.len = other.len;
+        self.inline = other.inline;
+        self.extra.clone_from(&other.extra);
+    }
+
+    #[inline]
     fn iter(&self) -> impl Iterator<Item = Slot> + '_ {
         self.inline[..self.len.min(INLINE_SLOTS)]
             .iter()
@@ -109,57 +123,41 @@ impl RawHeaders {
     }
 }
 
-/// La tête d'une requête telle que lue sur le réseau par le moteur HTTP/1.1.
-pub(crate) struct WireHead {
-    pub(crate) method: Method,
-    pub(crate) version: Version,
-    /// Les octets de la tête (ligne de requête + en-têtes).
-    pub(crate) bytes: Bytes,
-    /// Position de la cible (`/chemin?query`) dans `bytes`.
-    pub(crate) target: (usize, usize),
-    pub(crate) headers: RawHeaders,
+/// Le chemin d'une cible `/chemin?query`.
+#[inline]
+fn path_of(head: &[u8], target: (u32, u32), path_end: u32) -> &str {
+    std::str::from_utf8(&head[target.0 as usize..path_end as usize]).unwrap_or("/")
 }
 
-/// Le chemin + la query string, et la position du `?`.
-struct Target {
-    bytes: Bytes,
-    path_end: usize,
-}
+/// Réserve de requêtes par thread : la boîte d'une requête terminée (et ses
+/// tampons) sert à la suivante, sans passer par l'allocateur.
+// Les boîtes sont voulues : c'est la boîte elle-même qu'on rend à une requête,
+// sans recopier son contenu.
+#[allow(clippy::vec_box)]
+mod pool {
+    use std::cell::RefCell;
 
-impl Target {
-    fn new(bytes: Bytes) -> Self {
-        let path_end = bytes.iter().position(|&b| b == b'?').unwrap_or(bytes.len());
-        Target { bytes, path_end }
-    }
+    use super::Inner;
 
-    fn from_uri(uri: &Uri) -> Self {
-        let pq = uri.path_and_query().map_or("/", |pq| pq.as_str());
-        let pq = if pq.is_empty() { "/" } else { pq };
-        Target::new(Bytes::copy_from_slice(pq.as_bytes()))
+    const MAX_POOLED: usize = 256;
+
+    thread_local! {
+        static POOL: RefCell<Vec<Box<Inner>>> = const { RefCell::new(Vec::new()) };
     }
 
     #[inline]
-    fn path(&self) -> &str {
-        std::str::from_utf8(&self.bytes[..self.path_end]).unwrap_or("/")
+    pub(super) fn take() -> Option<Box<Inner>> {
+        POOL.try_with(|pool| pool.borrow_mut().pop()).ok().flatten()
     }
 
     #[inline]
-    fn query(&self) -> Option<&str> {
-        let q = self.bytes.get(self.path_end + 1..)?;
-        std::str::from_utf8(q).ok()
-    }
-}
-
-impl Params {
-    pub(crate) fn new(names: &'static [Box<str>], path: &str, captures: Captures) -> Self {
-        let values = captures
-            .into_iter()
-            .map(|(a, b)| match percent_decode(&path[a..b]) {
-                Cow::Borrowed(_) => ParamValue::Slice(a as u32, b as u32),
-                Cow::Owned(s) => ParamValue::Owned(s.into_boxed_str()),
-            })
-            .collect();
-        Params { names, values }
+    pub(super) fn give(inner: Box<Inner>) {
+        let _ = POOL.try_with(|pool| {
+            let mut pool = pool.borrow_mut();
+            if pool.len() < MAX_POOLED {
+                pool.push(inner);
+            }
+        });
     }
 }
 
@@ -180,7 +178,8 @@ impl Params {
 /// }
 /// ```
 pub struct Request {
-    inner: Box<Inner>,
+    /// Rendue à la réserve du thread par `Drop`.
+    inner: ManuallyDrop<Box<Inner>>,
 }
 
 /// Le contenu de la requête, derrière un pointeur : la requête traverse les
@@ -188,18 +187,117 @@ pub struct Request {
 struct Inner {
     method: Method,
     version: Version,
-    target: Target,
-    /// Les octets bruts de la tête, référencés par `raw_headers`.
-    head: Bytes,
+    /// Les octets bruts de la tête, référencés par `target` et `raw_headers`.
+    head: Vec<u8>,
+    /// Position de la cible (`/chemin?query`) dans `head`, et du `?`.
+    target: (u32, u32),
+    path_end: u32,
     raw_headers: RawHeaders,
     /// Construits seulement si on les demande.
     headers: OnceLock<Box<HeaderMap>>,
     uri: OnceLock<Box<Uri>>,
     extensions: Extensions,
     body: Mutex<ReqBody>,
+    /// Positions trouvées par le routeur (tampon réutilisé).
+    captures: Captures,
     params: Params,
     remote: Option<SocketAddr>,
     shared: &'static Shared,
+}
+
+impl Inner {
+    fn new(shared: &'static Shared) -> Self {
+        Inner {
+            method: Method::GET,
+            version: Version::HTTP_11,
+            head: Vec::new(),
+            target: (0, 0),
+            path_end: 0,
+            raw_headers: RawHeaders::default(),
+            headers: OnceLock::new(),
+            uri: OnceLock::new(),
+            extensions: Extensions::new(),
+            body: Mutex::new(ReqBody::Empty),
+            captures: Vec::new(),
+            params: Params::default(),
+            remote: None,
+            shared,
+        }
+    }
+
+    /// Une boîte de la réserve, ou une nouvelle.
+    #[inline]
+    fn take(shared: &'static Shared) -> Box<Inner> {
+        match pool::take() {
+            Some(mut inner) => {
+                inner.shared = shared;
+                inner
+            }
+            None => Box::new(Inner::new(shared)),
+        }
+    }
+
+    /// Vide la requête pour la réutiliser (en gardant ses tampons).
+    fn reset(&mut self) {
+        if self.head.capacity() > 16 * 1024 {
+            self.head = Vec::new();
+        } else {
+            self.head.clear();
+        }
+        self.raw_headers.clear();
+        self.headers = OnceLock::new();
+        self.uri = OnceLock::new();
+        self.extensions.clear();
+        *self.body.get_mut().unwrap_or_else(PoisonError::into_inner) = ReqBody::Empty;
+        self.captures.clear();
+        self.params.names = &[];
+        self.params.values.clear();
+        self.remote = None;
+    }
+
+    /// Ajoute la cible à la fin de `head` et la désigne.
+    fn push_target(&mut self, target: &[u8]) {
+        let start = self.head.len();
+        self.head
+            .extend_from_slice(if target.is_empty() { b"/" } else { target });
+        self.set_target(start, self.head.len());
+    }
+
+    fn set_target(&mut self, start: usize, end: usize) {
+        let path_end = self.head[start..end]
+            .iter()
+            .position(|&b| b == b'?')
+            .map_or(end, |i| start + i);
+        self.target = (start as u32, end as u32);
+        self.path_end = path_end as u32;
+    }
+
+    #[inline]
+    fn path(&self) -> &str {
+        path_of(&self.head, self.target, self.path_end)
+    }
+
+    #[inline]
+    fn query(&self) -> Option<&str> {
+        if self.path_end >= self.target.1 {
+            return None;
+        }
+        std::str::from_utf8(&self.head[self.path_end as usize + 1..self.target.1 as usize]).ok()
+    }
+
+    #[inline]
+    fn target_bytes(&self) -> &[u8] {
+        &self.head[self.target.0 as usize..self.target.1 as usize]
+    }
+}
+
+impl Drop for Request {
+    fn drop(&mut self) {
+        // SAFETY : `inner` n'est plus jamais lu après ce point.
+        let mut inner = unsafe { ManuallyDrop::take(&mut self.inner) };
+        inner.reset();
+        pool::give(inner);
+    }
 }
 
 impl fmt::Debug for Request {
@@ -214,40 +312,43 @@ impl fmt::Debug for Request {
 }
 
 impl Request {
-    /// Construit une requête lue sur le réseau.
+    /// Construit une requête lue sur le réseau ; `head` est la tête brute,
+    /// copiée dans une boîte recyclée.
     #[inline]
     pub(crate) fn from_wire(
-        wire: WireHead,
-        body: ReqBody,
+        head: &[u8],
+        method: Method,
+        version: Version,
+        target: (usize, usize),
+        raw_headers: &RawHeaders,
         remote: Option<SocketAddr>,
         shared: &'static Shared,
     ) -> Self {
-        let (start, end) = wire.target;
-        let raw_target = &wire.bytes[start..end];
-        let (target, uri) = if raw_target.first() == Some(&b'/') {
-            (Target::new(wire.bytes.slice(start..end)), OnceLock::new())
+        let mut inner = Inner::take(shared);
+        inner.method = method;
+        inner.version = version;
+        inner.head.extend_from_slice(head);
+        inner.raw_headers.copy_from(raw_headers);
+        inner.remote = remote;
+        let (start, end) = target;
+        if head.get(start) == Some(&b'/') {
+            inner.set_target(start, end);
         } else {
             // Forme absolue (`GET http://hôte/chemin`) ou `*` : rare, on passe par `Uri`.
-            match Uri::try_from(raw_target) {
-                Ok(uri) => (Target::from_uri(&uri), OnceLock::from(Box::new(uri))),
-                Err(_) => (Target::new(wire.bytes.slice(start..end)), OnceLock::new()),
+            match Uri::try_from(&head[start..end]) {
+                Ok(uri) => {
+                    let pq = uri
+                        .path_and_query()
+                        .map_or("/", |pq| pq.as_str())
+                        .to_owned();
+                    inner.push_target(pq.as_bytes());
+                    inner.uri = OnceLock::from(Box::new(uri));
+                }
+                Err(_) => inner.set_target(start, end),
             }
-        };
+        }
         Request {
-            inner: Box::new(Inner {
-                method: wire.method,
-                version: wire.version,
-                target,
-                head: wire.bytes,
-                raw_headers: wire.headers,
-                headers: OnceLock::new(),
-                uri,
-                extensions: Extensions::new(),
-                body: Mutex::new(body),
-                params: Params::default(),
-                remote,
-                shared,
-            }),
+            inner: ManuallyDrop::new(inner),
         }
     }
 
@@ -258,28 +359,53 @@ impl Request {
         remote: Option<SocketAddr>,
         shared: &'static Shared,
     ) -> Self {
+        let mut inner = Inner::take(shared);
+        inner.method = parts.method;
+        inner.version = parts.version;
+        let pq = parts.uri.path_and_query().map_or("/", |pq| pq.as_str());
+        inner.push_target(pq.as_bytes());
+        inner.headers = OnceLock::from(Box::new(parts.headers));
+        inner.uri = OnceLock::from(Box::new(parts.uri));
+        inner.extensions = parts.extensions;
+        *inner.body.get_mut().unwrap_or_else(PoisonError::into_inner) = body;
+        inner.remote = remote;
         Request {
-            inner: Box::new(Inner {
-                method: parts.method,
-                version: parts.version,
-                target: Target::from_uri(&parts.uri),
-                head: Bytes::new(),
-                raw_headers: RawHeaders::default(),
-                headers: OnceLock::from(Box::new(parts.headers)),
-                uri: OnceLock::from(Box::new(parts.uri)),
-                extensions: parts.extensions,
-                body: Mutex::new(body),
-                params: Params::default(),
-                remote,
-                shared,
-            }),
+            inner: ManuallyDrop::new(inner),
         }
+    }
+
+    /// Donne son corps à la requête.
+    #[inline]
+    pub(crate) fn put_body(&mut self, body: ReqBody) {
+        *self
+            .inner
+            .body
+            .get_mut()
+            .unwrap_or_else(PoisonError::into_inner) = body;
+    }
+
+    /// Cherche la route de la requête dans l'arbre ; les positions des
+    /// paramètres sont gardées pour [`Request::set_params`].
+    #[inline]
+    pub(crate) fn find_route<T>(&mut self, tree: &'static Tree<T>) -> Option<&'static T> {
+        let inner = &mut **self.inner;
+        let path = path_of(&inner.head, inner.target, inner.path_end);
+        tree.find(path, &mut inner.captures)
     }
 
     /// Enregistre les paramètres de la route trouvée par le routeur.
     #[inline]
-    pub(crate) fn set_params(&mut self, names: &'static [Box<str>], captures: Captures) {
-        self.inner.params = Params::new(names, self.inner.target.path(), captures);
+    pub(crate) fn set_params(&mut self, names: &'static [Box<str>]) {
+        let inner = &mut **self.inner;
+        let path = path_of(&inner.head, inner.target, inner.path_end);
+        inner.params.names = names;
+        inner.params.values.clear();
+        for &(a, b) in &inner.captures {
+            inner.params.values.push(match percent_decode(&path[a..b]) {
+                Cow::Borrowed(_) => ParamValue::Slice(a as u32, b as u32),
+                Cow::Owned(s) => ParamValue::Owned(s.into_boxed_str()),
+            });
+        }
     }
 
     // ----- Ligne de requête -------------------------------------------------
@@ -294,8 +420,7 @@ impl Request {
     pub fn uri(&self) -> &Uri {
         self.inner.uri.get_or_init(|| {
             Box::new(
-                Uri::from_maybe_shared(self.inner.target.bytes.clone())
-                    .unwrap_or_else(|_| Uri::from_static("/")),
+                Uri::try_from(self.inner.target_bytes()).unwrap_or_else(|_| Uri::from_static("/")),
             )
         })
     }
@@ -303,20 +428,26 @@ impl Request {
     /// Le chemin, sans la query string (`req.path`).
     #[inline]
     pub fn path(&self) -> &str {
-        self.inner.target.path()
+        self.inner.path()
     }
 
     /// Remplace l'URI (ex. réécriture d'URL dans un middleware global).
     pub fn set_uri(&mut self, uri: Uri) {
         // Les paramètres pointent dans l'ancien chemin : on les rend autonomes.
-        let path = self.inner.target.path();
-        for value in &mut self.inner.params.values {
+        let inner = &mut **self.inner;
+        let path = path_of(&inner.head, inner.target, inner.path_end);
+        for value in &mut inner.params.values {
             if let ParamValue::Slice(a, b) = *value {
                 *value = ParamValue::Owned(Box::from(&path[a as usize..b as usize]));
             }
         }
-        self.inner.target = Target::from_uri(&uri);
-        self.inner.uri = OnceLock::from(Box::new(uri));
+        // La nouvelle cible s'ajoute après les en-têtes bruts, toujours valides.
+        let pq = uri
+            .path_and_query()
+            .map_or("/", |pq| pq.as_str())
+            .to_owned();
+        inner.push_target(pq.as_bytes());
+        inner.uri = OnceLock::from(Box::new(uri));
     }
 
     /// La version HTTP.
@@ -341,12 +472,7 @@ impl Request {
             let mut map = HeaderMap::with_capacity(self.inner.raw_headers.len);
             for slot in self.inner.raw_headers.iter() {
                 let name = HeaderName::from_bytes(self.raw_name(slot));
-                let start = slot.value as usize;
-                let value = HeaderValue::from_maybe_shared(
-                    self.inner
-                        .head
-                        .slice(start..start + slot.value_len as usize),
-                );
+                let value = HeaderValue::from_bytes(self.raw_value(slot));
                 if let (Ok(name), Ok(value)) = (name, value) {
                     map.append(name, value);
                 }
@@ -467,7 +593,7 @@ impl Request {
     pub fn param(&self, name: &str) -> Option<&str> {
         let i = self.inner.params.names.iter().position(|n| &**n == name)?;
         Some(match self.inner.params.values.get(i)? {
-            ParamValue::Slice(a, b) => &self.inner.target.path()[*a as usize..*b as usize],
+            ParamValue::Slice(a, b) => &self.inner.path()[*a as usize..*b as usize],
             ParamValue::Owned(s) => s,
         })
     }
@@ -501,14 +627,14 @@ impl Request {
     /// La query string brute (`a=1&b=2`).
     #[inline]
     pub fn query_string(&self) -> Option<&str> {
-        self.inner.target.query()
+        self.inner.query()
     }
 
     /// Un paramètre de query string décodé (`req.query.page`).
     ///
     /// N'alloue que si la valeur contient des caractères encodés.
     pub fn query(&self, name: &str) -> Option<Cow<'_, str>> {
-        let q = self.inner.target.query()?;
+        let q = self.inner.query()?;
         form_urlencoded::parse(q.as_bytes())
             .find(|(k, _)| k == name)
             .map(|(_, v)| v)
@@ -516,7 +642,7 @@ impl Request {
 
     /// Toutes les paires de la query string.
     pub fn query_pairs(&self) -> impl Iterator<Item = (Cow<'_, str>, Cow<'_, str>)> {
-        form_urlencoded::parse(self.inner.target.query().unwrap_or("").as_bytes())
+        form_urlencoded::parse(self.inner.query().unwrap_or("").as_bytes())
     }
 
     /// Désérialise la query string dans une structure ; `400` en cas d'échec.
@@ -532,7 +658,7 @@ impl Request {
     /// }
     /// ```
     pub fn query_as<T: DeserializeOwned>(&self) -> Result<T, Error> {
-        serde_urlencoded::from_str(self.inner.target.query().unwrap_or(""))
+        serde_urlencoded::from_str(self.inner.query().unwrap_or(""))
             .map_err(|e| Error::bad_request(format!("query string invalide : {e}")))
     }
 

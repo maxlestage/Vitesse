@@ -34,7 +34,7 @@ use tokio::time::Instant;
 
 use crate::app::AppService;
 use crate::body::{Body, BoxError, Kind};
-use crate::request::{RawHeaders, ReqBody, Request, WireHead};
+use crate::request::{RawHeaders, ReqBody, Request};
 use crate::response::{Response, header_pool};
 use crate::server::ResponseFuture;
 use crate::util::http_date;
@@ -130,6 +130,7 @@ pub(crate) async fn serve_connection(
         app,
         state,
         linger: false,
+        raw: RawHeaders::default(),
     };
     if conn.run().await.is_ok() && conn.linger {
         conn.linger_close().await;
@@ -145,6 +146,8 @@ struct Conn {
     state: &'static ServerState,
     /// Le client envoie encore un corps que personne n'a lu.
     linger: bool,
+    /// Positions des en-têtes de la requête en cours d'analyse.
+    raw: RawHeaders,
 }
 
 /// Une requête dont la réponse est en préparation.
@@ -176,17 +179,28 @@ impl Conn {
             // Toutes les requêtes complètes déjà reçues, en un seul lot.
             let mut busy = None;
             loop {
-                let head = match parse_head(&mut self.rbuf) {
+                let head = match parse_head(&self.rbuf, &mut self.raw) {
                     Ok(Some(head)) => head,
                     Ok(None) => break,
                     Err(status) => return self.fail(status).await,
                 };
                 busy.get_or_insert_with(|| Busy::new(self.state));
                 quiet_ticks = 0;
+                let mut req = Request::from_wire(
+                    &self.rbuf[..head.len],
+                    head.method.clone(),
+                    head.version,
+                    head.target,
+                    &self.raw,
+                    Some(self.peer),
+                    &self.app.shared,
+                );
+                self.rbuf.advance(head.len);
                 let keep_alive = match self.ready_body(head.framing) {
                     Some(body) => {
-                        let mut job = self.job(head.wire, body, head.keep_alive);
-                        match poll_once(&mut job.fut).await {
+                        req.put_body(body);
+                        let mut job = self.job(req, &head);
+                        match &mut poll_once(&mut job.fut).await {
                             // Chemin rapide : le handler a répondu sans attendre.
                             Some(res) => {
                                 let (keep_alive, rest) = self.encode(res, &job);
@@ -198,7 +212,7 @@ impl Conn {
                             None => self.finish(job).await?,
                         }
                     }
-                    None => self.handle_with_body(head).await?,
+                    None => self.handle_with_body(req, head).await?,
                 };
                 if !keep_alive {
                     return self.flush().await;
@@ -259,15 +273,12 @@ impl Conn {
     }
 
     #[inline]
-    fn job(&self, wire: WireHead, body: ReqBody, keep_alive: bool) -> Job {
-        let is_head = wire.method == Method::HEAD;
-        let version = wire.version;
-        let req = Request::from_wire(wire, body, Some(self.peer), &self.app.shared);
+    fn job(&self, req: Request, head: &ParsedHead) -> Job {
         Job {
             fut: ResponseFuture::new(self.app, req),
-            is_head,
-            version,
-            keep_alive,
+            is_head: head.method == Method::HEAD,
+            version: head.version,
+            keep_alive: head.keep_alive,
         }
     }
 
@@ -275,22 +286,17 @@ impl Conn {
     /// précédentes, puis on attend la sienne.
     async fn finish(&mut self, mut job: Job) -> io::Result<bool> {
         self.flush().await?;
-        let res = (&mut job.fut).await;
+        let mut res = (&mut job.fut).await;
         date::refresh();
-        let (keep_alive, rest) = self.encode(res, &job);
+        let (keep_alive, rest) = self.encode(&mut res, &job);
         self.write_rest(rest).await?;
         Ok(keep_alive)
     }
 
     /// Requête dont le corps n'est pas encore (entièrement) arrivé.
-    async fn handle_with_body(&mut self, head: ParsedHead) -> io::Result<bool> {
-        let ParsedHead {
-            wire,
-            framing,
-            keep_alive,
-            expect_continue,
-        } = head;
-        if expect_continue {
+    async fn handle_with_body(&mut self, mut req: Request, head: ParsedHead) -> io::Result<bool> {
+        let framing = head.framing;
+        if head.expect_continue {
             self.wbuf
                 .extend_from_slice(b"HTTP/1.1 100 Continue\r\n\r\n");
             self.flush().await?;
@@ -327,8 +333,9 @@ impl Conn {
             }
         };
 
-        let mut job = self.job(wire, body, keep_alive);
-        let res = match &mut feeder {
+        req.put_body(body);
+        let mut job = self.job(req, &head);
+        let mut res = match &mut feeder {
             None => match poll_once(&mut job.fut).await {
                 Some(res) => res,
                 None => {
@@ -344,7 +351,7 @@ impl Conn {
             job.keep_alive = false;
             self.linger = true;
         }
-        let (keep_alive, rest) = self.encode(res, &job);
+        let (keep_alive, rest) = self.encode(&mut res, &job);
         self.write_rest(rest).await?;
         Ok(keep_alive)
     }
@@ -441,32 +448,41 @@ impl Conn {
     /// Sérialise la tête de la réponse (et un petit corps) dans le tampon
     /// d'écriture. Renvoie s'il faut garder la connexion, et ce qu'il reste à
     /// envoyer.
-    fn encode(&mut self, res: Response, job: &Job) -> (bool, Rest) {
-        let (parts, body) = res.into_http().into_parts();
-        let status = parts.status;
+    fn encode(&mut self, res: &mut Response, job: &Job) -> (bool, Rest) {
+        res.log_server_error();
+        let status = res.status;
+        let ctype = res.ctype;
+        let headers = res.headers.take();
+        let body = std::mem::take(&mut res.body);
         let mut keep_alive = job.keep_alive && !self.state.shutdown.load(Relaxed);
         let buf = &mut self.wbuf;
 
         write_status(buf, status);
         let mut user_length: Option<&HeaderValue> = None;
-        for (name, value) in &parts.headers {
-            if name == header::CONTENT_LENGTH {
-                user_length = Some(value);
-                continue;
-            }
-            if name == header::TRANSFER_ENCODING {
-                continue;
-            }
-            if name == header::CONNECTION {
-                if value.as_bytes().eq_ignore_ascii_case(b"close") {
-                    keep_alive = false;
+        match &headers {
+            Some(map) => {
+                for (name, value) in map.iter() {
+                    if name == header::CONTENT_LENGTH {
+                        user_length = Some(value);
+                        continue;
+                    }
+                    if name == header::TRANSFER_ENCODING {
+                        continue;
+                    }
+                    if name == header::CONNECTION {
+                        if value.as_bytes().eq_ignore_ascii_case(b"close") {
+                            keep_alive = false;
+                        }
+                        continue;
+                    }
+                    buf.extend_from_slice(name.as_str().as_bytes());
+                    buf.extend_from_slice(b": ");
+                    buf.extend_from_slice(value.as_bytes());
+                    buf.extend_from_slice(b"\r\n");
                 }
-                continue;
             }
-            buf.extend_from_slice(name.as_str().as_bytes());
-            buf.extend_from_slice(b": ");
-            buf.extend_from_slice(value.as_bytes());
-            buf.extend_from_slice(b"\r\n");
+            // Le cas courant : un type de contenu connu, écrit d'un bloc.
+            None => buf.extend_from_slice(ctype.line()),
         }
         date::write(buf);
 
@@ -482,9 +498,7 @@ impl Conn {
                 buf.extend_from_slice(len.as_bytes());
                 buf.extend_from_slice(b"\r\n");
             } else if let Some(n) = exact {
-                buf.extend_from_slice(b"content-length: ");
-                push_u64(buf, n);
-                buf.extend_from_slice(b"\r\n");
+                push_content_length(buf, n);
             } else if job.is_head {
                 // Taille inconnue : rien à annoncer.
             } else if job.version == Version::HTTP_11 {
@@ -496,13 +510,16 @@ impl Conn {
             }
         }
         if !keep_alive {
-            buf.extend_from_slice(b"connection: close\r\n");
+            buf.extend_from_slice(b"connection: close\r\n\r\n");
         } else if job.version == Version::HTTP_10 {
-            buf.extend_from_slice(b"connection: keep-alive\r\n");
+            buf.extend_from_slice(b"connection: keep-alive\r\n\r\n");
+        } else {
+            buf.extend_from_slice(b"\r\n");
         }
-        buf.extend_from_slice(b"\r\n");
 
-        header_pool::recycle(parts.headers);
+        if let Some(map) = headers {
+            header_pool::recycle(map);
+        }
         if bodyless || job.is_head {
             return (keep_alive, Rest::None);
         }
@@ -583,14 +600,19 @@ enum Framing {
 }
 
 struct ParsedHead {
-    wire: WireHead,
+    /// Taille de la tête dans le tampon de lecture.
+    len: usize,
+    method: Method,
+    version: Version,
+    target: (usize, usize),
     framing: Framing,
     keep_alive: bool,
     expect_continue: bool,
 }
 
-/// Analyse la tête d'une requête si elle est complète, et la retire du tampon.
-fn parse_head(rbuf: &mut BytesMut) -> Result<Option<ParsedHead>, StatusCode> {
+/// Analyse la tête d'une requête si elle est complète ; les positions des
+/// en-têtes sont écrites dans `raw`. Le tampon n'est pas modifié.
+fn parse_head(rbuf: &[u8], raw: &mut RawHeaders) -> Result<Option<ParsedHead>, StatusCode> {
     if rbuf.is_empty() {
         return Ok(None);
     }
@@ -621,7 +643,7 @@ fn parse_head(rbuf: &mut BytesMut) -> Result<Option<ParsedHead>, StatusCode> {
     let path = req.path.unwrap_or("/").as_bytes();
     let target = (offset(path), offset(path) + path.len());
 
-    let mut raw = RawHeaders::default();
+    raw.clear();
     let mut length: Option<u64> = None;
     let mut transfer_encoding = false;
     let mut chunked = false;
@@ -686,15 +708,11 @@ fn parse_head(rbuf: &mut BytesMut) -> Result<Option<ParsedHead>, StatusCode> {
         _ => keep && !close,
     };
 
-    let bytes = rbuf.split_to(len).freeze();
     Ok(Some(ParsedHead {
-        wire: WireHead {
-            method,
-            version,
-            bytes,
-            target,
-            headers: raw,
-        },
+        len,
+        method,
+        version,
+        target,
         framing,
         keep_alive,
         expect_continue,
@@ -925,26 +943,47 @@ fn find_crlf(buf: &[u8]) -> Option<usize> {
 // ----- Écriture ------------------------------------------------------------
 
 fn write_status(buf: &mut Vec<u8>, status: StatusCode) {
-    buf.extend_from_slice(b"HTTP/1.1 ");
-    buf.extend_from_slice(status.as_str().as_bytes());
-    buf.push(b' ');
-    buf.extend_from_slice(status.canonical_reason().unwrap_or("").as_bytes());
-    buf.extend_from_slice(b"\r\n");
+    // Les statuts courants, d'un seul bloc.
+    let line: &[u8] = match status.as_u16() {
+        200 => b"HTTP/1.1 200 OK\r\n",
+        201 => b"HTTP/1.1 201 Created\r\n",
+        204 => b"HTTP/1.1 204 No Content\r\n",
+        206 => b"HTTP/1.1 206 Partial Content\r\n",
+        301 => b"HTTP/1.1 301 Moved Permanently\r\n",
+        302 => b"HTTP/1.1 302 Found\r\n",
+        304 => b"HTTP/1.1 304 Not Modified\r\n",
+        400 => b"HTTP/1.1 400 Bad Request\r\n",
+        401 => b"HTTP/1.1 401 Unauthorized\r\n",
+        403 => b"HTTP/1.1 403 Forbidden\r\n",
+        404 => b"HTTP/1.1 404 Not Found\r\n",
+        405 => b"HTTP/1.1 405 Method Not Allowed\r\n",
+        500 => b"HTTP/1.1 500 Internal Server Error\r\n",
+        _ => {
+            buf.extend_from_slice(b"HTTP/1.1 ");
+            buf.extend_from_slice(status.as_str().as_bytes());
+            buf.push(b' ');
+            buf.extend_from_slice(status.canonical_reason().unwrap_or("").as_bytes());
+            buf.extend_from_slice(b"\r\n");
+            return;
+        }
+    };
+    buf.extend_from_slice(line);
 }
 
-fn push_u64(buf: &mut Vec<u8>, n: u64) {
-    if n < 10 {
-        buf.push(b'0' + n as u8);
-        return;
-    }
-    let digits = n.ilog10() as usize + 1;
-    let start = buf.len();
-    buf.resize(start + digits, b'0');
+/// Écrit `content-length: n` d'un seul bloc.
+fn push_content_length(buf: &mut Vec<u8>, n: u64) {
+    const PREFIX: &[u8] = b"content-length: ";
+    let mut line = [0u8; PREFIX.len() + 20 + 2];
+    line[..PREFIX.len()].copy_from_slice(PREFIX);
+    let digits = if n == 0 { 1 } else { n.ilog10() as usize + 1 };
     let mut n = n;
-    for slot in buf[start..].iter_mut().rev() {
+    for slot in line[PREFIX.len()..PREFIX.len() + digits].iter_mut().rev() {
         *slot = b'0' + (n % 10) as u8;
         n /= 10;
     }
+    let end = PREFIX.len() + digits;
+    line[end..end + 2].copy_from_slice(b"\r\n");
+    buf.extend_from_slice(&line[..end + 2]);
 }
 
 fn push_hex(buf: &mut Vec<u8>, mut n: usize) {
@@ -1041,42 +1080,42 @@ mod tests {
 
     #[test]
     fn head_parsing() {
+        let mut raw = RawHeaders::default();
         let mut buf = BytesMut::from(
             &b"POST /a?b=1 HTTP/1.1\r\nHost: x\r\nContent-Length: 5\r\n\r\nhelloGET / HTTP/1.0\r\n\r\n"[..],
         );
-        let head = parse_head(&mut buf).unwrap().unwrap();
-        assert_eq!(head.wire.method, Method::POST);
+        let head = parse_head(&buf, &mut raw).unwrap().unwrap();
+        assert_eq!(head.method, Method::POST);
         assert_eq!(head.framing, Framing::Length(5));
         assert!(head.keep_alive);
-        assert_eq!(
-            &head.wire.bytes[head.wire.target.0..head.wire.target.1],
-            b"/a?b=1"
-        );
+        assert_eq!(&buf[head.target.0..head.target.1], b"/a?b=1");
+        buf.advance(head.len);
         assert_eq!(&buf[..5], b"hello");
         buf.advance(5);
-        let head = parse_head(&mut buf).unwrap().unwrap();
-        assert_eq!(head.wire.version, Version::HTTP_10);
+        let head = parse_head(&buf, &mut raw).unwrap().unwrap();
+        assert_eq!(head.version, Version::HTTP_10);
         assert!(!head.keep_alive);
+        buf.advance(head.len);
         assert!(buf.is_empty());
 
-        let mut partial = BytesMut::from(&b"GET / HTTP/1.1\r\nHost:"[..]);
-        assert!(parse_head(&mut partial).unwrap().is_none());
+        let partial = BytesMut::from(&b"GET / HTTP/1.1\r\nHost:"[..]);
+        assert!(parse_head(&partial, &mut raw).unwrap().is_none());
 
-        let mut smuggle = BytesMut::from(
+        let smuggle = BytesMut::from(
             &b"POST / HTTP/1.1\r\nContent-Length: 3\r\nTransfer-Encoding: chunked\r\n\r\n"[..],
         );
         assert_eq!(
-            parse_head(&mut smuggle).err(),
+            parse_head(&smuggle, &mut raw).err(),
             Some(StatusCode::BAD_REQUEST)
         );
-        let mut bad_len = BytesMut::from(&b"POST / HTTP/1.1\r\nContent-Length: 1x\r\n\r\n"[..]);
+        let bad_len = BytesMut::from(&b"POST / HTTP/1.1\r\nContent-Length: 1x\r\n\r\n"[..]);
         assert_eq!(
-            parse_head(&mut bad_len).err(),
+            parse_head(&bad_len, &mut raw).err(),
             Some(StatusCode::BAD_REQUEST)
         );
-        let mut garbage = BytesMut::from(&b"\x01\x02 / HTTP/1.1\r\n\r\n"[..]);
+        let garbage = BytesMut::from(&b"\x01\x02 / HTTP/1.1\r\n\r\n"[..]);
         assert_eq!(
-            parse_head(&mut garbage).err(),
+            parse_head(&garbage, &mut raw).err(),
             Some(StatusCode::BAD_REQUEST)
         );
     }
@@ -1084,10 +1123,13 @@ mod tests {
     #[test]
     fn numbers() {
         let mut v = Vec::new();
-        push_u64(&mut v, 0);
-        push_u64(&mut v, 1234567890);
+        push_content_length(&mut v, 0);
+        push_content_length(&mut v, 1234567890);
         push_hex(&mut v, 0x1a2b);
-        assert_eq!(v, b"012345678901a2b");
+        assert_eq!(
+            v,
+            b"content-length: 0\r\ncontent-length: 1234567890\r\n1a2b"
+        );
         assert_eq!(parse_decimal(b" 42 "), Some(42));
         assert_eq!(parse_decimal(b"-1"), None);
     }

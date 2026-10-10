@@ -4,6 +4,7 @@
 use std::borrow::Cow;
 use std::cell::RefCell;
 use std::fmt;
+use std::sync::LazyLock;
 use std::time::Duration;
 
 use bytes::Bytes;
@@ -14,10 +15,61 @@ use serde::Serialize;
 use crate::body::Body;
 use crate::error::Error;
 
-pub(crate) const TEXT: &str = "text/plain; charset=utf-8";
-pub(crate) const HTML: &str = "text/html; charset=utf-8";
-pub(crate) const JSON: &str = "application/json";
-pub(crate) const OCTETS: &str = "application/octet-stream";
+/// Les types de contenu les plus courants : ils sont mémorisés sous forme d'un
+/// simple code et écrits d'un bloc, sans passer par une `HeaderMap`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
+pub(crate) enum Ctype {
+    None = 0,
+    Text,
+    Html,
+    Json,
+    Octets,
+}
+
+impl Ctype {
+    const VALUES: [&'static str; 5] = [
+        "",
+        "text/plain; charset=utf-8",
+        "text/html; charset=utf-8",
+        "application/json",
+        "application/octet-stream",
+    ];
+
+    const LINES: [&'static [u8]; 5] = [
+        b"",
+        b"content-type: text/plain; charset=utf-8\r\n",
+        b"content-type: text/html; charset=utf-8\r\n",
+        b"content-type: application/json\r\n",
+        b"content-type: application/octet-stream\r\n",
+    ];
+
+    #[inline]
+    fn value(self) -> &'static str {
+        Self::VALUES[self as usize]
+    }
+
+    /// La ligne d'en-tête complète, prête à être écrite.
+    #[inline]
+    pub(crate) fn line(self) -> &'static [u8] {
+        Self::LINES[self as usize]
+    }
+}
+
+/// Les en-têtes vus par [`Response::headers`] quand seul un type de contenu
+/// courant est défini.
+static CTYPE_HEADERS: LazyLock<[HeaderMap; 5]> = LazyLock::new(|| {
+    std::array::from_fn(|i| {
+        let mut map = HeaderMap::new();
+        if i > 0 {
+            map.insert(
+                header::CONTENT_TYPE,
+                HeaderValue::from_static(Ctype::VALUES[i]),
+            );
+        }
+        map
+    })
+});
 
 /// Une réponse HTTP, construite comme avec Express :
 ///
@@ -31,7 +83,13 @@ pub(crate) const OCTETS: &str = "application/octet-stream";
 /// assert_eq!(res.status_code(), 201);
 /// ```
 pub struct Response {
-    pub(crate) inner: http::Response<Body>,
+    pub(crate) status: StatusCode,
+    /// Type de contenu courant, tant qu'aucune `HeaderMap` n'existe.
+    pub(crate) ctype: Ctype,
+    /// Les en-têtes, créés au premier en-tête qui n'est pas un `ctype`.
+    pub(crate) headers: Option<Box<HeaderMap>>,
+    pub(crate) body: Body,
+    pub(crate) extensions: http::Extensions,
     pub(crate) error: Option<Box<Error>>,
 }
 
@@ -44,9 +102,9 @@ impl Default for Response {
 impl fmt::Debug for Response {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Response")
-            .field("status", &self.inner.status())
-            .field("headers", self.inner.headers())
-            .field("body", self.inner.body())
+            .field("status", &self.status)
+            .field("headers", self.headers())
+            .field("body", &self.body)
             .finish()
     }
 }
@@ -55,15 +113,20 @@ impl Response {
     /// Une réponse `200 OK` vide.
     #[inline]
     pub fn new() -> Self {
-        let mut inner = http::Response::new(Body::empty());
-        *inner.headers_mut() = header_pool::take();
-        Response { inner, error: None }
+        Response {
+            status: StatusCode::OK,
+            ctype: Ctype::None,
+            headers: None,
+            body: Body::empty(),
+            extensions: http::Extensions::new(),
+            error: None,
+        }
     }
 
     /// Change le statut (`res.status(404)` en Express).
     #[inline]
     pub fn status(mut self, status: impl IntoStatus) -> Self {
-        *self.inner.status_mut() = status.into_status();
+        self.status = status.into_status();
         self
     }
 
@@ -86,7 +149,7 @@ impl Response {
         V: TryInto<HeaderValue>,
     {
         if let (Ok(name), Ok(value)) = (name.try_into(), value.try_into()) {
-            self.inner.headers_mut().append(name, value);
+            self.headers_mut().append(name, value);
         }
         self
     }
@@ -99,20 +162,20 @@ impl Response {
     /// Définit le corps, sans toucher au `Content-Type`.
     #[inline]
     pub fn send(mut self, body: impl Into<Body>) -> Self {
-        *self.inner.body_mut() = body.into();
+        self.body = body.into();
         self
     }
 
     /// Corps texte (`text/plain; charset=utf-8`).
     #[inline]
     pub fn text(self, text: impl Into<Body>) -> Self {
-        self.static_type(TEXT).send(text)
+        self.with_ctype(Ctype::Text).send(text)
     }
 
     /// Corps HTML (`text/html; charset=utf-8`).
     #[inline]
     pub fn html(self, html: impl Into<Body>) -> Self {
-        self.static_type(HTML).send(html)
+        self.with_ctype(Ctype::Html).send(html)
     }
 
     /// Sérialise `value` en JSON (`res.json()` en Express).
@@ -129,14 +192,20 @@ impl Response {
 
     #[inline]
     pub(crate) fn json_bytes(self, json: impl Into<Body>) -> Self {
-        self.static_type(JSON).send(json)
+        self.with_ctype(Ctype::Json).send(json)
     }
 
     #[inline]
-    pub(crate) fn static_type(mut self, value: &'static str) -> Self {
-        self.inner
-            .headers_mut()
-            .insert(header::CONTENT_TYPE, HeaderValue::from_static(value));
+    pub(crate) fn with_ctype(mut self, ctype: Ctype) -> Self {
+        match &mut self.headers {
+            Some(map) => {
+                map.insert(
+                    header::CONTENT_TYPE,
+                    HeaderValue::from_static(ctype.value()),
+                );
+            }
+            None => self.ctype = ctype,
+        }
         self
     }
 
@@ -184,30 +253,46 @@ impl Response {
     /// Le statut de la réponse.
     #[inline]
     pub fn status_code(&self) -> StatusCode {
-        self.inner.status()
+        self.status
     }
 
     /// Modifie le statut en place.
     pub fn set_status(&mut self, status: impl IntoStatus) -> &mut Self {
-        *self.inner.status_mut() = status.into_status();
+        self.status = status.into_status();
         self
     }
 
     /// Les en-têtes.
     #[inline]
     pub fn headers(&self) -> &HeaderMap {
-        self.inner.headers()
+        match &self.headers {
+            Some(map) => map,
+            None => &CTYPE_HEADERS[self.ctype as usize],
+        }
     }
 
     /// Les en-têtes, modifiables.
-    #[inline]
     pub fn headers_mut(&mut self) -> &mut HeaderMap {
-        self.inner.headers_mut()
+        if self.headers.is_none() {
+            let mut map = header_pool::take();
+            if self.ctype != Ctype::None {
+                map.insert(
+                    header::CONTENT_TYPE,
+                    HeaderValue::from_static(self.ctype.value()),
+                );
+                self.ctype = Ctype::None;
+            }
+            self.headers = Some(map);
+        }
+        match &mut self.headers {
+            Some(map) => map,
+            None => unreachable!("en-têtes créés ci-dessus"),
+        }
     }
 
     /// Lit un en-tête.
     pub fn get_header(&self, name: &str) -> Option<&str> {
-        self.inner.headers().get(name).and_then(|v| v.to_str().ok())
+        self.headers().get(name).and_then(|v| v.to_str().ok())
     }
 
     /// Définit un en-tête en place. Les noms ou valeurs invalides sont ignorés.
@@ -218,34 +303,34 @@ impl Response {
         V: TryInto<HeaderValue>,
     {
         if let (Ok(name), Ok(value)) = (name.try_into(), value.try_into()) {
-            self.inner.headers_mut().insert(name, value);
+            self.headers_mut().insert(name, value);
         }
         self
     }
 
     /// Le corps.
     pub fn body(&self) -> &Body {
-        self.inner.body()
+        &self.body
     }
 
     /// Le corps, modifiable.
     pub fn body_mut(&mut self) -> &mut Body {
-        self.inner.body_mut()
+        &mut self.body
     }
 
     /// Consomme la réponse et renvoie son corps.
     pub fn into_body(self) -> Body {
-        self.inner.into_body()
+        self.body
     }
 
     /// Les extensions (données typées attachées à la réponse).
     pub fn extensions(&self) -> &http::Extensions {
-        self.inner.extensions()
+        &self.extensions
     }
 
     /// Les extensions, modifiables.
     pub fn extensions_mut(&mut self) -> &mut http::Extensions {
-        self.inner.extensions_mut()
+        &mut self.extensions
     }
 
     /// L'erreur à l'origine de cette réponse, si elle vient d'une [`Error`].
@@ -258,8 +343,8 @@ impl Response {
         self.error.take().map(|e| *e)
     }
 
-    /// Convertit en [`http::Response`].
-    pub fn into_http(self) -> http::Response<Body> {
+    /// Journalise la cause d'une erreur 5xx non traitée.
+    pub(crate) fn log_server_error(&self) {
         if let Some(err) = &self.error {
             if err.status().is_server_error() {
                 if let Some(source) = err.source() {
@@ -267,28 +352,51 @@ impl Response {
                 }
             }
         }
-        self.inner
+    }
+
+    /// Convertit en [`http::Response`].
+    pub fn into_http(self) -> http::Response<Body> {
+        self.log_server_error();
+        let headers = match self.headers {
+            Some(map) => *map,
+            None => CTYPE_HEADERS[self.ctype as usize].clone(),
+        };
+        let mut res = http::Response::new(self.body);
+        *res.status_mut() = self.status;
+        *res.headers_mut() = headers;
+        *res.extensions_mut() = self.extensions;
+        res
     }
 
     /// Construit à partir d'une [`http::Response`].
-    pub fn from_http(inner: http::Response<Body>) -> Self {
-        Response { inner, error: None }
+    pub fn from_http(res: http::Response<Body>) -> Self {
+        let (parts, body) = res.into_parts();
+        Response {
+            status: parts.status,
+            ctype: Ctype::None,
+            headers: (!parts.headers.is_empty()).then(|| Box::new(parts.headers)),
+            body,
+            extensions: parts.extensions,
+            error: None,
+        }
     }
 }
 
 /// Réserve de `HeaderMap` déjà allouées, par thread : une réponse réutilise
 /// les tables d'une réponse précédente au lieu d'en allouer de nouvelles.
+// Les boîtes sont voulues : une réponse reçoit la boîte elle-même.
+#[allow(clippy::vec_box)]
 pub(crate) mod header_pool {
     use super::*;
 
     const MAX_POOLED: usize = 128;
 
     thread_local! {
-        static POOL: RefCell<Vec<HeaderMap>> = const { RefCell::new(Vec::new()) };
+        static POOL: RefCell<Vec<Box<HeaderMap>>> = const { RefCell::new(Vec::new()) };
     }
 
     #[inline]
-    pub(crate) fn take() -> HeaderMap {
+    pub(crate) fn take() -> Box<HeaderMap> {
         POOL.try_with(|pool| pool.borrow_mut().pop())
             .ok()
             .flatten()
@@ -296,7 +404,7 @@ pub(crate) mod header_pool {
     }
 
     #[inline]
-    pub(crate) fn recycle(mut map: HeaderMap) {
+    pub(crate) fn recycle(mut map: Box<HeaderMap>) {
         if map.capacity() == 0 || map.capacity() > 64 {
             return;
         }
@@ -409,21 +517,21 @@ impl IntoResponse for Cow<'static, str> {
 impl IntoResponse for Bytes {
     #[inline]
     fn into_response(self) -> Response {
-        Response::new().static_type(OCTETS).send(self)
+        Response::new().with_ctype(Ctype::Octets).send(self)
     }
 }
 
 impl IntoResponse for Vec<u8> {
     #[inline]
     fn into_response(self) -> Response {
-        Response::new().static_type(OCTETS).send(self)
+        Response::new().with_ctype(Ctype::Octets).send(self)
     }
 }
 
 impl IntoResponse for &'static [u8] {
     #[inline]
     fn into_response(self) -> Response {
-        Response::new().static_type(OCTETS).send(self)
+        Response::new().with_ctype(Ctype::Octets).send(self)
     }
 }
 

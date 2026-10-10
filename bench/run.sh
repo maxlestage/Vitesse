@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Benchmark Vitesse vs Drogon, axum et Express avec `wrk`.
+# Benchmark Vitesse vs actix-web, axum, Drogon et Express avec `wrk`.
 #
 #   bench/run.sh [durée] [connexions]
 #
@@ -24,6 +24,7 @@ trap 'rm -rf "$RESULTS"' EXIT
 command -v "$WRK" >/dev/null || { echo "wrk introuvable (apt install wrk / brew install wrk)" >&2; exit 1; }
 cargo build --release --example bench -q
 (cd bench/axum && cargo build --release -q)
+(cd bench/actix && cargo build --release -q)
 (cd bench/express && [ -d node_modules ] || npm install --silent --no-audit --no-fund)
 if [ ! -x bench/drogon/build/bench-drogon ]; then
   cmake -S bench/drogon -B bench/drogon/build -DCMAKE_BUILD_TYPE=Release \
@@ -36,6 +37,7 @@ fi
 SCENARIOS=(
   "texte|/||"
   "json|/json||"
+  "navigateur|/json|bench/lua/navigateur.lua|"
   "params|/users/42||"
   "post-json|/echo|bench/lua/post.lua|"
   "pipeline×16|/|bench/lua/pipeline.lua|16"
@@ -96,6 +98,7 @@ run_server "Express cluster" 3001 env WORKERS="$NCPU" node bench/express/server.
 [ -x bench/drogon/build/bench-drogon ] &&
   run_server "Drogon" 3003 env WORKERS="$NCPU" PORT=3003 bench/drogon/build/bench-drogon
 run_server "axum" 3002 env WORKERS="$NCPU" PORT=3002 bench/axum/target/release/bench-axum
+run_server "actix-web" 3004 env WORKERS="$NCPU" PORT=3004 bench/actix/target/release/bench-actix
 run_server "Vitesse" 3000 env WORKERS="$NCPU" PORT=3000 target/release/examples/bench
 
 python3 - "$RESULTS" <<'PY'
@@ -115,7 +118,7 @@ for f in sorted(os.listdir(d)):
     if name not in servers:
         servers.append(name)
 
-order = ["Express", "Express cluster", "Drogon", "axum", "Vitesse"]
+order = ["Express", "Express cluster", "Drogon", "axum", "actix-web", "Vitesse"]
 servers.sort(key=order.index)
 fmt = lambda n: f"{n:,.0f}".replace(",", " ")
 print()
@@ -123,7 +126,7 @@ print("Requêtes par seconde (temps CPU serveur par requête) :")
 print()
 print("| Scénario | " + " | ".join(servers) + " |")
 print("|---|" + "---:|" * len(servers))
-for label in ["texte", "json", "params", "post-json", "pipeline×16"]:
+for label in ["texte", "json", "navigateur", "params", "post-json", "pipeline×16"]:
     cells = []
     for name in servers:
         rps, us, errors = rows[label][name]

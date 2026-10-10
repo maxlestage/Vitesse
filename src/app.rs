@@ -46,6 +46,8 @@ pub struct App {
     body_limit: usize,
     workers: Option<usize>,
     thread_per_core: bool,
+    #[cfg(feature = "http3")]
+    http3: Option<crate::http3::Http3>,
 }
 
 impl Default for App {
@@ -67,6 +69,8 @@ impl App {
             body_limit: DEFAULT_BODY_LIMIT,
             workers: None,
             thread_per_core: true,
+            #[cfg(feature = "http3")]
+            http3: None,
         }
     }
 
@@ -175,6 +179,15 @@ impl App {
         self
     }
 
+    /// Also serves the application over HTTP/3 (QUIC, UDP), next to
+    /// HTTP/1.1, with [`App::run`], [`App::listen`] and [`App::bind`]:
+    /// see [`http3`](crate::http3).
+    #[cfg(feature = "http3")]
+    pub fn http3(&mut self, config: crate::http3::Http3) -> &mut Self {
+        self.http3 = Some(config);
+        self
+    }
+
     /// Freezes the application. It then lives until the end of the program,
     /// so requests never have to touch a reference count.
     pub(crate) fn build(self) -> &'static AppService {
@@ -200,6 +213,10 @@ impl App {
                 state: self.state,
                 body_limit: self.body_limit,
             },
+            #[cfg(feature = "http3")]
+            http3: self.http3,
+            #[cfg(feature = "http3")]
+            alt_svc: std::sync::OnceLock::new(),
         }))
     }
 
@@ -247,6 +264,12 @@ impl App {
 pub(crate) struct AppService {
     chain: Chain,
     pub(crate) shared: Shared,
+    #[cfg(feature = "http3")]
+    pub(crate) http3: Option<crate::http3::Http3>,
+    /// The `alt-svc: …\r\n` line added to HTTP/1.1 responses once the
+    /// HTTP/3 port is open.
+    #[cfg(feature = "http3")]
+    pub(crate) alt_svc: std::sync::OnceLock<Box<[u8]>>,
 }
 
 impl AppService {

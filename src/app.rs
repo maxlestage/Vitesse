@@ -248,13 +248,13 @@ struct Dispatcher {
 impl Handler for Dispatcher {
     #[inline]
     fn call(&'static self, mut req: Request) -> BoxFuture<Response> {
-        let Some((methods, captures)) = self.tree.find(req.path()) else {
+        let Some(methods) = req.find_route(&self.tree) else {
             return self.fallback.call(req);
         };
         match methods.find(req.method()) {
             Some(route) => {
-                if !captures.is_empty() {
-                    req.set_params(&route.names, captures);
+                if !route.names.is_empty() {
+                    req.set_params(&route.names);
                 }
                 route.handler.call(req)
             }

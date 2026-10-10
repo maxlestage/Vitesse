@@ -124,8 +124,11 @@ impl<T> Tree<T> {
     }
 
     /// Cherche la route correspondant au chemin `path` (qui commence par `/`).
+    /// Les positions des paramètres sont écrites dans `captures`, un tampon
+    /// fourni par l'appelant pour éviter toute allocation.
     #[inline]
-    pub(crate) fn find(&self, path: &str) -> Option<(&T, Captures)> {
+    pub(crate) fn find(&self, path: &str, captures: &mut Captures) -> Option<&T> {
+        captures.clear();
         // `/users/` est traité comme `/users` (mode non strict, comme Express).
         let path = if path.len() > 1 {
             path.strip_suffix('/').unwrap_or(path)
@@ -134,9 +137,8 @@ impl<T> Tree<T> {
         };
         let rest = path.strip_prefix('/')?;
         let rest = if rest.is_empty() { None } else { Some(rest) };
-        let mut captures = Vec::new();
-        let idx = self.root.find(rest, 1, &mut captures)?;
-        Some((&self.values[idx], captures))
+        let idx = self.root.find(rest, 1, captures)?;
+        Some(&self.values[idx])
     }
 }
 
@@ -199,8 +201,9 @@ mod tests {
     }
 
     fn lookup<'a>(t: &Tree<&'static str>, path: &'a str) -> Option<(&'static str, Vec<&'a str>)> {
-        t.find(path)
-            .map(|(v, caps)| (*v, caps.into_iter().map(|(a, b)| &path[a..b]).collect()))
+        let mut caps = Vec::new();
+        t.find(path, &mut caps)
+            .map(|v| (*v, caps.into_iter().map(|(a, b)| &path[a..b]).collect()))
     }
 
     #[test]

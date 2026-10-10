@@ -24,29 +24,44 @@ fn main() -> std::io::Result<()> {
 Requêtes par seconde, et entre parenthèses le temps CPU consommé par le serveur
 pour chaque requête (plus c'est bas, mieux c'est) :
 
-| Scénario | Express 5 | Drogon 1.9 (C++) | axum 0.8 | **Vitesse** |
-|---|---:|---:|---:|---:|
-| `GET /` (texte) | 8 864 (120 µs) | 252 421 (7,8 µs) | 205 641 (9,6 µs) | **293 699 (6,0 µs)** |
-| `GET /json` | 8 916 (120 µs) | 178 130 (11,1 µs) | 198 569 (9,9 µs) | **295 080 (6,0 µs)** |
-| `GET /users/:id` (paramètre + JSON) | 8 905 (120 µs) | 139 001 (14,2 µs) | 178 361 (11,0 µs) | **299 664 (6,1 µs)** |
-| `POST /echo` (lit et renvoie du JSON) | 7 221 (149 µs) | 108 410 (18,3 µs) | 144 965 (13,6 µs) | **292 670 (6,6 µs)** |
-| `GET /` pipeliné ×16 | 11 679 (92 µs) | 836 154 (2,4 µs) | 304 843 (6,5 µs) | **2 552 061 (0,77 µs)** |
+| Scénario | Express 5 | Drogon 1.9 (C++) | axum 0.8 | actix-web 4 | **Vitesse** |
+|---|---:|---:|---:|---:|---:|
+| `GET /` (texte) | 5 921 (180 µs) | 203 244 (9,7 µs) | 168 165 (11,7 µs) | 274 195 (7,1 µs) | **291 415 (6,1 µs)** |
+| `GET /json` | 5 765 (184 µs) | 120 489 (16,5 µs) | 165 988 (11,9 µs) | 248 987 (7,9 µs) | **313 438 (5,9 µs)** |
+| `GET /json` envoyé par un navigateur (12 en-têtes) | 5 627 (188 µs) | 92 041 (21,7 µs) | 131 710 (15,0 µs) | 179 505 (10,9 µs) | **290 478 (6,8 µs)** |
+| `GET /users/:id` (paramètre + JSON) | 5 627 (187 µs) | 98 486 (20,1 µs) | 151 303 (13,1 µs) | 209 173 (9,4 µs) | **304 323 (6,2 µs)** |
+| `POST /echo` (lit et renvoie du JSON) | 4 538 (235 µs) | 69 876 (28,4 µs) | 105 570 (18,8 µs) | 170 129 (11,7 µs) | **253 941 (7,6 µs)** |
+| `GET /` pipeliné ×16 | 8 352 (128 µs) | 724 059 (2,7 µs) | 213 678 (9,3 µs) | 1 272 510 (1,6 µs) | **2 781 541 (0,64 µs)** |
 
-- **Contre Drogon**, l'un des frameworks C++ les plus rapides : de +16 % (texte)
-  à +170 % (POST JSON) de débit, et **3 fois plus** en pipeline. Pour le même
-  travail, Vitesse consomme 23 % à 64 % de CPU en moins.
-- **Contre Express** : 33 à 40 fois plus de requêtes par seconde, et encore
-  16 à 21 fois plus face à Express en cluster sur les mêmes 2 cœurs
-  (14 à 18 k req/s).
-- **Contre axum**, la référence en Rust : de +43 % à +102 % de débit,
-  et 8 fois plus en pipeline.
+- **Contre actix-web**, le framework Rust réputé le plus rapide : jusqu'à
+  **+62 %** de débit avec une vraie requête de navigateur, +45 à +49 % avec des
+  paramètres ou un corps JSON, **2,2 fois plus** en pipeline, et 15 à 59 % de
+  CPU en moins par requête.
+- **Contre axum** : de 1,7 à 2,4 fois plus de requêtes par seconde, deux fois
+  moins de CPU par requête, et 13 fois plus en pipeline.
+- **Contre Drogon (C++)** : de 1,4 à 3,8 fois plus rapide.
+- **Contre Express** : environ 50 fois plus rapide (et toujours 25 fois plus
+  face à Express en cluster sur les mêmes 2 cœurs).
+
+**Pourquoi l'écart avec actix est plus faible sur `GET /` ?** Sur la requête
+la plus simple, tous les serveurs rapides butent sur le même plancher : environ
+4,7 µs de travail du noyau par requête (lecture, écriture et, sur la boucle
+locale, le traitement de la réception côté client, imputé à l'envoi du
+serveur). Vitesse n'ajoute que ~1,4 µs par-dessus, actix ~2,4 µs et axum ~7 µs.
+Dès que la requête ressemble à une vraie requête (en-têtes de navigateur,
+paramètres, corps JSON, pipelining), c'est le code du framework qui fait la
+différence, et l'écart se creuse. En production, à travers un vrai réseau,
+la part du noyau côté serveur est plus faible : l'avantage de Vitesse n'en est
+que plus visible.
 
 <sub>VM 4 vCPU : serveur épinglé sur 2 cœurs, [wrk](https://github.com/wg/wrk)
-sur les 2 autres, 128 connexions keep-alive, 10 s par scénario. Node 22.22 /
-Express 5.3.0, Drogon 1.9.13 (GCC 13, `-O3`), axum 0.8, Rust 1.97, allocateur
-système partout. Sans pipeline, les serveurs les plus rapides saturent wrk : le
-temps CPU par requête, mesuré côté serveur, est alors le juge le plus fiable.
-Pour reproduire : `bench/run.sh` (code des serveurs dans `bench/`).</sub>
+sur les 2 autres, 128 connexions keep-alive, 10 s par scénario, même machine
+et même session pour tous. Node 22.22 / Express 5.3.0, Drogon 1.9.13 (GCC 13,
+`-O3`), axum 0.8, actix-web 4.15, Rust 1.97, allocateur système partout. Sans
+pipeline, les serveurs les plus rapides saturent wrk : le temps CPU par
+requête, mesuré côté serveur, est alors le juge le plus fiable. Les mesures
+varient de quelques pourcents d'une exécution à l'autre. Pour reproduire :
+`bench/run.sh` (code des serveurs dans `bench/`).</sub>
 
 ## Installation
 
@@ -315,14 +330,20 @@ par requête**, et un seul de chaque pour tout un lot de requêtes pipelinées.
 
 - **Un moteur HTTP/1.1 maison** (`src/http1.rs`) :
   - la tête de la requête est analysée par [httparse](https://github.com/seanmonstar/httparse)
-    (SIMD) et les en-têtes restent dans le tampon de lecture : seules leurs
-    positions sont notées. La `HeaderMap` et l'`Uri` ne sont construites que si
-    un handler les demande ;
+    (SIMD) ; les en-têtes ne sont notés que par leur position. La `HeaderMap` et
+    l'`Uri` ne sont construites que si un handler les demande : une requête de
+    navigateur et ses douze en-têtes coûtent presque autant qu'une requête nue ;
   - les réponses sont sérialisées directement dans un tampon d'écriture
-    réutilisé, avec l'en-tête `Date` en cache par thread ;
+    réutilisé : lignes de statut et types de contenu courants pré-calculés,
+    en-tête `Date` en cache par thread, `HeaderMap` créée seulement si on ajoute
+    d'autres en-têtes ;
   - un handler qui répond sans attendre suit un chemin entièrement synchrone :
     pas de `Future` intermédiaire ni de copie de grosses structures ;
   - un seul minuteur par connexion (et non par requête) gère l'inactivité.
+- **Presque aucune allocation** : les requêtes (et leurs tampons) sont
+  recyclées par thread, les tables d'en-têtes des réponses aussi, et le routeur
+  écrit les paramètres dans des tampons réutilisés. Il ne reste que le `Future`
+  du handler (et le tampon d'un corps JSON).
 - **Un thread par cœur** (Linux) : chaque cœur a sa propre boucle d'événements
   et son propre socket `SO_REUSEPORT`, le noyau répartit les connexions et une
   requête ne change jamais de thread. `app.thread_per_core(false)` revient au
@@ -332,9 +353,9 @@ par requête**, et un seul de chaque pour tout un lot de requêtes pipelinées.
   pour les routes statiques ; les paramètres pointent dans le chemin.
 - **Zéro compteur atomique partagé par requête** : l'application est figée au
   démarrage (`&'static`), handlers, middlewares et état sont lus sans `Arc`.
-- **Peu d'allocations et de copies** : la requête traverse middlewares et
-  handlers en ne déplaçant qu'un pointeur, les tables d'en-têtes des réponses
-  sont recyclées, et le corps n'est lu que si le handler le demande.
+- **Peu de copies** : la requête traverse middlewares et handlers en ne
+  déplaçant qu'un pointeur, la réponse ne pèse que 72 octets, et le corps
+  n'est lu que si le handler le demande.
 
 Le moteur reste robuste : rejet des requêtes ambiguës (`Content-Length` +
 `Transfer-Encoding`), limites de taille des en-têtes (431) et du corps (413),

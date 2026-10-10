@@ -216,12 +216,21 @@ macro_rules! routing_methods {
         }
 
         /// Mounts a [`Router`](crate::Router) under a prefix
-        /// (`app.use('/api', router)`). Its middlewares only apply to its own
-        /// routes.
+        /// (`app.use('/api', router)`).
+        ///
+        /// Its middlewares run for its own routes, and, as in Express, for
+        /// every other request under the prefix that no route answers (the
+        /// `404`, `405` and automatic `OPTIONS` responses): a CORS or logging
+        /// middleware on the router covers its whole prefix.
         #[track_caller]
         pub fn mount(&mut self, prefix: &str, router: $crate::Router) -> &mut Self {
-            for (method, path, handler) in router.into_routes() {
+            let (routes, scopes) = router.into_parts();
+            for (method, path, handler) in routes {
                 self.add_route(method, &$crate::router::join_paths(prefix, &path), handler);
+            }
+            for (path, middlewares) in scopes {
+                self.scopes
+                    .push(($crate::router::join_paths(prefix, &path), middlewares));
             }
             self
         }
@@ -275,7 +284,13 @@ pub(crate) use routing_methods;
 pub struct Router {
     routes: Vec<(Option<Method>, String, Arc<dyn Handler>)>,
     middlewares: Vec<Arc<dyn Middleware>>,
+    /// Middlewares of the routers mounted inside this one, by prefix.
+    pub(crate) scopes: Vec<Scope>,
 }
+
+/// The middlewares of a mounted router, with its prefix: they also run for
+/// the requests under that prefix that no route answers.
+pub(crate) type Scope = (String, Vec<Arc<dyn Middleware>>);
 
 impl Router {
     /// Creates an empty router.
@@ -299,23 +314,31 @@ impl Router {
         self.routes.push((method, path.to_owned(), handler));
     }
 
-    /// The routes, wrapped in the router's middlewares.
-    pub(crate) fn into_routes(self) -> Vec<(Option<Method>, String, Arc<dyn Handler>)> {
+    /// The routes, wrapped in the router's middlewares, and the scopes
+    /// (this router's own one first, at `/`).
+    #[allow(clippy::type_complexity)]
+    pub(crate) fn into_parts(
+        self,
+    ) -> (Vec<(Option<Method>, String, Arc<dyn Handler>)>, Vec<Scope>) {
         let Router {
             routes,
             middlewares,
+            scopes: inner,
         } = self;
         if middlewares.is_empty() {
-            return routes;
+            return (routes, inner);
         }
-        routes
+        let routes = routes
             .into_iter()
             .map(|(method, path, handler)| {
                 let chained: Arc<dyn Handler> =
                     Arc::new(Chained::new(middlewares.clone(), handler));
                 (method, path, chained)
             })
-            .collect()
+            .collect();
+        let mut scopes = vec![("/".to_owned(), middlewares)];
+        scopes.extend(inner);
+        (routes, scopes)
     }
 }
 

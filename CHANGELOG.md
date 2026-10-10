@@ -13,17 +13,27 @@ First public release.
 - Express.js-style API: `App`, `app.get/post/put/patch/delete/…`, path
   parameters and wildcards, `Router` and `app.mount`, middleware with
   `next.run(req)`, shared state, `app.fallback` and `app.on_error`.
+- Router middlewares cover their whole mount prefix, like `router.use`:
+  they also run for the `404`, `405` and automatic `OPTIONS` responses
+  under it (a CORS middleware on a router answers its preflights).
+- Panics in handlers and in middlewares become `500` responses that go
+  back through the outer middlewares and `app.on_error`.
 - `Request` helpers: params, query strings, headers, cookies, JSON, forms,
   text, bytes and streaming bodies, with a configurable body limit.
 - Responses from plain values (`&str`, `String`, `Json`, `Html`,
   `(status, body)`, `Redirect`, `Result`…) and the `res` builder.
+- `res::file` / `res::download` with `ETag`, `Last-Modified`, `304 Not
+  Modified`, `Range` / `206 Partial Content` and `If-Range`.
 - Built-in middleware (`logger`, `cors`, `helmet`, `timeout`) and static
   files (`ServeDir`).
 - `vitesse::test`: an in-memory test client.
 - Its own HTTP/1.1 engine on tokio: keep-alive, pipelining, chunked bodies,
   `Expect: 100-continue`, size limits, idle timeouts, graceful shutdown on
-  Ctrl+C / SIGTERM, thread-per-core with `SO_REUSEPORT` on Linux.
+  Ctrl+C / SIGTERM (`app.run`, `app.listen` and `Server::run`),
+  thread-per-core with `SO_REUSEPORT` on Linux.
 - Documentation in English, French and Spanish, a Docker image and
   one-click deployment to Heroku.
+- A 100% Rust repository: the website is Yew (WebAssembly) and the
+  benchmark runner (`bench/runner`) is Rust.
 
 [0.1.0]: https://github.com/maxlestage/Vitesse/releases/tag/v0.1.0

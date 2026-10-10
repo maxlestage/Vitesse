@@ -27,7 +27,7 @@ If Rust was already installed, update it:
 rustup update
 ```
 
-`cargo` is Rust's build tool and package manager. It does the job of `npm` (dependencies, running the project) and also drives the compiler.
+`cargo` is Rust's build tool and package manager: like the package manager of a Node.js project, it handles dependencies and runs the project, and it also drives the compiler.
 
 ## Create a project
 

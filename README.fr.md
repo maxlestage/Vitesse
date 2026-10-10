@@ -55,8 +55,7 @@ pour chaque requête (plus c'est bas, mieux c'est) :
 - **Contre axum** : de 1,7 à 2,4 fois plus de requêtes par seconde, deux fois
   moins de CPU par requête, et 13 fois plus en pipeline.
 - **Contre Drogon (C++)** : de 1,4 à 3,8 fois plus rapide.
-- **Contre Express** : environ 50 fois plus rapide (et toujours 25 fois plus
-  face à Express en cluster sur les mêmes 2 cœurs).
+- **Contre Express** : environ 50 fois plus rapide.
 
 **Pourquoi l'écart avec actix est plus faible sur `GET /` ?** Sur la requête
 la plus simple, tous les serveurs rapides butent sur le même plancher : environ
@@ -76,7 +75,12 @@ et même session pour tous. Node 22.22 / Express 5.3.0, Drogon 1.9.13 (GCC 13,
 pipeline, les serveurs les plus rapides saturent wrk : le temps CPU par
 requête, mesuré côté serveur, est alors le juge le plus fiable. Les mesures
 varient de quelques pourcents d'une exécution à l'autre. Pour reproduire :
-`bench/run.sh` (code des serveurs dans `bench/`).</sub>
+`cargo run --release --manifest-path bench/runner/Cargo.toml` (code des
+serveurs dans `bench/`). Le serveur Express, mesuré dans la même session, a
+depuis été retiré du dépôt pour que le projet reste 100 % Rust, sans
+JavaScript : il figure toujours dans l'historique git
+(`git show 484eed3:bench/express/server.js`), et l'outil de benchmark compare
+désormais Drogon, axum, actix-web et Vitesse.</sub>
 
 ## Installation
 
@@ -242,7 +246,7 @@ cargo run --release --example hello      # Hello World
 cargo run --release --example rest_api   # API CRUD complète
 cargo run --release --example demo       # l'application déployée sur Heroku (lit $PORT)
 cargo test                               # tests unitaires, d'intégration et doctests
-bench/run.sh                             # benchmark (wrk, Node.js, et Drogon si installé)
+cargo run --release --manifest-path bench/runner/Cargo.toml   # benchmark (Linux, wrk, et Drogon si installé)
 docker build -t vitesse-demo . && docker run --rm -p 8080:8080 vitesse-demo
 ```
 
@@ -273,6 +277,10 @@ cargo fmt --check
 cargo clippy --all-targets -- -D warnings
 cargo test
 ```
+
+L'outil de benchmark ([`bench/runner`](bench/runner)) et le site
+([`site/`](site)) sont des crates à part, hors du build principal : si vous
+les modifiez, lancez aussi `cargo test` dans leur dossier.
 
 La documentation se trouve dans [`docs/`](docs), en anglais, en français et
 en espagnol : quand vous modifiez une page, mettez aussi à jour les autres

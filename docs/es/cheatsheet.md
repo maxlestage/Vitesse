@@ -29,7 +29,7 @@ fn main() -> std::io::Result<()> {
 |---|---|
 | `App::new()` | Una aplicación vacía (`express()`) |
 | `app.run(addr)` | Arranca el servidor con su propio runtime; bloquea; se detiene limpiamente con `Ctrl+C` / `SIGTERM` |
-| `app.listen(addr).await` | Arranca el servidor en el runtime de tokio actual; sirve para siempre |
+| `app.listen(addr).await` | Arranca el servidor en el runtime de tokio actual; se detiene limpiamente con `Ctrl+C` / `SIGTERM` |
 | `app.bind(addr).await?` | Abre el puerto y devuelve un `Server`, sin empezar a servir |
 | `app.middleware(mw)` | Middleware global (`app.use`): todas las peticiones, en orden, antes del enrutamiento |
 | `app.fallback(handler)` | Handler al que se llama cuando ninguna ruta coincide (por defecto: `404 {"error":"Cannot GET /x"}`) |
@@ -166,8 +166,8 @@ El cuerpo se lee bajo demanda y se guarda en caché: los métodos de lectura se 
 | `res::send(cuerpo)`, `res::text(t)`, `res::html(h)`, `res::json(v)` | Una respuesta `200` con ese cuerpo |
 | `res::redirect(url)` | Redirección `302` |
 | `res::send_status(código)` | El estado y su motivo como texto (`res.sendStatus()`) |
-| `res::file(ruta).await` | Envía un archivo; `404` si no existe (`res.sendFile()`) |
-| `res::download(ruta, nombre).await` | Envía un archivo como adjunto (`res.download()`) |
+| `res::file(ruta).await` | Envía un archivo con `ETag`, `304` y `Range` (`206`); `404` si no existe (`res.sendFile()`) |
+| `res::download(ruta, nombre).await` | Igual, como adjunto (`res.download()`) |
 
 ### Redirecciones, cookies y cuerpos
 
@@ -205,7 +205,7 @@ Consulta [Respuestas](responses.md).
 | `err.status()`, `err.message()`, `err.source()` | Lee el error |
 | `vitesse::Result<T>` | Alias de `Result<T, vitesse::Error>` |
 | `?` sobre cualquier error estándar | `500 {"error":"Internal Server Error"}`; la causa solo va al log |
-| Pánico en un handler | `500`; el servidor sigue funcionando |
+| Pánico en un handler o en un middleware | `500`; el servidor sigue funcionando |
 
 Consulta [Errores](errors.md).
 
@@ -218,7 +218,7 @@ Consulta [Errores](errors.md).
 | `next.run(req).await` | Continúa la cadena y devuelve la `Response` (`next()`) |
 | Devolver una respuesta sin llamar a `next` | Detiene la cadena (autenticación, caché…) |
 | `app.middleware(mw)` | Para todas las peticiones |
-| `router.middleware(mw)` | Solo para las rutas de ese router |
+| `router.middleware(mw)` | Para las rutas de ese router, y las respuestas `404`, `405` y `OPTIONS` bajo su prefijo |
 | `handler.with(mw)` | Para una sola ruta |
 | `impl Middleware for MiTipo` | `fn handle(&'static self, req: Request, next: Next) -> BoxFuture<Response>` |
 
@@ -245,7 +245,7 @@ Consulta [Middlewares](middleware.md).
 | `router.get(…)`, `.post(…)`, … `.route(…)` | Los mismos métodos de enrutamiento que `App` |
 | `router.mount(prefijo, otro)` | Routers anidados |
 | `router.static_dir(…)`, `router.serve_dir(…)` | Archivos estáticos dentro de un router |
-| `router.middleware(mw)` | Middleware solo para las rutas de este router |
+| `router.middleware(mw)` | Middleware del router: sus rutas y cualquier otra petición bajo su prefijo (`router.use`) |
 | `app.mount("/api", router)` | Lo monta; el prefijo puede contener parámetros (`/users/:id/posts`) |
 
 Consulta [Routers](routers.md).
@@ -272,8 +272,8 @@ Incluido: tipos MIME, `index.html`, `ETag` y `Last-Modified` (`304`), peticiones
 | `"127.0.0.1:8080"`, `"[::]:3000"`, `"localhost:3000"` | Escucha en esa dirección |
 | `String`, `SocketAddr`, `([127, 0, 0, 1], 8080)` | Otras formas aceptadas (`ListenAddr`) |
 | `server.local_addr()` | La dirección que se usa de verdad (puerto `0`) |
-| `server.run().await` | Sirve para siempre |
-| `server.with_graceful_shutdown(signal).await` | Sirve hasta que termina `signal`; las peticiones en curso tienen 10 s para acabar |
+| `server.run().await` | Sirve hasta `Ctrl+C` / `SIGTERM` y luego se detiene limpiamente |
+| `server.with_graceful_shutdown(signal).await` | Sirve hasta que termina `signal`, en lugar de `Ctrl+C` / `SIGTERM`; las peticiones en curso tienen 10 s para acabar |
 
 Consulta [Configuración del servidor](server.md).
 

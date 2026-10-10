@@ -8,7 +8,7 @@ This page covers everything around the server itself: the three ways to start it
 |---|---|---|---|
 | Needs `#[tokio::main]` | No | Yes | Yes |
 | Threads | One per core, see `workers` and `thread_per_core` | Those of your runtime | Those of your runtime |
-| Stops cleanly on `Ctrl+C` / `SIGTERM` | Yes | No | Yes, with `with_graceful_shutdown` |
+| Stops cleanly on `Ctrl+C` / `SIGTERM` | Yes | Yes | Yes with `run()`, or on your own signal with `with_graceful_shutdown` |
 | Knows the port before serving | No | No | Yes, with `local_addr()` |
 | Typical use | Most apps, production | An existing tokio app | Tests, custom shutdown, port `0` |
 
@@ -45,14 +45,14 @@ async fn main() -> std::io::Result<()> {
     app.state(greeting);
     app.get("/", |req: Request| async move { req.state::<String>().clone() });
 
-    app.listen(3000).await // runs forever, on the current runtime
+    app.listen(3000).await // until Ctrl+C / SIGTERM, on the current runtime
 }
 ```
 
 This needs tokio in your `Cargo.toml` (`tokio = { version = "1", features = ["full"] }`).
 
-> [!WARNING]
-> `listen` serves forever: it does not catch `Ctrl+C` or `SIGTERM`, so the process is simply killed, together with the requests in progress. `app.workers` and `app.thread_per_core` have no effect either: the threads are those of your runtime. For a clean shutdown in your own runtime, use `bind` and `with_graceful_shutdown`.
+> [!NOTE]
+> Like `run`, `listen` stops cleanly on `Ctrl+C` or `SIGTERM` and lets requests in progress finish (see [Graceful shutdown](#graceful-shutdown)). On the other hand, `app.workers` and `app.thread_per_core` have no effect: the threads are those of your runtime.
 
 ### `app.bind` and `Server`: full control
 
@@ -69,37 +69,17 @@ async fn main() -> std::io::Result<()> {
     let server = app.bind("127.0.0.1:0").await?; // port 0: the OS picks a free port
     println!("Listening on http://{}", server.local_addr());
 
-    server.with_graceful_shutdown(shutdown_signal()).await
-}
-
-/// Resolves on Ctrl+C or, on Unix, on SIGTERM.
-async fn shutdown_signal() {
-    let ctrl_c = async {
-        tokio::signal::ctrl_c().await.ok();
-    };
-    #[cfg(unix)]
-    let terminate = async {
-        use tokio::signal::unix::{SignalKind, signal};
-        signal(SignalKind::terminate())
-            .expect("cannot listen for SIGTERM")
-            .recv()
-            .await;
-    };
-    #[cfg(not(unix))]
-    let terminate = std::future::pending::<()>();
-
-    tokio::select! {
-        _ = ctrl_c => {}
-        _ = terminate => {}
-    }
+    server.run().await // until Ctrl+C / SIGTERM, like app.run
 }
 ```
 
 | `Server` method | Role |
 |---|---|
 | `server.local_addr()` | The address actually used (handy with port `0`) |
-| `server.run().await` | Serves forever |
+| `server.run().await` | Serves until `Ctrl+C` / `SIGTERM`, then shuts down cleanly |
 | `server.with_graceful_shutdown(signal).await` | Serves until the `signal` future completes, then shuts down cleanly |
+
+`with_graceful_shutdown` replaces `Ctrl+C` / `SIGTERM` with a future of your choice: a channel in [tests](testing.md), or the usual signals plus some code of your own, as in [Going to production](production.md#graceful-shutdown).
 
 This is the mode used for [integration tests](testing.md) on a real port.
 
@@ -204,7 +184,7 @@ The HTTP/1.1 engine protects the server against malformed or abusive requests. T
 | Large body the handler does not read | Response sent with `connection: close`, then the end of the upload is drained (2 s and 8 MiB at most) so the client receives the response |
 | Pipelined requests | Answered in order; the responses of a batch leave in a single system call |
 | HTTP/1.0 | Connection closed after the response, unless the client asks for keep-alive |
-| Panic in a handler | `500`, and the server keeps running |
+| Panic in a handler or a middleware | `500`, and the server keeps running |
 
 On the response side, the engine computes `content-length`, adds the `date` header, sends bodies of unknown size (streams) in `chunked` encoding, sends no body for `204`, `304` and `HEAD` requests, and closes the connection after the response if your handler sets a `connection: close` header.
 
@@ -217,13 +197,13 @@ app.middleware(middleware::timeout(Duration::from_secs(30))); // std::time::Dura
 
 ## Graceful shutdown
 
-With `app.run`, `Ctrl+C` (SIGINT) and, on Unix, `SIGTERM` trigger a graceful shutdown:
+With `app.run`, `app.listen` and `Server::run`, `Ctrl+C` (SIGINT) and, on Unix, `SIGTERM` trigger a graceful shutdown:
 
 1. the server stops accepting new connections;
 2. requests in progress get up to **10 seconds** to finish, and their responses carry `connection: close`;
-3. the remaining connections (idle keep-alive connections, requests still running after 10 s) are closed, and `run` returns `Ok(())`.
+3. the remaining connections (idle keep-alive connections, requests still running after 10 s) are closed, and `run` (or `listen`) returns `Ok(())`.
 
-This is exactly what Docker, Kubernetes or Heroku expect: they send `SIGTERM` and wait a while before forcing the process to stop. With `bind`, `with_graceful_shutdown(signal)` follows the same steps once your `signal` future completes, so you decide what triggers the shutdown. `app.listen()` and `Server::run()` never stop by themselves. The 10-second grace period is not configurable.
+This is exactly what Docker, Kubernetes or Heroku expect: they send `SIGTERM` and wait a while before forcing the process to stop. With `bind`, `with_graceful_shutdown(signal)` follows the same steps once your `signal` future completes, so you decide what triggers the shutdown; `Ctrl+C` and `SIGTERM` are then no longer watched, so include them in your future if you still need them. The 10-second grace period is not configurable.
 
 ## HTTP/1.1 only
 

@@ -104,6 +104,8 @@ Video and audio players, and download managers, ask for parts of a file with the
 | a range beyond the end of the file | `416 Range Not Satisfiable` with `Content-Range: bytes */1234` |
 | several ranges (`bytes=0-1,5-6`) | the whole file, `200` |
 
+To resume a download, a client may add `If-Range`: the range is then only served if `If-Range` equals the file's `Last-Modified` date. Otherwise the file has changed, and the whole file is sent with a `200`. Vitesse's ETags are weak, so an ETag in `If-Range` never matches and also gets the whole file.
+
 ## Large files
 
 Files up to 256 KiB are read in one go; larger files are streamed in 64 KiB chunks, with their exact `Content-Length`. Memory use therefore stays constant, even for a video of several gigabytes. For a `HEAD` request, only the headers are sent.
@@ -141,7 +143,7 @@ Vitesse doesn't compress responses (gzip, brotli). In production, put a reverse 
 
 ## Sending a single file
 
-To send one particular file from a handler, use `res::file(path).await`, or `res::download(path, name).await` to trigger a download (see [Sending responses](responses.md)). Unlike `ServeDir`, these helpers don't know about the request: they always send the whole file with a `200`, and ignore `Range`, `If-None-Match` and `If-Modified-Since` headers.
+To send one particular file from a handler, use `res::file(path).await`, or `res::download(path, name).await` to trigger a download (see [Sending responses](responses.md)). Like Express's `res.sendFile`, these helpers handle caching and ranges exactly as `ServeDir` does: `ETag` and `Last-Modified` headers, `304 Not Modified`, `206 Partial Content` (with `If-Range`) and `416`, as described above. `res::download` keeps its `Content-Disposition: attachment` header on partial responses too. Only the cache duration can't be configured: they always send `max-age=0`.
 
 ## Single-page applications (SPA)
 

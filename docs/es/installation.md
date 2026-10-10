@@ -27,7 +27,7 @@ Si ya tenías Rust instalado, actualízalo:
 rustup update
 ```
 
-`cargo` es la herramienta de compilación y el gestor de paquetes de Rust. Hace el trabajo de `npm` (dependencias, ejecutar el proyecto) y además controla el compilador.
+`cargo` es la herramienta de compilación y el gestor de paquetes de Rust: como el gestor de paquetes de un proyecto Node.js, se encarga de las dependencias y de ejecutar el proyecto, y además controla el compilador.
 
 ## Crear un proyecto
 

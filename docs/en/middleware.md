@@ -101,7 +101,7 @@ app.get("/", handler);
 // a (before) → b (before) → handler → b (after) → a (after)
 ```
 
-The full chain for a request is: **global middleware → [router](routers.md) middleware → route middleware (`.with`) → handler**.
+The full chain for a request is: **global middleware → [router](routers.md) middleware → route middleware (`.with`) → handler**. Router middleware also runs, after global middleware, for the requests under the router's prefix that no route answers: the `404`, the `405` and the automatic `OPTIONS` (see [Routers](routers.md#requests-that-no-route-answers)).
 
 > [!IMPORTANT]
 > Unlike Express's `app.use()`, the position of `app.middleware(...)` relative to your routes doesn't matter: global middleware always wraps **every** request, including routes declared before it, `404`s and `405`s. The [`app.on_error`](errors.md) handler is always the outermost layer.
@@ -137,7 +137,7 @@ app.get("/dashboard", dashboard.with(auth));
 app.get("/health", (|_| async { "ok" }).with(auth));
 ```
 
-- **A group of routes**: put them in a `Router` and call `router.middleware(...)` (see [Routers](routers.md)).
+- **A group of routes**: put them in a `Router` and call `router.middleware(...)`. Like `router.use()` in Express, it covers the router's whole prefix, `404`s included (see [Routers](routers.md)).
 - **A path prefix**: test the path in a global middleware:
 
 ```rust
@@ -208,7 +208,7 @@ When the request's origin is in the list, Vitesse echoes it in `Access-Control-A
 > [!IMPORTANT]
 > Browsers refuse credentialed requests (cookies, `Authorization`) when the answer is `*`. To use cookies or authentication across origins, list your trusted origins explicitly with `.allow_origin(...)`, once per origin. Vitesse deliberately never echoes an arbitrary origin: that would let any website read the responses of a logged-in user.
 
-Requests without an `Origin` header pass through untouched. Preflight requests (`OPTIONS` with `Access-Control-Request-Method`) are answered directly with a `204`, without reaching your routes. When an origin isn't allowed, Vitesse doesn't add any CORS header and the browser blocks the response: CORS protects users' browsers, it doesn't replace authentication.
+Requests without an `Origin` header pass through untouched. Preflight requests (`OPTIONS` with `Access-Control-Request-Method`) are answered directly with a `204`, without reaching your routes. Add `cors()` to the app or to a [router](routers.md), which also covers the preflights of its routes; on a single route (`.with`), it never sees the preflight, which the automatic `OPTIONS` answers without CORS headers. When an origin isn't allowed, Vitesse doesn't add any CORS header and the browser blocks the response: CORS protects users' browsers, it doesn't replace authentication.
 
 > [!TIP]
 > Add `cors()` before your authentication middleware: that way, error responses (a `401`, for example) also carry the CORS headers, and your front-end JavaScript can read them.
@@ -283,3 +283,6 @@ app.middleware(RequestCounter { total: AtomicU64::new(0) });
 ```
 
 `next.run(req)` already returns a `BoxFuture<Response>`: when you don't need to touch the response, return it directly, without `Box::pin`.
+
+> [!NOTE]
+> A panic in a middleware written as a closure or an `async fn` becomes a `500` that goes back through the outer middleware and `app.on_error`, just like a panic in a handler. A hand-written `impl Middleware` doesn't get this treatment: its panics are caught further up the chain (see [Panics](errors.md#panics)).

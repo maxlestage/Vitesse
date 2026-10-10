@@ -208,16 +208,15 @@ A restart takes a fraction of a second, but connections attempted during it fail
 
 ## Graceful shutdown
 
-`app.run` listens for `Ctrl+C` (`SIGINT`) and `SIGTERM`, which systemd, Docker, Kubernetes or Heroku send before stopping an app. Vitesse then:
+`app.run`, `app.listen(port).await` and `Server::run` listen for `Ctrl+C` (`SIGINT`) and `SIGTERM`, which systemd, Docker, Kubernetes or Heroku send before stopping an app. Vitesse then:
 
 1. stops accepting new connections;
 2. lets in-flight requests finish, for up to **10 seconds**;
-3. closes the remaining connections and returns from `app.run`.
+3. closes the remaining connections and returns from `app.run` (or `app.listen`).
 
 The 10-second grace period is fixed. Make sure your platform waits a little longer before killing the process: systemd waits 90 seconds by default (`TimeoutStopSec`), Kubernetes 30 seconds (`terminationGracePeriodSeconds`), Heroku 30 seconds, but Docker only 10 seconds (use `--stop-timeout 15`).
 
-> [!NOTE]
-> `app.listen(port).await`, used inside your own tokio runtime, does **not** watch for signals: it serves forever. In that case, open the port with `app.bind` and pass your own shutdown signal to `with_graceful_shutdown`.
+To run some code of your own when the signal arrives (a log line, flushing a buffer), or to stop on another event, open the port with `app.bind` and pass your own future to `with_graceful_shutdown`. It replaces `Ctrl+C` and `SIGTERM`, so include them if you still need them:
 
 ```rust
 use tokio::signal::unix::{SignalKind, signal};
@@ -260,7 +259,7 @@ If the app depends on a database, add a separate route (for example `/ready`) th
 
 - `middleware::logger()` writes one line per request on standard output, such as `GET /users/42 200 0.084 ms`. Colours are only used when the output is a terminal, so journald, Docker and platform logs stay clean.
 - When a `5xx` error has a cause (a Rust error converted with `?`, or `Error::with_source`), the cause is printed on standard error with a `[vitesse]` prefix; the client only gets a generic message.
-- A panic in a handler becomes a `500`, and Rust prints the panic message on standard error.
+- A panic in a handler or a middleware becomes a `500`, and Rust prints the panic message on standard error.
 
 Need JSON logs for a log collector? Write your own middleware (see [Middleware](middleware.md)):
 

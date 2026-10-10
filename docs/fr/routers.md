@@ -42,7 +42,7 @@ Les chemins se combinent comme on s'y attend : le `/` du routeur devient `/users
 
 ## Les middlewares d'un routeur
 
-`router.middleware(...)` ajoute un middleware à **toutes les routes de ce routeur**, et seulement à elles :
+`router.middleware(...)` ajoute un middleware à **toutes les routes de ce routeur** et, comme `router.use()` en Express, à toute autre requête sous son préfixe :
 
 ```rust
 async fn require_token(req: Request, next: Next) -> Response {
@@ -62,8 +62,29 @@ app.get("/", |_| async { "page d'accueil publique" }); // non concerné
 
 Pour une requête, l'ordre est le suivant : middlewares globaux (`app.middleware`), puis middlewares du routeur dans leur ordre d'ajout, puis middlewares de la route (`.with`), puis le handler. Le middleware d'un routeur s'applique à toutes ses routes, qu'il ait été ajouté avant ou après elles, du moment qu'il l'est avant `mount`.
 
-> [!NOTE]
-> Les middlewares d'un routeur ne s'exécutent que pour les requêtes qui correspondent à l'une de ses routes. Une requête vers `/admin/inconnu` reçoit le `404` de l'application sans passer par `require_token`, alors qu'en Express un middleware ajouté avec `router.use()` s'exécute pour toute requête qui entre dans le routeur.
+### Les requêtes auxquelles aucune route ne répond
+
+Les middlewares d'un routeur s'exécutent aussi pour les requêtes sous son préfixe auxquelles aucune de ses routes ne répond : le `404` (ou votre `app.fallback`), le `405 Method Not Allowed` et la réponse automatique à `OPTIONS` (`204` avec `Allow`). Dans l'exemple ci-dessus, `GET /admin/inconnu` passe lui aussi par `require_token` : sans jeton, le visiteur reçoit un `401` et ne sait même pas si la page existe.
+
+C'est ce qui permet à un logger ou à CORS sur un routeur de fonctionner comme on s'y attend :
+
+```rust
+let mut api = Router::new();
+api.middleware(middleware::logger()); // journalise aussi les 404 sous /api
+api.middleware(middleware::cors());   // répond aussi aux requêtes préliminaires de /api/users
+api.post("/users", |_| async { (201, "créé") });
+
+app.mount("/api", api);
+```
+
+Avant un `POST /api/users` venant d'une autre origine, le navigateur envoie une requête préliminaire `OPTIONS /api/users` : `cors()` y répond avec un `204` et les en-têtes CORS. Un `GET /api/nope` est journalisé, puis reçoit son `404`.
+
+Quelques précisions :
+
+- Le préfixe est comparé segment par segment : un routeur monté sur `/api` couvre `/api` et `/api/...`, mais pas `/apix`.
+- Les middlewares globaux (`app.middleware`) passent toujours en premier, pour chaque requête. Avec des routeurs imbriqués, viennent ensuite les middlewares du routeur extérieur, puis ceux du routeur intérieur.
+- Si un middleware du routeur réécrit le chemin d'une telle requête avec `req.set_uri(...)`, le routage est refait sur le nouveau chemin.
+- Seuls les préfixes faits de segments fixes sont couverts ainsi : sous un préfixe qui contient un paramètre (`/users/:user_id/posts`), les middlewares du routeur ne s'exécutent que pour ses propres routes.
 
 ## Imbriquer des routeurs
 

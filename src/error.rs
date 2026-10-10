@@ -1,4 +1,4 @@
-//! Le type d'erreur HTTP de Vitesse.
+//! Vitesse's HTTP error type.
 
 use std::borrow::Cow;
 use std::fmt;
@@ -8,23 +8,22 @@ use http::StatusCode;
 use crate::body::BoxError;
 use crate::response::{IntoResponse, IntoStatus, Response};
 
-/// Alias pratique : `vitesse::Result<T>` = `Result<T, vitesse::Error>`.
+/// Convenience alias: `vitesse::Result<T>` = `Result<T, vitesse::Error>`.
 pub type Result<T, E = Error> = std::result::Result<T, E>;
 
-/// Une erreur qui se transforme en réponse HTTP.
+/// An error that turns into an HTTP response.
 ///
-/// N'importe quelle erreur standard se convertit en `Error` avec `?` : elle
-/// devient alors une `500 Internal Server Error` dont le détail n'est **pas**
-/// envoyé au client (il est seulement journalisé). Pour renvoyer un message au
-/// client, utilisez les constructeurs comme [`Error::bad_request`] ou
-/// [`Error::not_found`].
+/// Any standard error converts into an `Error` with `?`: it then becomes a
+/// `500 Internal Server Error` whose details are **not** sent to the client
+/// (they are only logged). To send a message to the client, use constructors
+/// such as [`Error::bad_request`] or [`Error::not_found`].
 ///
 /// ```
 /// use vitesse::Error;
 ///
 /// fn check(age: i32) -> vitesse::Result<i32> {
 ///     if age < 0 {
-///         return Err(Error::bad_request("l'âge doit être positif"));
+///         return Err(Error::bad_request("age must be positive"));
 ///     }
 ///     Ok(age)
 /// }
@@ -37,7 +36,7 @@ pub struct Error {
 }
 
 impl Error {
-    /// Crée une erreur avec un statut et un message envoyé au client.
+    /// Creates an error with a status and a message sent to the client.
     pub fn new(status: impl IntoStatus, message: impl Into<Cow<'static, str>>) -> Self {
         Error {
             status: status.into_status(),
@@ -46,14 +45,14 @@ impl Error {
         }
     }
 
-    /// Crée une erreur dont le message est la raison standard du statut
-    /// (ex. `Not Found` pour 404).
+    /// Creates an error whose message is the standard reason phrase of the
+    /// status (e.g. `Not Found` for 404).
     pub fn from_status(status: impl IntoStatus) -> Self {
         let status = status.into_status();
         Error::new(status, status.canonical_reason().unwrap_or("Error"))
     }
 
-    /// Attache la cause d'origine (journalisée pour les erreurs 5xx).
+    /// Attaches the underlying cause (logged for 5xx errors).
     pub fn with_source(mut self, source: impl Into<BoxError>) -> Self {
         self.source = Some(source.into());
         self
@@ -99,17 +98,17 @@ impl Error {
         Error::new(StatusCode::INTERNAL_SERVER_ERROR, message)
     }
 
-    /// Le statut HTTP.
+    /// The HTTP status.
     pub fn status(&self) -> StatusCode {
         self.status
     }
 
-    /// Le message envoyé au client.
+    /// The message sent to the client.
     pub fn message(&self) -> &str {
         &self.message
     }
 
-    /// La cause d'origine, s'il y en a une.
+    /// The underlying cause, if any.
     pub fn source(&self) -> Option<&(dyn std::error::Error + Send + Sync + 'static)> {
         self.source.as_deref()
     }
@@ -135,7 +134,7 @@ impl fmt::Display for Error {
     }
 }
 
-/// Toute erreur standard devient une `500` (détail non exposé au client).
+/// Any standard error becomes a `500` (details are not exposed to the client).
 impl<E> From<E> for Error
 where
     E: std::error::Error + Send + Sync + 'static,

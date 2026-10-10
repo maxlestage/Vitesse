@@ -1,4 +1,4 @@
-//! Fichiers statiques (`express.static`, `res.sendFile`).
+//! Static files (`express.static`, `res.sendFile`).
 
 use std::fs::Metadata;
 use std::io::{self, SeekFrom};
@@ -20,21 +20,21 @@ use crate::request::Request;
 use crate::response::{IntoResponse, Response};
 use crate::util::{http_date, mime_for, percent_decode};
 
-/// En dessous de cette taille, un fichier est lu d'un coup ; au-delà, il est
-/// envoyé en flux.
+/// Below this size, a file is read in one go; above it, the file is
+/// streamed.
 const SMALL_FILE: u64 = 256 * 1024;
 const CHUNK: usize = 64 * 1024;
 
-/// Sert les fichiers d'un dossier.
+/// Serves the files of a directory.
 ///
-/// - **Comme route**, avec [`App::static_dir`](crate::App::static_dir) ou
-///   [`App::serve_dir`](crate::App::serve_dir) : `GET /static/*`.
-/// - **Comme middleware** (`app.use(express.static('public'))`) : si le
-///   fichier n'existe pas, la requête continue vers les routes.
+/// - **As a route**, with [`App::static_dir`](crate::App::static_dir) or
+///   [`App::serve_dir`](crate::App::serve_dir): `GET /static/*`.
+/// - **As a middleware** (`app.use(express.static('public'))`): if the file
+///   does not exist, the request moves on to the routes.
 ///
-/// Gère `index.html`, `ETag` / `Last-Modified` (réponses `304`), les requêtes
-/// partielles (`Range`) et refuse les chemins qui sortent du dossier ainsi que
-/// les fichiers cachés (`.env`, `.git`…).
+/// Handles `index.html`, `ETag` / `Last-Modified` (`304` responses) and
+/// partial requests (`Range`), and rejects paths that escape the directory
+/// as well as hidden files (`.env`, `.git`…).
 ///
 /// ```
 /// use vitesse::prelude::*;
@@ -43,7 +43,7 @@ const CHUNK: usize = 64 * 1024;
 /// let mut app = App::new();
 /// app.static_dir("/assets", "./public");
 /// app.serve_dir("/docs", ServeDir::new("./site").max_age(Duration::from_secs(3600)));
-/// app.middleware(ServeDir::new("./www")); // à la racine, avant les routes
+/// app.middleware(ServeDir::new("./www")); // at the root, before the routes
 /// ```
 #[derive(Debug, Clone)]
 pub struct ServeDir {
@@ -54,7 +54,7 @@ pub struct ServeDir {
 }
 
 impl ServeDir {
-    /// Sert le dossier `root`.
+    /// Serves the directory `root`.
     pub fn new(root: impl Into<PathBuf>) -> Self {
         ServeDir {
             root: root.into(),
@@ -64,25 +64,26 @@ impl ServeDir {
         }
     }
 
-    /// Fichier servi pour un dossier (`index.html` par défaut, `None` pour désactiver).
+    /// The file served for a directory (`index.html` by default, `None` to
+    /// disable).
     pub fn index(mut self, index: Option<&str>) -> Self {
         self.index = index.map(str::to_owned);
         self
     }
 
-    /// Durée de cache navigateur (`Cache-Control: max-age`).
+    /// Browser cache duration (`Cache-Control: max-age`).
     pub fn max_age(mut self, max_age: Duration) -> Self {
         self.max_age = max_age.as_secs();
         self
     }
 
-    /// Autorise les fichiers et dossiers cachés (commençant par `.`).
+    /// Allows hidden files and directories (starting with `.`).
     pub fn dotfiles(mut self, allow: bool) -> Self {
         self.dotfiles = allow;
         self
     }
 
-    /// Cherche et sert `relative` ; `None` si le fichier n'existe pas.
+    /// Looks up and serves `relative`; `None` if the file does not exist.
     async fn serve(&self, req: &Request, relative: &str) -> Option<Response> {
         let mut path = self.root.clone();
         for segment in relative.split('/') {
@@ -152,7 +153,7 @@ impl Middleware for ServeDir {
     }
 }
 
-/// `res.sendFile` : envoie un fichier précis.
+/// `res.sendFile`: sends a specific file.
 pub(crate) async fn send_file(path: &Path, req: Option<&Request>) -> Response {
     match tokio::fs::metadata(path).await {
         Ok(meta) if meta.is_file() => file_response(path, &meta, req, 0).await,
@@ -160,7 +161,7 @@ pub(crate) async fn send_file(path: &Path, req: Option<&Request>) -> Response {
     }
 }
 
-/// Construit la réponse pour un fichier existant.
+/// Builds the response for an existing file.
 async fn file_response(
     path: &Path,
     meta: &Metadata,
@@ -234,13 +235,14 @@ async fn file_response(
 
     match read_file(path, start, count, len).await {
         Ok(body) => res.send(body),
-        Err(e) => Error::internal("lecture du fichier impossible")
+        Err(e) => Error::internal("failed to read the file")
             .with_source(e)
             .into_response(),
     }
 }
 
-/// Lit `count` octets à partir de `start` : d'un coup si c'est petit, en flux sinon.
+/// Reads `count` bytes starting at `start`: in one go if that is small,
+/// as a stream otherwise.
 async fn read_file(path: &Path, start: u64, count: u64, len: u64) -> io::Result<Body> {
     if start == 0 && count == len && count <= SMALL_FILE {
         let data = tokio::fs::read(path).await?;
@@ -263,9 +265,9 @@ async fn read_file(path: &Path, start: u64, count: u64, len: u64) -> io::Result<
     }))
 }
 
-/// Analyse un en-tête `Range: bytes=a-b` (une seule plage).
+/// Parses a `Range: bytes=a-b` header (a single range).
 ///
-/// `None` : en-tête ignoré ; `Some(Err)` : plage impossible (416).
+/// `None`: the header is ignored; `Some(Err)`: unsatisfiable range (416).
 fn parse_range(value: &str, len: u64) -> Option<Result<(u64, u64), ()>> {
     let spec = value.trim().strip_prefix("bytes=")?;
     if spec.contains(',') {
@@ -295,7 +297,7 @@ fn parse_range(value: &str, len: u64) -> Option<Result<(u64, u64), ()>> {
     Some(Ok(range))
 }
 
-/// Un fichier envoyé par morceaux de 64 Kio.
+/// A file sent in 64 KiB chunks.
 struct FileBody {
     file: tokio::fs::File,
     remaining: u64,

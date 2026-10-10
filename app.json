@@ -1,0 +1,10 @@
+{
+  "name": "Vitesse",
+  "description": "An Express.js-style web framework in native Rust, built for speed. Deploys the Vitesse demo app.",
+  "repository": "https://github.com/maxlestage/Vitesse",
+  "website": "https://maxlestage.github.io/Vitesse/",
+  "logo": "https://maxlestage.github.io/Vitesse/assets/favicon.svg",
+  "keywords": ["rust", "web", "framework", "express", "http"],
+  "stack": "container",
+  "success_url": "/"
+}

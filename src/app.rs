@@ -1,4 +1,4 @@
-//! L'application (`express()`).
+//! The application (`express()`).
 
 use std::io;
 use std::sync::Arc;
@@ -14,10 +14,10 @@ use crate::router::{MethodMap, Route, routing_methods};
 use crate::server::{self, ListenAddr, Server};
 use crate::tree::{Tree, param_names, parse_pattern};
 
-/// Taille maximale par défaut d'un corps de requête lu en mémoire : 1 Mio.
+/// Default maximum size of a request body read into memory: 1 MiB.
 pub const DEFAULT_BODY_LIMIT: usize = 1024 * 1024;
 
-/// Une application Vitesse (`const app = express()`).
+/// A Vitesse application (`const app = express()`).
 ///
 /// ```no_run
 /// use vitesse::prelude::*;
@@ -52,7 +52,7 @@ impl Default for App {
 }
 
 impl App {
-    /// Une application vide.
+    /// Creates an empty application.
     pub fn new() -> Self {
         App {
             tree: Tree::new(),
@@ -70,7 +70,12 @@ impl App {
 
     #[track_caller]
     fn add_route(&mut self, method: Option<Method>, path: &str, handler: Arc<dyn Handler>) {
-        let segments = parse_pattern(path).unwrap_or_else(|e| panic!("route invalide : {e}"));
+        // Un `match` plutôt qu'une closure : `#[track_caller]` désigne ainsi la
+        // ligne de l'utilisateur.
+        let segments = match parse_pattern(path) {
+            Ok(segments) => segments,
+            Err(e) => panic!("invalid route: {e}"),
+        };
         let route = Route {
             handler,
             names: param_names(&segments),
@@ -78,36 +83,36 @@ impl App {
         let methods = self.tree.entry(&segments, MethodMap::default);
         if methods.insert(method.clone(), route).is_err() {
             let method = method.map_or("ALL".to_owned(), |m| m.to_string());
-            panic!("route en double : {method} {path} est déjà définie");
+            panic!("duplicate route: {method} {path} is already defined");
         }
     }
 
-    /// Ajoute un middleware global (`app.use(fn)`).
+    /// Adds a global middleware (`app.use(fn)`).
     ///
-    /// Les middlewares globaux s'exécutent dans l'ordre d'ajout, avant le
-    /// routage, pour **toutes** les requêtes (y compris les 404).
+    /// Global middlewares run in the order they were added, before routing,
+    /// for **every** request (including 404s).
     pub fn middleware<M: Middleware>(&mut self, middleware: M) -> &mut Self {
         self.middlewares.push(Arc::new(middleware));
         self
     }
 
-    /// Le handler appelé quand aucune route ne correspond (404 par défaut).
+    /// Sets the handler called when no route matches (a 404 by default).
     pub fn fallback<H: Handler>(&mut self, handler: H) -> &mut Self {
         self.fallback = Some(Arc::new(handler));
         self
     }
 
-    /// Personnalise les réponses d'erreur (le `(err, req, res, next)` d'Express).
+    /// Customizes error responses (Express's `(err, req, res, next)`).
     ///
-    /// Appelé pour chaque réponse issue d'une [`Error`] (y compris les 404,
-    /// les erreurs de parsing et les paniques).
+    /// Called for every response produced from an [`Error`] (including 404s,
+    /// parsing errors and panics).
     ///
     /// ```
     /// use vitesse::prelude::*;
     ///
     /// let mut app = App::new();
     /// app.on_error(|err: Error| {
-    ///     res::status(err.status()).html(format!("<h1>Oups : {}</h1>", err.message()))
+    ///     res::status(err.status()).html(format!("<h1>Oops: {}</h1>", err.message()))
     /// });
     /// ```
     pub fn on_error<F, R>(&mut self, handler: F) -> &mut Self
@@ -119,7 +124,7 @@ impl App {
         self
     }
 
-    /// Enregistre un état global, accessible avec [`Request::state`].
+    /// Registers global state, accessible with [`Request::state`].
     ///
     /// ```
     /// use vitesse::prelude::*;
@@ -129,7 +134,7 @@ impl App {
     /// app.state(AtomicU64::new(0));
     /// app.get("/visits", |req: Request| async move {
     ///     let n = req.state::<AtomicU64>().fetch_add(1, Ordering::Relaxed);
-    ///     format!("visite n°{}", n + 1)
+    ///     format!("visit #{}", n + 1)
     /// });
     /// ```
     pub fn state<T: Send + Sync + 'static>(&mut self, value: T) -> &mut Self {
@@ -137,37 +142,37 @@ impl App {
         self
     }
 
-    /// Taille maximale d'un corps de requête lu en mémoire (1 Mio par défaut).
+    /// Maximum size of a request body read into memory (1 MiB by default).
     pub fn body_limit(&mut self, bytes: usize) -> &mut Self {
         self.body_limit = bytes;
         self
     }
 
-    /// Nombre de threads du serveur pour [`App::run`] (un par cœur par défaut).
+    /// Number of server threads for [`App::run`] (one per core by default).
     pub fn workers(&mut self, workers: usize) -> &mut Self {
         self.workers = Some(workers.max(1));
         self
     }
 
-    /// Mode « un thread par cœur » pour [`App::run`] : activé par défaut
-    /// sous Linux (ignoré ailleurs).
+    /// "Thread per core" mode for [`App::run`]: enabled by default on Linux
+    /// (ignored elsewhere).
     ///
-    /// Chaque thread a sa propre boucle d'événements et son propre socket
-    /// (`SO_REUSEPORT`) : le noyau répartit les connexions et une requête ne
-    /// change jamais de thread, sans aucune synchronisation entre cœurs. C'est
-    /// le mode le plus rapide.
+    /// Each thread has its own event loop and its own socket
+    /// (`SO_REUSEPORT`): the kernel spreads connections across threads and a
+    /// request never changes thread, with no synchronization at all between
+    /// cores. This is the fastest mode.
     ///
-    /// En contrepartie, la charge n'est pas rééquilibrée entre threads :
-    /// désactivez-le (`false`) pour utiliser le runtime multi-thread de tokio
-    /// si des handlers font de longs calculs bloquants ou si les connexions
-    /// sont peu nombreuses et très inégales.
+    /// The trade-off is that load is not rebalanced between threads: disable
+    /// it (`false`) to use tokio's multi-threaded runtime if handlers perform
+    /// long blocking computations, or if connections are few and very
+    /// uneven.
     pub fn thread_per_core(&mut self, enabled: bool) -> &mut Self {
         self.thread_per_core = enabled;
         self
     }
 
-    /// Fige l'application. Elle vit ensuite jusqu'à la fin du programme : les
-    /// requêtes n'ont ainsi jamais à manipuler de compteur de références.
+    /// Freezes the application. It then lives until the end of the program,
+    /// so requests never have to touch a reference count.
     pub(crate) fn build(self) -> &'static AppService {
         let fallback = self.fallback.unwrap_or_else(|| Arc::new(not_found));
         let dispatcher: Arc<dyn Handler> = Arc::new(Dispatcher {
@@ -190,14 +195,14 @@ impl App {
         }))
     }
 
-    /// Ouvre le port sans démarrer le serveur : pratique pour connaître le
-    /// port choisi quand on écoute sur le port `0`.
+    /// Opens the port without starting the server: handy to find out which
+    /// port was picked when listening on port `0`.
     pub async fn bind(self, addr: impl ListenAddr) -> io::Result<Server> {
         let listener = server::bind(&addr.socket_addrs()?, false)?;
         Server::new(self.build(), tokio::net::TcpListener::from_std(listener)?)
     }
 
-    /// Démarre le serveur sur le runtime tokio courant (`app.listen(3000)`).
+    /// Starts the server on the current tokio runtime (`app.listen(3000)`).
     ///
     /// ```no_run
     /// # use vitesse::prelude::*;
@@ -212,10 +217,10 @@ impl App {
         self.bind(addr).await?.run().await
     }
 
-    /// Démarre le serveur sans avoir besoin de `#[tokio::main]` : crée les
-    /// threads (un par cœur, voir [`App::workers`] et
-    /// [`App::thread_per_core`]) et s'arrête proprement sur `Ctrl+C` /
-    /// `SIGTERM`. C'est le mode le plus rapide.
+    /// Starts the server without needing `#[tokio::main]`: spawns the
+    /// threads (one per core, see [`App::workers`] and
+    /// [`App::thread_per_core`]) and shuts down gracefully on `Ctrl+C` /
+    /// `SIGTERM`. This is the fastest mode.
     pub fn run(self, addr: impl ListenAddr) -> io::Result<()> {
         let addrs = addr.socket_addrs()?;
         let workers = self
@@ -226,7 +231,7 @@ impl App {
     }
 }
 
-/// L'application figée, prête à servir.
+/// The frozen application, ready to serve.
 pub(crate) struct AppService {
     chain: Chain,
     pub(crate) shared: Shared,
@@ -239,7 +244,7 @@ impl AppService {
     }
 }
 
-/// Le routage : trouve la route et appelle son handler.
+/// Routing: finds the route and calls its handler.
 struct Dispatcher {
     tree: Tree<MethodMap>,
     fallback: Arc<dyn Handler>,
@@ -278,7 +283,7 @@ async fn not_found(req: Request) -> Error {
     Error::not_found(format!("Cannot {} {}", req.method(), req.path()))
 }
 
-/// Applique `app.on_error` aux réponses issues d'une erreur.
+/// Applies `app.on_error` to responses produced from an error.
 struct ErrorHandler(Arc<dyn Fn(Error) -> Response + Send + Sync>);
 
 impl Middleware for ErrorHandler {

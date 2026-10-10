@@ -5,10 +5,12 @@ on:
     branches: [master]
     paths:
       - "site/**"
+      - "docs/**"
       - ".github/workflows/site.yml"
   pull_request:
     paths:
       - "site/**"
+      - "docs/**"
       - ".github/workflows/site.yml"
   workflow_dispatch:
 
@@ -39,6 +41,9 @@ jobs:
           trunk --version
       - run: cargo fmt --check
       - run: cargo clippy --target wasm32-unknown-unknown --release -- -D warnings
+      # Tests natifs : langues, rendu Markdown, recherche, et vérification de
+      # toutes les pages de docs/ (titres, liens et ancres).
+      - run: cargo test
       - name: Build
         run: trunk build --release --public-url "/${{ github.event.repository.name }}/"
       - uses: actions/upload-pages-artifact@v3

@@ -3,11 +3,26 @@ name = "vitesse"
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.85"
-description = "Un framework web minimaliste à la Express.js, écrit en Rust natif et pensé pour la vitesse."
-repository = "https://github.com/maxlestage/vitesse"
+description = "An Express.js-style web framework in native Rust, built for speed: familiar API (app.get, req.params, middleware, Router), its own HTTP/1.1 engine on tokio."
+authors = ["Maxime Lestage"]
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/maxlestage/Vitesse"
+homepage = "https://maxlestage.github.io/Vitesse/"
+documentation = "https://docs.rs/vitesse"
 readme = "README.md"
 keywords = ["web", "http", "framework", "express", "server"]
-categories = ["web-programming::http-server"]
+categories = ["web-programming::http-server", "network-programming", "asynchronous"]
+# The published package only contains the library (not the website, the
+# docs or the benchmarks).
+include = [
+    "/src",
+    "/examples",
+    "/tests",
+    "/README.md",
+    "/CHANGELOG.md",
+    "/LICENSE-MIT",
+    "/LICENSE-APACHE",
+]
 
 [dependencies]
 bytes = "1"
@@ -33,7 +48,7 @@ tokio = { version = "1", features = ["full"] }
 lto = "fat"
 codegen-units = 1
 
-# `cargo build --profile profiling` : comme release, avec de quoi profiler (perf).
+# `cargo build --profile profiling`: like release, with what perf needs.
 [profile.profiling]
 inherits = "release"
 debug = "line-tables-only"

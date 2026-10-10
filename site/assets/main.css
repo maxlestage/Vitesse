@@ -2,6 +2,32 @@
    Vitesse — site de présentation
    ========================================================================== */
 
+/* Polices hébergées avec le site (licence SIL OFL, voir fonts/*-OFL.txt) :
+   disponibles hors ligne, sans service tiers. */
+@font-face {
+  font-family: "Inter";
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url("fonts/inter-latin.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Space Grotesk";
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url("fonts/space-grotesk-latin.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "JetBrains Mono";
+  font-style: normal;
+  font-weight: 400 500;
+  font-display: swap;
+  src: url("fonts/jetbrains-mono-latin.woff2") format("woff2");
+}
+
 :root {
   --bg: #07070b;
   --bg-2: #0c0c13;
@@ -25,6 +51,17 @@
   --radius: 22px;
   --gutter: clamp(20px, 5vw, 64px);
   --max: 1240px;
+  /* Le départ des animations du héros : tout de suite, ou quand l'écran de
+     chargement se lève. */
+  --hero-delay: 0.1s;
+}
+
+html.with-loader {
+  --hero-delay: 1.7s;
+}
+
+html.with-loader.intro-seen {
+  --hero-delay: 0.15s;
 }
 
 *,
@@ -50,8 +87,23 @@ body {
   overflow-x: hidden;
 }
 
-body:not(.is-loaded) {
-  overflow: hidden;
+/* Le lien d'évitement, visible seulement au clavier. */
+.skip {
+  position: fixed;
+  top: 12px;
+  left: 12px;
+  z-index: 120;
+  padding: 10px 16px;
+  border-radius: 999px;
+  background: var(--text);
+  color: var(--bg);
+  font-weight: 600;
+  transform: translateY(-160%);
+  transition: transform 0.3s var(--ease-out);
+}
+
+.skip:focus {
+  transform: none;
 }
 
 ::selection {
@@ -141,6 +193,9 @@ main.main--docs:has(.doc-side.is-open) {
 
 /* ----- Écran de chargement ------------------------------------------------- */
 
+/* Tout en CSS : l'éclair se dessine pendant que le compteur monte à 100, puis le
+   rideau se lève (à 1,7 s). Rendu au premier accueil de la visite ; le code du
+   navigateur l'efface aussitôt s'il a déjà joué (`html.intro-seen`). */
 .loader {
   position: fixed;
   inset: 0;
@@ -148,25 +203,41 @@ main.main--docs:has(.doc-side.is-open) {
   display: grid;
   place-items: center;
   background: var(--bg);
-  transition: transform 1.1s var(--ease-in-out) 0.35s, visibility 0s linear 1.5s;
+  animation: loader-out 1.1s var(--ease-in-out) 2.05s forwards;
 }
 
-.loader--done {
-  transform: translateY(-100%);
-  visibility: hidden;
-  pointer-events: none;
+@keyframes loader-out {
+  to {
+    transform: translateY(-100%);
+    visibility: hidden;
+    pointer-events: none;
+  }
+}
+
+html.intro-seen .loader {
+  animation: loader-skip 0.45s ease forwards;
+}
+
+@keyframes loader-skip {
+  to {
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+  }
 }
 
 .loader__inner {
   display: grid;
   justify-items: center;
   gap: 18px;
-  transition: opacity 0.4s ease, transform 0.6s var(--ease-out);
+  animation: loader-inner-out 0.6s var(--ease-out) 1.7s forwards;
 }
 
-.loader--done .loader__inner {
-  opacity: 0;
-  transform: translateY(-40px) scale(0.96);
+@keyframes loader-inner-out {
+  to {
+    opacity: 0;
+    transform: translateY(-40px) scale(0.96);
+  }
 }
 
 .loader__bolt {
@@ -217,7 +288,24 @@ main.main--docs:has(.doc-side.is-open) {
   height: 100%;
   background: var(--grad);
   transform-origin: left;
-  transition: transform 0.12s linear;
+  transform: scaleX(0);
+  animation: bar-fill 1.6s cubic-bezier(0.2, 0.7, 0.3, 1) forwards;
+}
+
+@keyframes bar-fill {
+  to { transform: scaleX(1); }
+}
+
+/* Le compteur, de 000 à 100, sans JavaScript. */
+@property --pct {
+  syntax: "<integer>";
+  inherits: false;
+  initial-value: 0;
+}
+
+@counter-style pct {
+  system: extends decimal;
+  pad: 3 "0";
 }
 
 .loader__percent {
@@ -231,6 +319,17 @@ main.main--docs:has(.doc-side.is-open) {
   line-height: 1;
   color: transparent;
   -webkit-text-stroke: 1px var(--border-2);
+  font-variant-numeric: tabular-nums;
+  counter-reset: pct var(--pct);
+  animation: pct 1.6s cubic-bezier(0.2, 0.7, 0.3, 1) forwards;
+}
+
+.loader__percent::after {
+  content: counter(pct, pct);
+}
+
+@keyframes pct {
+  to { --pct: 100; }
 }
 
 .loader__curtain {
@@ -239,10 +338,7 @@ main.main--docs:has(.doc-side.is-open) {
   background: var(--grad);
   transform: translateY(100%);
   z-index: -1;
-}
-
-.loader--done .loader__curtain {
-  animation: curtain 1.2s var(--ease-in-out) forwards;
+  animation: curtain 1.2s var(--ease-in-out) 1.7s forwards;
 }
 
 @keyframes curtain {
@@ -676,18 +772,17 @@ body.has-cursor .cursor {
 
 /* ----- Apparition au défilement --------------------------------------------- */
 
-[data-reveal] {
-  opacity: 0;
-  transform: translateY(46px);
-  filter: blur(6px);
+/* Sans le code du navigateur, tout est visible ; avec lui, ce qui est sous
+   l'écran attend son tour. */
+.hydrated [data-reveal] {
   transition: opacity 1s var(--ease-out), transform 1.1s var(--ease-out), filter 1s var(--ease-out);
   transition-delay: var(--d, 0ms);
 }
 
-[data-reveal].in {
-  opacity: 1;
-  transform: none;
-  filter: none;
+.hydrated [data-reveal]:not(.in) {
+  opacity: 0;
+  transform: translateY(46px);
+  filter: blur(6px);
 }
 
 /* ----- Héros ----------------------------------------------------------------- */
@@ -715,11 +810,11 @@ body.has-cursor .cursor {
   width: 100%;
   height: 100%;
   opacity: 0;
-  transition: opacity 2s ease 0.4s;
+  animation: warp-in 2s ease calc(var(--hero-delay) + 0.4s) forwards;
 }
 
-body.is-loaded .warp {
-  opacity: 0.9;
+@keyframes warp-in {
+  to { opacity: 0.9; }
 }
 
 .blob {
@@ -806,10 +901,7 @@ body.is-loaded .warp {
 .intro {
   opacity: 0;
   transform: translateY(30px);
-}
-
-body.is-loaded .intro {
-  animation: intro 1.1s var(--ease-out) var(--d, 0ms) forwards;
+  animation: intro 1.1s var(--ease-out) calc(var(--hero-delay) + var(--d, 0ms)) forwards;
 }
 
 @keyframes intro {
@@ -882,10 +974,7 @@ body.is-loaded .intro {
   display: inline-block;
   transform: translateY(115%) rotate(6deg);
   opacity: 0;
-}
-
-body.is-loaded .split .ch {
-  animation: rise 1s var(--ease-out) calc(120ms + var(--i) * 22ms) forwards;
+  animation: rise 1s var(--ease-out) calc(var(--hero-delay) + 120ms + var(--i) * 22ms) forwards;
 }
 
 @keyframes rise {
@@ -3287,8 +3376,11 @@ body.is-loaded .split .ch {
     position: fixed;
     z-index: 85;
     inset: 0;
-    display: block;
     background: rgba(0, 0, 0, 0.55);
+  }
+
+  .doc-side.is-open ~ .docs__scrim {
+    display: block;
   }
 
   .docs__crumb {
@@ -3483,14 +3575,140 @@ body.is-loaded .split .ch {
   *::before,
   *::after {
     animation-duration: 0.01ms !important;
+    animation-delay: 0ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
     transition-delay: 0ms !important;
     scroll-behavior: auto !important;
   }
 
+  .loader {
+    display: none;
+  }
+
   .noise,
   .marquee__track {
     animation: none !important;
   }
+}
+
+/* ----- Page introuvable ------------------------------------------------------------------------- */
+
+.notfound {
+  min-height: 100svh;
+  display: grid;
+  align-content: center;
+}
+
+.notfound__code {
+  font-family: var(--font-display);
+  font-size: clamp(96px, 22vw, 220px);
+  font-weight: 600;
+  letter-spacing: -0.06em;
+  line-height: 0.9;
+  color: transparent;
+  -webkit-text-stroke: 1px var(--border-2);
+  background: var(--grad);
+  -webkit-background-clip: text;
+  background-clip: text;
+  opacity: 0.85;
+}
+
+.notfound__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 14px;
+  margin-top: 34px;
+}
+
+/* ----- Pages seules (hors ligne, choix de la langue) --------------------------------------------- */
+
+.standalone {
+  min-height: 100svh;
+  display: grid;
+  place-items: center;
+  padding: 48px var(--gutter);
+}
+
+.standalone__card {
+  width: min(560px, 100%);
+  display: grid;
+  justify-items: center;
+  gap: 18px;
+  padding: clamp(28px, 6vw, 48px);
+  text-align: center;
+}
+
+.standalone__card h1 {
+  font-size: clamp(30px, 6vw, 44px);
+}
+
+.standalone__card p {
+  color: var(--muted);
+}
+
+.standalone__icon,
+.standalone__logo {
+  display: grid;
+  place-items: center;
+  width: 64px;
+  height: 64px;
+  border-radius: 18px;
+  border: 1px solid var(--border-2);
+  background: var(--surface-2);
+  color: var(--hot-1);
+}
+
+.standalone__icon .icon,
+.standalone__logo .logo-mark {
+  width: 34px;
+  height: 34px;
+}
+
+.standalone__lang {
+  display: grid;
+  gap: 8px;
+  padding-top: 18px;
+  border-top: 1px solid var(--border);
+}
+
+.standalone__lang h1 {
+  font-size: clamp(24px, 5vw, 32px);
+}
+
+.standalone__links a,
+.root__langs a {
+  color: var(--hot-1);
+}
+
+.root__langs {
+  display: grid;
+  gap: 10px;
+  width: 100%;
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.root__langs a {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 18px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  color: var(--text);
+  transition: border-color 0.3s, background 0.3s;
+}
+
+.root__langs a:hover {
+  border-color: var(--hot-2);
+  background: rgba(255, 122, 26, 0.08);
+}
+
+.root__code {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--hot-2);
 }

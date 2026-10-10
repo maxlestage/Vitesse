@@ -1,7 +1,11 @@
 //! Les données du site qui ne dépendent pas de la langue : chiffres du
-//! benchmark, icônes et étiquettes de code (les textes sont dans `i18n`).
+//! benchmark, icônes et étiquettes de code (les textes sont dans `i18n` et
+//! `labels`).
 
 pub const GITHUB: &str = "https://github.com/maxlestage/Vitesse";
+
+/// La commande d'installation du héros.
+pub const INSTALL: &str = "cargo add vitesse";
 
 /// Le bouton « Deploy to Heroku » (Heroku Button).
 pub const HEROKU_DEPLOY: &str =

@@ -1,0 +1,10 @@
+target/
+site/
+docs/
+bench/
+tests/
+uploads/
+.git/
+.github/
+*.md
+Dockerfile

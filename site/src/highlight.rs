@@ -1,4 +1,5 @@
-//! Coloration syntaxique minimale pour Rust et JavaScript.
+//! Coloration syntaxique minimale pour Rust et JavaScript, partagée par le serveur
+//! (documentation, exemples) et le navigateur (l'exemple qui s'écrit tout seul).
 
 /// Les catégories de jetons (chacune a sa classe CSS).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -187,4 +188,61 @@ pub fn truncate(tokens: &[(Kind, String)], limit: usize) -> Vec<(Kind, String)> 
         }
     }
     out
+}
+
+/// Échappe un texte pour le HTML.
+pub fn escape(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for c in text.chars() {
+        match c {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '"' => out.push_str("&quot;"),
+            _ => out.push(c),
+        }
+    }
+    out
+}
+
+/// Les jetons en HTML : un `<span class="t-…">` par jeton coloré.
+pub fn to_html(tokens: &[(Kind, String)]) -> String {
+    let mut out = String::new();
+    for (kind, text) in tokens {
+        if *kind == Kind::Plain {
+            out.push_str(&escape(text));
+        } else {
+            out.push_str("<span class=\"");
+            out.push_str(kind.class());
+            out.push_str("\">");
+            out.push_str(&escape(text));
+            out.push_str("</span>");
+        }
+    }
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn colors_rust_and_escapes() {
+        let html = to_html(&tokenize("let x = \"<a>\"; // ok"));
+        assert_eq!(
+            html,
+            "<span class=\"t-kw\">let</span> x <span class=\"t-punct\">=</span> \
+             <span class=\"t-str\">&quot;&lt;a&gt;&quot;</span><span class=\"t-punct\">;</span> \
+             <span class=\"t-com\">// ok</span>"
+        );
+    }
+
+    #[test]
+    fn truncates_by_characters() {
+        let tokens = tokenize("fn main()");
+        let cut = truncate(&tokens, 4);
+        let text: String = cut.iter().map(|(_, t)| t.as_str()).collect();
+        assert_eq!(text, "fn m");
+        assert_eq!(truncate(&tokens, 0).len(), 0);
+    }
 }

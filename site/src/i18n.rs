@@ -1,13 +1,9 @@
-//! Les langues du site (français, anglais, espagnol) : tous les textes,
-//! le format des nombres, et le choix de la langue (mémorisé, sinon déduit du
-//! navigateur).
+//! Les langues du site (français, anglais, espagnol) : les textes des pages, le
+//! format des nombres et le choix de la langue d'après le navigateur.
 //!
 //! Chaque langue est une constante [`Texts`] : oublier une traduction est une
-//! erreur de compilation.
-
-use yew::prelude::*;
-
-use crate::dom;
+//! erreur de compilation. Les textes des îlots, qui vont aussi dans le code du
+//! navigateur, sont à part dans [`crate::labels`].
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
 pub enum Lang {
@@ -15,8 +11,6 @@ pub enum Lang {
     En,
     Es,
 }
-
-const STORAGE_KEY: &str = "vitesse-lang";
 
 impl Lang {
     /// Dans l'ordre du sélecteur.
@@ -30,8 +24,14 @@ impl Lang {
         self.pick(["Français", "English", "Español"])
     }
 
+    /// Pour formater les dates et heures (`fr-FR`).
     pub fn locale(self) -> &'static str {
         self.pick(["fr-FR", "en-US", "es-ES"])
+    }
+
+    /// Pour Open Graph (`fr_FR`).
+    pub fn og_locale(self) -> &'static str {
+        self.pick(["fr_FR", "en_US", "es_ES"])
     }
 
     /// Choisit la valeur de cette langue dans `[fr, en, es]`.
@@ -43,8 +43,9 @@ impl Lang {
         }]
     }
 
-    pub fn from_code(code: &str) -> Option<Lang> {
-        match code.get(..2)?.to_ascii_lowercase().as_str() {
+    /// La langue d'un code exact (`fr`), comme dans les adresses.
+    pub fn parse(code: &str) -> Option<Lang> {
+        match code {
             "fr" => Some(Lang::Fr),
             "en" => Some(Lang::En),
             "es" => Some(Lang::Es),
@@ -52,50 +53,35 @@ impl Lang {
         }
     }
 
+    /// La langue d'une étiquette de langue (`fr-CA`, `ES`…).
+    pub fn from_code(code: &str) -> Option<Lang> {
+        Lang::parse(&code.get(..2)?.to_ascii_lowercase())
+    }
+
     pub fn texts(self) -> &'static Texts {
         self.pick([&FR, &EN, &ES])
     }
-
-    /// La langue choisie la dernière fois, sinon celle du navigateur, sinon
-    /// l'anglais.
-    pub fn detect() -> Lang {
-        let win = dom::window();
-        let stored = win
-            .local_storage()
-            .ok()
-            .flatten()
-            .and_then(|s| s.get_item(STORAGE_KEY).ok().flatten())
-            .and_then(|c| Lang::from_code(&c));
-        if let Some(lang) = stored {
-            return lang;
-        }
-        let navigator = win.navigator();
-        navigator
-            .languages()
-            .iter()
-            .filter_map(|l| l.as_string())
-            .chain(navigator.language())
-            .find_map(|l| Lang::from_code(&l))
-            .unwrap_or(Lang::En)
-    }
-
-    pub fn save(self) {
-        if let Some(storage) = dom::window().local_storage().ok().flatten() {
-            let _ = storage.set_item(STORAGE_KEY, self.code());
-        }
-    }
 }
 
-/// La langue courante, partagée par contexte.
-#[derive(Clone, PartialEq)]
-pub struct LangCtx {
-    pub lang: Lang,
-    pub set: Callback<Lang>,
-}
-
-#[hook]
-pub fn use_lang() -> LangCtx {
-    use_context::<LangCtx>().expect("LangCtx manquant")
+/// La langue préférée parmi celles du site, d'après un en-tête `Accept-Language`
+/// (l'anglais par défaut).
+pub fn pick_lang(header: &str) -> Lang {
+    let mut ranked: Vec<(Lang, f32)> = header
+        .split(',')
+        .filter_map(|part| {
+            let mut pieces = part.trim().split(";q=");
+            let lang = Lang::from_code(pieces.next()?.trim())?;
+            let q = pieces
+                .next()
+                .and_then(|q| q.trim().parse().ok())
+                .unwrap_or(1.0);
+            Some((lang, q))
+        })
+        .filter(|(_, q)| *q > 0.0)
+        .collect();
+    // Stable : à qualité égale, l'ordre de l'en-tête.
+    ranked.sort_by(|a, b| b.1.total_cmp(&a.1));
+    ranked.first().map_or(Lang::En, |r| r.0)
 }
 
 /// Formate un nombre selon la langue : `2 781 541` / `2,781,541` /
@@ -133,14 +119,7 @@ pub struct Step {
     pub metric: &'static str,
 }
 
-/// Un exemple « Express à gauche, Vitesse à droite ».
-pub struct Example {
-    pub label: &'static str,
-    pub express: &'static str,
-    pub vitesse: &'static str,
-}
-
-const fn item(title: &'static str, text: &'static str) -> Item {
+pub const fn item(title: &'static str, text: &'static str) -> Item {
     Item { title, text }
 }
 
@@ -155,7 +134,9 @@ const fn step(title: &'static str, text: &'static str, metric: &'static str) -> 
 pub struct Texts {
     // Méta
     pub meta_title: &'static str,
+    pub meta_description: &'static str,
     pub docs_meta: &'static str,
+    pub skip: &'static str,
     // Navigation
     pub nav_links: [&'static str; 4],
     pub nav_docs: &'static str,
@@ -171,9 +152,6 @@ pub struct Texts {
     pub hero_lead: [&'static str; 2],
     pub hero_start: &'static str,
     pub hero_perf: &'static str,
-    pub copy: &'static str,
-    pub copied: &'static str,
-    pub copy_aria: &'static str,
     pub scroll: &'static str,
     pub scroll_aria: &'static str,
     // Bandeaux
@@ -187,10 +165,6 @@ pub struct Texts {
     pub bench_label: &'static str,
     pub bench_title: &'static str,
     pub bench_lead: &'static str,
-    pub scenarios: [Item; 6],
-    pub bench_vs: &'static str,
-    pub bench_note: &'static str,
-    pub bench_reproduce: &'static str,
     // Fonctionnalités
     pub features_label: &'static str,
     pub features_title: &'static str,
@@ -206,7 +180,6 @@ pub struct Texts {
     pub compare_label: &'static str,
     pub compare_title: &'static str,
     pub compare_lead: &'static str,
-    pub examples: [Example; 4],
     // Démarrer
     pub start_label: &'static str,
     pub start_title: &'static str,
@@ -227,24 +200,17 @@ pub struct Texts {
     pub footer_docs: [&'static str; 4],
     pub footer_community: [&'static str; 4],
     pub footer_copyright: &'static str,
-    pub clock: &'static str,
     pub totop: &'static str,
     pub totop_aria: &'static str,
     pub totop_cursor: &'static str,
     // Documentation
     pub docs_title: &'static str,
     pub docs_lead: &'static str,
-    pub docs_search: &'static str,
-    pub docs_search_hint: &'static str,
-    /// `{}` est remplacé par la recherche.
-    pub docs_no_results: &'static str,
     pub docs_toc: &'static str,
     pub docs_prev: &'static str,
     pub docs_next: &'static str,
     pub docs_edit: &'static str,
-    pub docs_loading: &'static str,
     pub docs_missing: &'static str,
-    pub docs_read_en: &'static str,
     pub docs_menu: &'static str,
     pub docs_api: &'static str,
     pub docs_quick: &'static str,
@@ -252,49 +218,22 @@ pub struct Texts {
     pub docs_pages: &'static str,
     /// Note, astuce, important, attention, prudence.
     pub callouts: [&'static str; 5],
+    // Page introuvable, hors ligne, choix de la langue
+    pub not_found_title: &'static str,
+    pub not_found_text: &'static str,
+    pub not_found_back: &'static str,
+    pub offline_title: &'static str,
+    pub offline_text: &'static str,
+    pub lang_choose: &'static str,
 }
 
-// ----- Exemples de code (les commentaires et messages sont traduits) ----------
-
-const HELLO_EXPRESS: &str = r#"const express = require("express");
-const app = express();
-
-app.get("/", (req, res) => {
-  res.send("Hello World!");
-});
-
-app.listen(3000);"#;
-
-const HELLO_VITESSE: &str = r#"use vitesse::prelude::*;
-
-fn main() -> std::io::Result<()> {
-    let mut app = App::new();
-
-    app.get("/", |_| async { "Hello World!" });
-
-    app.run(3000)
-}"#;
-
-const JSON_EXPRESS: &str = r#"app.use(express.json());
-
-app.post("/users", (req, res) => {
-  const user = req.body;
-  res.status(201).json(user);
-});"#;
-
-const JSON_VITESSE: &str = r#"#[derive(Serialize, Deserialize)]
-struct User { name: String }
-
-app.post("/users", |req: Request| async move {
-    let user: User = req.json().await?;
-    Ok::<_, Error>((201, Json(user)))
-});"#;
-
-// ----- Français ------------------------------------------------------------------
+// ----- Français -------------------------------------------------------------
 
 pub const FR: Texts = Texts {
     meta_title: "Vitesse — le framework web Rust à la Express",
+    meta_description: "Vitesse apporte l'API d'Express (app.get, req.params, res.json) au Rust natif, avec son propre moteur HTTP/1.1 : plus rapide qu'actix-web, axum et Drogon. Docs en français, anglais et espagnol.",
     docs_meta: "Documentation Vitesse",
+    skip: "Aller au contenu",
     nav_links: [
         "Performances",
         "Fonctionnalités",
@@ -316,9 +255,6 @@ pub const FR: Texts = Texts {
     ],
     hero_start: "Commencer",
     hero_perf: "Voir les performances",
-    copy: "Copier",
-    copied: "Copié !",
-    copy_aria: "Copier la commande",
     scroll: "Défiler",
     scroll_aria: "Défiler vers la suite",
     marquee_aria: "Points forts",
@@ -355,23 +291,6 @@ pub const FR: Texts = Texts {
     bench_label: "Performances",
     bench_title: "Plus rapide qu'actix\u{2011}web. Bien plus rapide que le reste.",
     bench_lead: "Mêmes routes, même machine, même session : Express, Drogon (C++), axum, actix-web et Vitesse face au même générateur de charge.",
-    scenarios: [
-        item(
-            "Navigateur",
-            "GET /json envoyé avec les 12 en-têtes d'un vrai navigateur",
-        ),
-        item("JSON", "GET /json : sérialisation d'un petit objet"),
-        item("Paramètres", "GET /users/:id : routage, paramètre et JSON"),
-        item("POST JSON", "POST /echo : lit un corps JSON et le renvoie"),
-        item(
-            "Pipeline ×16",
-            "GET / : seize requêtes envoyées d'un coup (TechEmpower)",
-        ),
-        item("Hello World", "GET / : la réponse la plus simple possible"),
-    ],
-    bench_vs: "face à",
-    bench_note: "VM 4 vCPU : serveur sur 2 cœurs, wrk sur les 2 autres, 128 connexions keep-alive, 10 s par scénario. À droite, le temps CPU consommé par le serveur pour chaque requête. ",
-    bench_reproduce: "Reproduire le benchmark",
     features_label: "Fonctionnalités",
     features_title: "Tout ce qu'Express sait faire. En Rust, sans compromis.",
     features_lead: "Un cœur volontairement petit, comme Express, et tout ce qu'il faut pour une vraie application.",
@@ -443,48 +362,6 @@ pub const FR: Texts = Texts {
     compare_label: "D'Express à Vitesse",
     compare_title: "Vous savez déjà écrire du Vitesse.",
     compare_lead: "Mêmes idées, mêmes noms, même façon de penser. La différence : un compilateur qui vérifie tout, et des performances natives.",
-    examples: [
-        Example {
-            label: "Hello World",
-            express: HELLO_EXPRESS,
-            vitesse: HELLO_VITESSE,
-        },
-        Example {
-            label: "Routes",
-            express: r#"app.get("/users/:id", (req, res) => {
-  const id = Number(req.params.id);
-  if (Number.isNaN(id)) {
-    return res.status(400).send("id invalide");
-  }
-  res.json({ id, name: "Ada" });
-});"#,
-            vitesse: r#"app.get("/users/:id", |req: Request| async move {
-    // 400 automatique si ce n'est pas un nombre
-    let id: u64 = req.param_as("id")?;
-    Ok::<_, Error>(Json(json!({ "id": id, "name": "Ada" })))
-});"#,
-        },
-        Example {
-            label: "Middleware",
-            express: r#"app.use((req, res, next) => {
-  if (req.get("authorization") !== "Bearer secret") {
-    return res.status(401).json({ error: "connectez-vous" });
-  }
-  next();
-});"#,
-            vitesse: r#"app.middleware(|req: Request, next: Next| async move {
-    if req.header("authorization") != Some("Bearer secret") {
-        return Error::unauthorized("connectez-vous").into_response();
-    }
-    next.run(req).await
-});"#,
-        },
-        Example {
-            label: "JSON",
-            express: JSON_EXPRESS,
-            vitesse: JSON_VITESSE,
-        },
-    ],
     start_label: "Démarrer",
     start_title: "En ligne en trente secondes.",
     start_steps: ["Ajoutez Vitesse", "Écrivez votre application", "Lancez-la"],
@@ -498,7 +375,7 @@ pub const FR: Texts = Texts {
     footer_lead: "Écrivez du code comme avec Express. Servez-le à la vitesse du métal.",
     footer_cta: "Commencer maintenant",
     footer_cols: ["Projet", "Documentation", "Communauté"],
-    footer_project: ["Code source", "Benchmark", "Exemples", "Ce site (Yew)"],
+    footer_project: ["Code source", "Benchmark", "Exemples", "Ce site (active)"],
     footer_docs: [
         "Guide",
         "Venir d'Express",
@@ -506,35 +383,37 @@ pub const FR: Texts = Texts {
         "Déployer sur Heroku",
     ],
     footer_community: ["Signaler un bug", "Issues", "Pull requests", "Historique"],
-    footer_copyright: "© 2026 Vitesse. Fait en Rust avec Yew et WebAssembly.",
-    clock: "Heure locale",
+    footer_copyright: "© 2026 Vitesse. Servi par Vitesse, écrit en Rust avec active et WebAssembly.",
     totop: "RETOUR EN HAUT • RETOUR EN HAUT • ",
     totop_aria: "Retour en haut",
     totop_cursor: "Haut",
     docs_title: "Documentation",
     docs_lead: "Tout ce qu'il faut pour construire, tester et déployer une application Vitesse, pas à pas.",
-    docs_search: "Rechercher dans la documentation…",
-    docs_search_hint: "Appuyez sur / pour chercher",
-    docs_no_results: "Aucun résultat pour « {} ».",
     docs_toc: "Sur cette page",
     docs_prev: "Précédent",
     docs_next: "Suivant",
     docs_edit: "Améliorer cette page sur GitHub",
-    docs_loading: "Chargement…",
-    docs_missing: "Cette page n'est pas encore disponible dans cette langue.",
-    docs_read_en: "Lire la version anglaise",
+    docs_missing: "Cette page n'est pas encore disponible dans cette langue : voici la version anglaise.",
     docs_menu: "Sommaire",
     docs_api: "Référence complète de l'API (docs.rs)",
     docs_quick: "Pour bien démarrer",
     docs_pages: "{} pages",
     callouts: ["Remarque", "Astuce", "Important", "Attention", "Prudence"],
+    not_found_title: "Page introuvable",
+    not_found_text: "Cette page n'existe pas, ou elle a changé d'adresse. L'accueil et la documentation, eux, sont toujours là.",
+    not_found_back: "Retour à l'accueil",
+    offline_title: "Vous êtes hors ligne",
+    offline_text: "Cette page n'a pas encore été enregistrée sur cet appareil. L'accueil, le sommaire de la documentation et les pages déjà visitées restent disponibles.",
+    lang_choose: "Choisissez votre langue",
 };
 
-// ----- English -------------------------------------------------------------------
+// ----- English --------------------------------------------------------------
 
 pub const EN: Texts = Texts {
     meta_title: "Vitesse — the Express-style web framework for Rust",
+    meta_description: "Vitesse brings the Express API (app.get, req.params, res.json) to native Rust, with its own HTTP/1.1 engine: faster than actix-web, axum and Drogon. Docs in English, French and Spanish.",
     docs_meta: "Vitesse docs",
+    skip: "Skip to content",
     nav_links: ["Performance", "Features", "From Express", "Get started"],
     nav_docs: "Docs",
     nav_aria: "Main navigation",
@@ -551,9 +430,6 @@ pub const EN: Texts = Texts {
     ],
     hero_start: "Get started",
     hero_perf: "See the benchmarks",
-    copy: "Copy",
-    copied: "Copied!",
-    copy_aria: "Copy the command",
     scroll: "Scroll",
     scroll_aria: "Scroll down",
     marquee_aria: "Highlights",
@@ -590,29 +466,6 @@ pub const EN: Texts = Texts {
     bench_label: "Performance",
     bench_title: "Faster than actix\u{2011}web. Far faster than the rest.",
     bench_lead: "Same routes, same machine, same session: Express, Drogon (C++), axum, actix-web and Vitesse against the same load generator.",
-    scenarios: [
-        item(
-            "Browser",
-            "GET /json sent with the 12 headers of a real browser",
-        ),
-        item("JSON", "GET /json: serialising a small object"),
-        item(
-            "Parameters",
-            "GET /users/:id: routing, a parameter and JSON",
-        ),
-        item(
-            "POST JSON",
-            "POST /echo: reads a JSON body and sends it back",
-        ),
-        item(
-            "Pipeline ×16",
-            "GET /: sixteen requests sent at once (TechEmpower)",
-        ),
-        item("Hello World", "GET /: the simplest possible response"),
-    ],
-    bench_vs: "vs",
-    bench_note: "4 vCPU VM: server on 2 cores, wrk on the other 2, 128 keep-alive connections, 10 s per scenario. On the right, the CPU time the server spends on each request. ",
-    bench_reproduce: "Reproduce the benchmark",
     features_label: "Features",
     features_title: "Everything Express can do. In Rust, without compromise.",
     features_lead: "A deliberately small core, like Express, and everything a real application needs.",
@@ -684,48 +537,6 @@ pub const EN: Texts = Texts {
     compare_label: "From Express to Vitesse",
     compare_title: "You already know how to write Vitesse.",
     compare_lead: "Same ideas, same names, same way of thinking. The difference: a compiler that checks everything, and native performance.",
-    examples: [
-        Example {
-            label: "Hello World",
-            express: HELLO_EXPRESS,
-            vitesse: HELLO_VITESSE,
-        },
-        Example {
-            label: "Routes",
-            express: r#"app.get("/users/:id", (req, res) => {
-  const id = Number(req.params.id);
-  if (Number.isNaN(id)) {
-    return res.status(400).send("invalid id");
-  }
-  res.json({ id, name: "Ada" });
-});"#,
-            vitesse: r#"app.get("/users/:id", |req: Request| async move {
-    // automatic 400 if it is not a number
-    let id: u64 = req.param_as("id")?;
-    Ok::<_, Error>(Json(json!({ "id": id, "name": "Ada" })))
-});"#,
-        },
-        Example {
-            label: "Middleware",
-            express: r#"app.use((req, res, next) => {
-  if (req.get("authorization") !== "Bearer secret") {
-    return res.status(401).json({ error: "please log in" });
-  }
-  next();
-});"#,
-            vitesse: r#"app.middleware(|req: Request, next: Next| async move {
-    if req.header("authorization") != Some("Bearer secret") {
-        return Error::unauthorized("please log in").into_response();
-    }
-    next.run(req).await
-});"#,
-        },
-        Example {
-            label: "JSON",
-            express: JSON_EXPRESS,
-            vitesse: JSON_VITESSE,
-        },
-    ],
     start_label: "Get started",
     start_title: "Up and running in thirty seconds.",
     start_steps: ["Add Vitesse", "Write your app", "Run it"],
@@ -739,7 +550,7 @@ pub const EN: Texts = Texts {
     footer_lead: "Write code like you do with Express. Serve it at bare-metal speed.",
     footer_cta: "Get started now",
     footer_cols: ["Project", "Documentation", "Community"],
-    footer_project: ["Source code", "Benchmark", "Examples", "This site (Yew)"],
+    footer_project: ["Source code", "Benchmark", "Examples", "This site (active)"],
     footer_docs: [
         "Guide",
         "Coming from Express",
@@ -747,35 +558,37 @@ pub const EN: Texts = Texts {
         "Deploy to Heroku",
     ],
     footer_community: ["Report a bug", "Issues", "Pull requests", "History"],
-    footer_copyright: "© 2026 Vitesse. Made in Rust with Yew and WebAssembly.",
-    clock: "Local time",
+    footer_copyright: "© 2026 Vitesse. Served by Vitesse, written in Rust with active and WebAssembly.",
     totop: "BACK TO TOP • BACK TO TOP • ",
     totop_aria: "Back to top",
     totop_cursor: "Top",
     docs_title: "Documentation",
     docs_lead: "Everything you need to build, test and deploy a Vitesse app, step by step.",
-    docs_search: "Search the docs…",
-    docs_search_hint: "Press / to search",
-    docs_no_results: "No results for “{}”.",
     docs_toc: "On this page",
     docs_prev: "Previous",
     docs_next: "Next",
     docs_edit: "Improve this page on GitHub",
-    docs_loading: "Loading…",
-    docs_missing: "This page is not available in this language yet.",
-    docs_read_en: "Read the English version",
+    docs_missing: "This page is not available in this language yet: here is the English version.",
     docs_menu: "Contents",
     docs_api: "Full API reference (docs.rs)",
     docs_quick: "Start here",
     docs_pages: "{} pages",
     callouts: ["Note", "Tip", "Important", "Warning", "Caution"],
+    not_found_title: "Page not found",
+    not_found_text: "This page does not exist, or it has moved. The home page and the docs are still here.",
+    not_found_back: "Back to the home page",
+    offline_title: "You are offline",
+    offline_text: "This page has not been saved on this device yet. The home page, the docs contents and the pages you have already visited are still available.",
+    lang_choose: "Choose your language",
 };
 
-// ----- Español -------------------------------------------------------------------
+// ----- Español --------------------------------------------------------------
 
 pub const ES: Texts = Texts {
     meta_title: "Vitesse — el framework web de Rust al estilo Express",
+    meta_description: "Vitesse lleva la API de Express (app.get, req.params, res.json) a Rust nativo, con su propio motor HTTP/1.1: más rápido que actix-web, axum y Drogon. Documentación en español, inglés y francés.",
     docs_meta: "Documentación de Vitesse",
+    skip: "Ir al contenido",
     nav_links: ["Rendimiento", "Funciones", "Desde Express", "Empezar"],
     nav_docs: "Docs",
     nav_aria: "Navegación principal",
@@ -798,9 +611,6 @@ pub const ES: Texts = Texts {
     ],
     hero_start: "Empezar",
     hero_perf: "Ver el rendimiento",
-    copy: "Copiar",
-    copied: "¡Copiado!",
-    copy_aria: "Copiar el comando",
     scroll: "Desplázate",
     scroll_aria: "Desplázate hacia abajo",
     marquee_aria: "Puntos fuertes",
@@ -837,26 +647,6 @@ pub const ES: Texts = Texts {
     bench_label: "Rendimiento",
     bench_title: "Más rápido que actix\u{2011}web. Mucho más rápido que el resto.",
     bench_lead: "Mismas rutas, misma máquina, misma sesión: Express, Drogon (C++), axum, actix-web y Vitesse frente al mismo generador de carga.",
-    scenarios: [
-        item(
-            "Navegador",
-            "GET /json enviado con las 12 cabeceras de un navegador real",
-        ),
-        item("JSON", "GET /json: serialización de un objeto pequeño"),
-        item(
-            "Parámetros",
-            "GET /users/:id: enrutamiento, parámetro y JSON",
-        ),
-        item("POST JSON", "POST /echo: lee un cuerpo JSON y lo devuelve"),
-        item(
-            "Pipeline ×16",
-            "GET /: dieciséis peticiones enviadas de golpe (TechEmpower)",
-        ),
-        item("Hello World", "GET /: la respuesta más simple posible"),
-    ],
-    bench_vs: "frente a",
-    bench_note: "VM de 4 vCPU: servidor en 2 núcleos, wrk en los otros 2, 128 conexiones keep-alive, 10 s por escenario. A la derecha, el tiempo de CPU que el servidor dedica a cada petición. ",
-    bench_reproduce: "Reproducir el benchmark",
     features_label: "Funcionalidades",
     features_title: "Todo lo que hace Express. En Rust, sin concesiones.",
     features_lead: "Un núcleo deliberadamente pequeño, como Express, y todo lo necesario para una aplicación real.",
@@ -928,48 +718,6 @@ pub const ES: Texts = Texts {
     compare_label: "De Express a Vitesse",
     compare_title: "Ya sabes escribir Vitesse.",
     compare_lead: "Las mismas ideas, los mismos nombres, la misma forma de pensar. La diferencia: un compilador que lo comprueba todo y un rendimiento nativo.",
-    examples: [
-        Example {
-            label: "Hello World",
-            express: HELLO_EXPRESS,
-            vitesse: HELLO_VITESSE,
-        },
-        Example {
-            label: "Rutas",
-            express: r#"app.get("/users/:id", (req, res) => {
-  const id = Number(req.params.id);
-  if (Number.isNaN(id)) {
-    return res.status(400).send("id no válido");
-  }
-  res.json({ id, name: "Ada" });
-});"#,
-            vitesse: r#"app.get("/users/:id", |req: Request| async move {
-    // 400 automático si no es un número
-    let id: u64 = req.param_as("id")?;
-    Ok::<_, Error>(Json(json!({ "id": id, "name": "Ada" })))
-});"#,
-        },
-        Example {
-            label: "Middleware",
-            express: r#"app.use((req, res, next) => {
-  if (req.get("authorization") !== "Bearer secret") {
-    return res.status(401).json({ error: "inicia sesión" });
-  }
-  next();
-});"#,
-            vitesse: r#"app.middleware(|req: Request, next: Next| async move {
-    if req.header("authorization") != Some("Bearer secret") {
-        return Error::unauthorized("inicia sesión").into_response();
-    }
-    next.run(req).await
-});"#,
-        },
-        Example {
-            label: "JSON",
-            express: JSON_EXPRESS,
-            vitesse: JSON_VITESSE,
-        },
-    ],
     start_label: "Empezar",
     start_title: "En marcha en treinta segundos.",
     start_steps: ["Añade Vitesse", "Escribe tu aplicación", "Ejecútala"],
@@ -983,7 +731,12 @@ pub const ES: Texts = Texts {
     footer_lead: "Escribe código como con Express. Sírvelo a la velocidad del metal.",
     footer_cta: "Empezar ahora",
     footer_cols: ["Proyecto", "Documentación", "Comunidad"],
-    footer_project: ["Código fuente", "Benchmark", "Ejemplos", "Este sitio (Yew)"],
+    footer_project: [
+        "Código fuente",
+        "Benchmark",
+        "Ejemplos",
+        "Este sitio (active)",
+    ],
     footer_docs: [
         "Guía",
         "Viniendo de Express",
@@ -996,28 +749,28 @@ pub const ES: Texts = Texts {
         "Pull requests",
         "Historial",
     ],
-    footer_copyright: "© 2026 Vitesse. Hecho en Rust con Yew y WebAssembly.",
-    clock: "Hora local",
+    footer_copyright: "© 2026 Vitesse. Servido por Vitesse, escrito en Rust con active y WebAssembly.",
     totop: "VOLVER ARRIBA • VOLVER ARRIBA • ",
     totop_aria: "Volver arriba",
     totop_cursor: "Arriba",
     docs_title: "Documentación",
     docs_lead: "Todo lo que necesitas para crear, probar y desplegar una aplicación Vitesse, paso a paso.",
-    docs_search: "Buscar en la documentación…",
-    docs_search_hint: "Pulsa / para buscar",
-    docs_no_results: "Sin resultados para «{}».",
     docs_toc: "En esta página",
     docs_prev: "Anterior",
     docs_next: "Siguiente",
     docs_edit: "Mejorar esta página en GitHub",
-    docs_loading: "Cargando…",
-    docs_missing: "Esta página aún no está disponible en este idioma.",
-    docs_read_en: "Leer la versión en inglés",
+    docs_missing: "Esta página aún no está disponible en este idioma: aquí tienes la versión en inglés.",
     docs_menu: "Índice",
     docs_api: "Referencia completa de la API (docs.rs)",
     docs_quick: "Para empezar",
     docs_pages: "{} páginas",
     callouts: ["Nota", "Consejo", "Importante", "Advertencia", "Precaución"],
+    not_found_title: "Página no encontrada",
+    not_found_text: "Esta página no existe o ha cambiado de dirección. La portada y la documentación siguen aquí.",
+    not_found_back: "Volver a la portada",
+    offline_title: "Sin conexión",
+    offline_text: "Esta página aún no se ha guardado en este dispositivo. La portada, el índice de la documentación y las páginas que ya visitaste siguen disponibles.",
+    lang_choose: "Elige tu idioma",
 };
 
 #[cfg(test)]
@@ -1041,5 +794,40 @@ mod tests {
         assert_eq!(Lang::from_code("en"), Some(Lang::En));
         assert_eq!(Lang::from_code("de-DE"), None);
         assert_eq!(Lang::from_code("e"), None);
+        assert_eq!(Lang::parse("fr"), Some(Lang::Fr));
+        assert_eq!(Lang::parse("fr-CA"), None);
+    }
+
+    #[test]
+    fn picks_the_preferred_language() {
+        assert_eq!(pick_lang("fr-FR,fr;q=0.9,en;q=0.8"), Lang::Fr);
+        assert_eq!(pick_lang("de-DE,es;q=0.7,en;q=0.5"), Lang::Es);
+        assert_eq!(pick_lang("en;q=0.2, fr;q=0.9"), Lang::Fr);
+        assert_eq!(pick_lang("de, it"), Lang::En);
+        assert_eq!(pick_lang(""), Lang::En);
+        assert_eq!(pick_lang("fr;q=0"), Lang::En);
+    }
+
+    #[test]
+    fn every_text_is_filled_in() {
+        for lang in Lang::ALL {
+            let t = lang.texts();
+            for s in [
+                t.meta_title,
+                t.meta_description,
+                t.skip,
+                t.not_found_title,
+                t.offline_text,
+            ] {
+                assert!(!s.trim().is_empty(), "{lang:?}");
+            }
+            assert!(t.docs_pages.contains("{}"));
+            assert!(
+                t.meta_description.chars().count() <= 200,
+                "{lang:?}: description trop longue"
+            );
+        }
+        assert_ne!(FR.offline_title, EN.offline_title);
+        assert_ne!(ES.offline_title, EN.offline_title);
     }
 }

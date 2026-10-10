@@ -209,7 +209,7 @@ Certificates, `Alt-Svc` and deployment behind Caddy or Nginx:
 
 ## Documentation
 
-- **Website**: https://maxlestage.github.io/Vitesse/#/docs
+- **Website**: https://maxlestage.github.io/Vitesse/en/docs/
 - **In this repository**: [docs/en/README.md](docs/en/README.md), from
   [your first app](docs/en/first-app.md) to
   [going to production](docs/en/production.md), including a guide for
@@ -298,16 +298,32 @@ docker build -t vitesse-demo . && docker run --rm -p 8080:8080 vitesse-demo
 
 ### The showcase website
 
-The [`site/`](site) folder contains the project's website, written in Rust
-with [Yew](https://yew.rs) and compiled to WebAssembly with
-[Trunk](https://trunkrs.dev). The `Site` workflow publishes it to GitHub
-Pages whenever it changes on `master`.
+The [`site/`](site) folder contains the project's website, in English,
+French and Spanish, with the documentation of [`docs/`](docs). It is served
+by Vitesse itself: the server is a Vitesse app whose pages are written with
+[active](https://github.com/maxlestage/Active) (server-rendered, with
+complete SEO tags), and the interactive parts are active islands compiled to
+WebAssembly. It is a Progressive Web App: it can be installed on a phone's
+home screen and keeps working offline. The `Site` workflow exports it to
+static files and publishes it to GitHub Pages whenever it changes on
+`master`.
 
 ```sh
 rustup target add wasm32-unknown-unknown
-cargo install trunk --locked
-cd site && trunk serve --open            # http://127.0.0.1:8080, hot reload
+cargo install wasm-bindgen-cli --version 0.2.129   # the version in site/Cargo.lock
+cd site
+# 1. The browser bundle (islands and animations) → site/pkg
+cargo build --lib --target wasm32-unknown-unknown --profile wasm-release
+wasm-bindgen --target web --no-typescript --out-dir pkg target/wasm32-unknown-unknown/wasm-release/vitesse_site.wasm
+# 2. The server, on http://localhost:3000 (PORT to change it)
+cargo run --release
+# Or the whole site as static files, behind the GitHub Pages path
+BASE_PATH=/Vitesse SITE_URL=https://maxlestage.github.io/Vitesse cargo run --release -- export dist
 ```
+
+The JavaScript that browsers need to start WebAssembly and the service
+worker are generated (by wasm-bindgen and by the server): the repository
+still contains no JavaScript file.
 
 ## Contributing
 
@@ -325,7 +341,8 @@ cargo test
 
 The benchmark runner ([`bench/runner`](bench/runner)) and the website
 ([`site/`](site)) are separate crates, outside the main build: if you change
-them, also run `cargo test` in their folder.
+them, also run `cargo test` in their folder (for the website, also
+`cargo clippy --lib --target wasm32-unknown-unknown -- -D warnings`).
 
 The documentation lives in [`docs/`](docs) in English, French and Spanish:
 when you change a page, please update the other languages too, or mention

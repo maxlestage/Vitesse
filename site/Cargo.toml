@@ -3,54 +3,75 @@ name = "vitesse-site"
 version = "0.1.0"
 edition = "2024"
 publish = false
-description = "Le site de présentation de Vitesse, écrit en Rust avec Yew (WebAssembly)."
+license = "MIT OR Apache-2.0"
+description = "Le site de présentation de Vitesse : servi par Vitesse, écrit avec active (WebAssembly), installable (PWA)."
 
 # Crate indépendante : ne fait pas partie du build de Vitesse.
 [workspace]
 
+# La bibliothèque contient ce que le serveur et le navigateur partagent (textes,
+# adresses, îlots) et, compilée en WebAssembly, le code du navigateur. Le binaire
+# est le serveur (et l'export statique pour GitHub Pages).
+[lib]
+name = "vitesse_site"
+crate-type = ["cdylib", "rlib"]
+
+[[bin]]
+name = "vitesse-site"
+path = "src/main.rs"
+
 [dependencies]
-yew = { version = "0.23", features = ["csr"] }
-wasm-bindgen = "0.2"
-js-sys = "0.3"
-gloo-timers = "0.3"
-gloo-events = "0.2"
-wasm-bindgen-futures = "0.4"
+active = { git = "https://github.com/maxlestage/Active" }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+# Le site est servi par Vitesse lui-même.
+vitesse = { path = "..", default-features = false }
 pulldown-cmark = { version = "0.13", default-features = false, features = ["html"] }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+active = { git = "https://github.com/maxlestage/Active", features = ["client"] }
+wasm-bindgen = "=0.2.129"
+wasm-bindgen-futures = "0.4"
+js-sys = "0.3"
 web-sys = { version = "0.3", features = [
   "AddEventListenerOptions",
   "CanvasRenderingContext2d",
+  "Clipboard",
   "CssStyleDeclaration",
   "Document",
   "DomRect",
+  "DomStringMap",
   "DomTokenList",
   "Element",
   "EventTarget",
   "HtmlCanvasElement",
+  "HtmlDocument",
   "HtmlElement",
   "HtmlInputElement",
-  "KeyboardEvent",
-  "Location",
-  "Response",
-  "ScrollBehavior",
-  "ScrollIntoViewOptions",
-  "ScrollLogicalPosition",
-  "Storage",
   "IntersectionObserver",
   "IntersectionObserverEntry",
   "IntersectionObserverInit",
+  "KeyboardEvent",
+  "Location",
   "MediaQueryList",
   "MouseEvent",
   "Navigator",
-  "Clipboard",
   "NodeList",
+  "PointerEvent",
+  "Response",
+  "Storage",
   "Window",
-  "HtmlDocument",
-  "HtmlHeadElement",
-  "HtmlMetaElement",
 ] }
 
-[profile.release]
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt"] }
+
+# Le code du navigateur :
+# `cargo build --lib --target wasm32-unknown-unknown --profile wasm-release`.
+[profile.wasm-release]
+inherits = "release"
 opt-level = "s"
 lto = true
 codegen-units = 1
 panic = "abort"
+strip = true

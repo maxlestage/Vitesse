@@ -8,21 +8,25 @@ use wasm_bindgen::JsCast;
 use web_sys::HtmlElement;
 use yew::prelude::*;
 
-use super::ui::{Code, CopyButton, Counter, Icon, Magnetic, Rotating, Split, fr_number};
+use super::ui::{Code, CopyButton, Counter, Icon, Magnetic, Rotating, Split};
 use super::warp::Warp;
-use crate::data::{EXAMPLES, FEATURES, GITHUB, JOURNEY, SCENARIOS, SERVERS};
+use crate::data::{FEATURES, GITHUB, HEROKU_DEPLOY, SCENARIOS, SERVERS};
 use crate::dom;
+use crate::i18n::{self, use_lang};
 
-const INSTALL: &str = "cargo add vitesse --git https://github.com/maxlestage/vitesse";
+const INSTALL: &str = "cargo add vitesse";
 
 // ----- Héros -----------------------------------------------------------------
 
 #[component]
 pub fn Hero() -> Html {
-    let words: Vec<AttrValue> = ["natif", "minimaliste", "ultra-rapide", "sûr", "familier"]
-        .into_iter()
-        .map(AttrValue::from)
-        .collect();
+    let lang = use_lang().lang;
+    let t = lang.texts();
+    let words: Vec<AttrValue> = t.hero_words.into_iter().map(AttrValue::from).collect();
+    let [line1, line2, line3] = t.hero_title;
+    // Chaque ligne enchaîne son animation après la précédente.
+    let offset2 = line1.chars().count() + 1;
+    let offset3 = offset2 + line2.chars().count() + 1;
     html! {
         <section class="hero" id="top">
             <div class="hero__bg" aria-hidden="true">
@@ -36,31 +40,31 @@ pub fn Hero() -> Html {
             <div class="hero__content">
                 <a class="badge intro" style="--d:0ms" href="#performances">
                     <span class="badge__dot"></span>
-                    <span>{ "Nouveau · 2,78 millions de requêtes/s sur 2 cœurs" }</span>
+                    <span>{ t.hero_badge }</span>
                     <Icon name="arrow" />
                 </a>
                 <h1 class="hero__title">
-                    <span class="hero__line"><Split text="Le confort d'Express." /></span>
+                    <span class="hero__line"><Split text={line1} /></span>
                     <span class="hero__line">
-                        <Split text="La vitesse de" offset={22} />
+                        <Split text={line2} offset={offset2} />
                         { " " }
-                        <span class="grad-text"><Split text="Rust." offset={36} /></span>
+                        <span class="grad-text"><Split text={line3} offset={offset3} /></span>
                     </span>
                 </h1>
                 <p class="hero__sub intro" style="--d:900ms">
-                    { "Un framework web " }<Rotating {words} />{ " pour Rust." }
+                    { t.hero_sub[0] }<Rotating key={lang.code()} {words} />{ t.hero_sub[1] }
                 </p>
                 <p class="hero__lead intro" style="--d:1050ms">
-                    { "Vitesse reprend l'API que vous connaissez déjà — " }
+                    { t.hero_lead[0] }
                     <code>{ "app.get" }</code>{ ", " }<code>{ "req.params" }</code>{ ", " }<code>{ "res.json" }</code>
-                    { " — et la propulse avec son propre moteur HTTP/1.1. Plus rapide qu'actix-web, axum et Drogon." }
+                    { t.hero_lead[1] }
                 </p>
                 <div class="hero__ctas intro" style="--d:1200ms">
-                    <Magnetic href="#demarrer" class={classes!("btn", "btn--primary", "btn--lg")} cursor={Some(AttrValue::from("Go"))}>
-                        <span>{ "Commencer" }</span><Icon name="arrow" />
+                    <Magnetic href="#/docs/installation" class={classes!("btn", "btn--primary", "btn--lg")} cursor={Some(AttrValue::from("Go"))}>
+                        <span>{ t.hero_start }</span><Icon name="arrow" />
                     </Magnetic>
                     <Magnetic href="#performances" class={classes!("btn", "btn--ghost", "btn--lg")}>
-                        <span>{ "Voir les performances" }</span>
+                        <span>{ t.hero_perf }</span>
                     </Magnetic>
                 </div>
                 <div class="install intro" style="--d:1350ms">
@@ -69,9 +73,9 @@ pub fn Hero() -> Html {
                     <CopyButton text={INSTALL} />
                 </div>
             </div>
-            <a class="scroll-hint intro" style="--d:1600ms" href="#chiffres" aria-label="Défiler vers la suite">
+            <a class="scroll-hint intro" style="--d:1600ms" href="#chiffres" aria-label={t.scroll_aria}>
                 <span class="scroll-hint__mouse"><span></span></span>
-                <span>{ "Défiler" }</span>
+                <span>{ t.scroll }</span>
             </a>
         </section>
     }
@@ -81,16 +85,8 @@ pub fn Hero() -> Html {
 
 #[component]
 pub fn Marquee() -> Html {
-    let words = [
-        "L'API d'Express",
-        "2,78 M req/s",
-        "Moteur HTTP/1.1 maison",
-        "Zéro regex",
-        "Un thread par cœur",
-        "100 % Rust",
-        "Arrêt propre",
-        "Tests sans réseau",
-    ];
+    let t = use_lang().lang.texts();
+    let words = t.marquee;
     let code = [
         "app.get(\"/\")",
         "req.param(\"id\")",
@@ -115,7 +111,7 @@ pub fn Marquee() -> Html {
         }
     };
     html! {
-        <section class="marquee" aria-label="Points forts">
+        <section class="marquee" aria-label={t.marquee_aria}>
             { row(&words, "marquee__row--a") }
             { row(&code, "marquee__row--b") }
         </section>
@@ -150,51 +146,24 @@ fn Head(props: &HeadProps) -> Html {
 
 #[component]
 pub fn Stats() -> Html {
-    let stats: [(f64, usize, &str, &str, &str, &str); 4] = [
-        (
-            2.78,
-            2,
-            "",
-            " M",
-            "requêtes par seconde",
-            "Sur deux cœurs, en pipeline : le test « plaintext » du TechEmpower.",
-        ),
-        (
-            1.62,
-            2,
-            "×",
-            "",
-            "plus rapide qu'actix-web",
-            "Avec une vraie requête de navigateur, et ×2,2 en pipeline.",
-        ),
-        (
-            6.1,
-            1,
-            "",
-            " µs",
-            "de CPU par requête",
-            "Contre 7,1 µs pour actix-web et 11,7 µs pour axum.",
-        ),
-        (
-            50.0,
-            0,
-            "×",
-            "",
-            "plus rapide qu'Express",
-            "De 49 à 56 fois selon le scénario, sur le même matériel.",
-        ),
+    let t = use_lang().lang.texts();
+    let values: [(f64, usize, &str, &str); 4] = [
+        (2.78, 2, "", " M"),
+        (1.62, 2, "×", ""),
+        (6.1, 1, "", " µs"),
+        (50.0, 0, "×", ""),
     ];
     html! {
         <section class="section" id="chiffres">
-            <Head num="01" label="En chiffres" title="Des chiffres qui parlent d'eux-mêmes." />
+            <Head num="01" label={t.stats_label} title={t.stats_title} />
             <div class="stats">
-                { for stats.iter().enumerate().map(|(i, (value, decimals, prefix, suffix, label, detail))| html! {
+                { for values.iter().zip(t.stats.iter()).enumerate().map(|(i, ((value, decimals, prefix, suffix), stat))| html! {
                     <article class="stat card" data-reveal="" style={format!("--d:{}ms", i * 110)}>
                         <div class="stat__value">
                             <Counter value={*value} decimals={*decimals} prefix={*prefix} suffix={*suffix} />
                         </div>
-                        <h3 class="stat__label">{ *label }</h3>
-                        <p class="stat__detail">{ *detail }</p>
+                        <h3 class="stat__label">{ stat.title }</h3>
+                        <p class="stat__detail">{ stat.text }</p>
                         <span class="stat__line"></span>
                     </article>
                 }) }
@@ -207,6 +176,8 @@ pub fn Stats() -> Html {
 
 #[component]
 pub fn Bench() -> Html {
+    let lang = use_lang().lang;
+    let t = lang.texts();
     let selected = use_state(|| 0usize);
     let visible = use_state(|| false);
     let panel = use_node_ref();
@@ -224,23 +195,22 @@ pub fn Bench() -> Html {
         });
     }
     let scenario = &SCENARIOS[*selected];
+    let text = &t.scenarios[*selected];
     let max = scenario.rps.iter().cloned().fold(0.0, f64::max);
     let vs_actix = scenario.rps[4] / scenario.rps[3];
     let vs_axum = scenario.rps[4] / scenario.rps[2];
     html! {
         <section class="section bench" id="performances">
-            <Head num="02" label="Performances"
-                  title="Plus rapide qu'actix\u{2011}web. Bien plus rapide que le reste."
-                  lead={Some("Mêmes routes, même machine, même session : Express, Drogon (C++), axum, actix-web et Vitesse face au même générateur de charge.")} />
+            <Head num="02" label={t.bench_label} title={t.bench_title} lead={Some(t.bench_lead)} />
             <div class="bench__tabs" role="tablist" data-reveal="" style={format!("--tab:{}; --tabs:{}", *selected, SCENARIOS.len())}>
                 <span class="bench__indicator" aria-hidden="true"></span>
-                { for SCENARIOS.iter().enumerate().map(|(i, s)| {
+                { for t.scenarios.iter().enumerate().map(|(i, s)| {
                     let selected = selected.clone();
                     html! {
                         <button role="tab" aria-selected={(i == *selected).to_string()}
                                 class={classes!("bench__tab", (i == *selected).then_some("is-active"))}
                                 onclick={Callback::from(move |_: MouseEvent| selected.set(i))}>
-                            { s.label }
+                            { s.title }
                         </button>
                     }
                 }) }
@@ -249,10 +219,10 @@ pub fn Bench() -> Html {
             // change, ce qui effacerait la classe posée par l'observateur.
             <div class={classes!("bench__panel", "card", visible.then_some("is-visible"), visible.then_some("in"))} ref={panel} data-reveal="">
                 <div class="bench__meta">
-                    <p class="bench__detail">{ scenario.detail }</p>
+                    <p class="bench__detail">{ text.text }</p>
                     <div class="bench__badges">
-                        <span class="pill pill--hot">{ format!("×{} face à actix-web", fr_number(vs_actix, 2)) }</span>
-                        <span class="pill">{ format!("×{} face à axum", fr_number(vs_axum, 1)) }</span>
+                        <span class="pill pill--hot">{ format!("×{} {} actix-web", i18n::number(lang, vs_actix, 2), t.bench_vs) }</span>
+                        <span class="pill">{ format!("×{} {} axum", i18n::number(lang, vs_axum, 1), t.bench_vs) }</span>
                     </div>
                 </div>
                 <div class="bench__rows">
@@ -270,14 +240,14 @@ pub fn Bench() -> Html {
                                     <Counter key={format!("{}-{i}", scenario.id)} value={rps} duration={1400.0} />
                                     <small>{ " req/s" }</small>
                                 </span>
-                                <span class="bar__cpu">{ format!("{} µs", fr_number(scenario.cpu[i], if scenario.cpu[i] < 10.0 { 1 } else { 0 })) }</span>
+                                <span class="bar__cpu">{ format!("{} µs", i18n::number(lang, scenario.cpu[i], if scenario.cpu[i] < 10.0 { 1 } else { 0 })) }</span>
                             </div>
                         }
                     }) }
                 </div>
                 <p class="bench__note">
-                    { "VM 4 vCPU : serveur sur 2 cœurs, wrk sur les 2 autres, 128 connexions keep-alive, 10 s par scénario. À droite, le temps CPU consommé par le serveur pour chaque requête. " }
-                    <a href={format!("{GITHUB}/tree/master/bench")} target="_blank" rel="noopener">{ "Reproduire le benchmark" }</a>
+                    { t.bench_note }
+                    <a href={format!("{GITHUB}/tree/master/bench")} target="_blank" rel="noopener">{ t.bench_reproduce }</a>
                 </p>
             </div>
         </section>
@@ -288,6 +258,7 @@ pub fn Bench() -> Html {
 
 #[component]
 pub fn Features() -> Html {
+    let t = use_lang().lang.texts();
     let onmousemove = Callback::from(|e: MouseEvent| {
         let Some(el) = e
             .current_target()
@@ -315,18 +286,16 @@ pub fn Features() -> Html {
     });
     html! {
         <section class="section" id="fonctionnalites">
-            <Head num="03" label="Fonctionnalités"
-                  title="Tout ce qu'Express sait faire. En Rust, sans compromis."
-                  lead={Some("Un cœur volontairement petit, comme Express, et tout ce qu'il faut pour une vraie application.")} />
+            <Head num="03" label={t.features_label} title={t.features_title} lead={Some(t.features_lead)} />
             <div class="features">
-                { for FEATURES.iter().enumerate().map(|(i, f)| html! {
+                { for FEATURES.iter().zip(t.features.iter()).enumerate().map(|(i, ((icon, tag), f))| html! {
                     <div class="feature-wrap" data-reveal="" style={format!("--d:{}ms", (i % 4) * 90)}>
                         <article class="feature card" onmousemove={onmousemove.clone()} onmouseleave={onmouseleave.clone()}>
                             <span class="feature__spot" aria-hidden="true"></span>
-                            <span class="feature__icon"><Icon name={f.icon} /></span>
+                            <span class="feature__icon"><Icon name={*icon} /></span>
                             <h3>{ f.title }</h3>
                             <p>{ f.text }</p>
-                            <code class="feature__tag">{ f.tag }</code>
+                            <code class="feature__tag">{ *tag }</code>
                         </article>
                     </div>
                 }) }
@@ -339,16 +308,17 @@ pub fn Features() -> Html {
 
 #[component]
 pub fn Journey() -> Html {
+    let t = use_lang().lang.texts();
     html! {
         <section class="journey" id="journey">
             <div class="journey__sticky">
                 <div class="journey__head">
-                    <p class="eyebrow"><span class="eyebrow__num">{ "04" }</span>{ "Sous le capot" }</p>
-                    <h2 class="head__title">{ "Le voyage d'une requête, en six microsecondes." }</h2>
+                    <p class="eyebrow"><span class="eyebrow__num">{ "04" }</span>{ t.journey_label }</p>
+                    <h2 class="head__title">{ t.journey_title }</h2>
                     <div class="journey__bar" aria-hidden="true"><span></span></div>
                 </div>
                 <div class="journey__track" id="journey-track">
-                    { for JOURNEY.iter().enumerate().map(|(i, step)| html! {
+                    { for t.journey.iter().enumerate().map(|(i, step)| html! {
                         <article class="panel">
                             <div class="panel__top">
                                 <span class="panel__num">{ format!("0{}", i + 1) }</span>
@@ -363,9 +333,9 @@ pub fn Journey() -> Html {
                     }) }
                     <article class="panel panel--end">
                         <p class="panel__big">{ "≈ 6 µs" }</p>
-                        <p>{ "de CPU par requête, du premier octet lu au dernier octet écrit." }</p>
+                        <p>{ t.journey_end }</p>
                         <Magnetic href="#express" class={classes!("btn", "btn--primary")}>
-                            <span>{ "Voir le code" }</span><Icon name="arrow" />
+                            <span>{ t.journey_cta }</span><Icon name="arrow" />
                         </Magnetic>
                     </article>
                 </div>
@@ -378,6 +348,8 @@ pub fn Journey() -> Html {
 
 #[component]
 pub fn Compare() -> Html {
+    let lang = use_lang().lang;
+    let t = lang.texts();
     let selected = use_state(|| 0usize);
     let typed = use_state(|| 0usize);
     let started = use_state(|| false);
@@ -398,34 +370,35 @@ pub fn Compare() -> Html {
     }
     {
         let (typed, timer) = (typed.clone(), timer.clone());
-        use_effect_with((*selected, *started), move |&(selected, started)| {
-            let total = EXAMPLES[selected].vitesse.chars().count();
-            if !started {
-                typed.set(0);
-            } else if dom::reduced_motion() {
-                typed.set(total);
-            } else {
-                let mut n = 0usize;
-                typed.set(0);
-                *timer.borrow_mut() = Some(Interval::new(16, move || {
-                    n = (n + 3).min(total);
-                    typed.set(n);
-                }));
-            }
-            move || {
-                timer.borrow_mut().take();
-            }
-        });
+        use_effect_with(
+            (*selected, *started, lang),
+            move |&(selected, started, lang)| {
+                let total = lang.texts().examples[selected].vitesse.chars().count();
+                if !started {
+                    typed.set(0);
+                } else if dom::reduced_motion() {
+                    typed.set(total);
+                } else {
+                    let mut n = 0usize;
+                    typed.set(0);
+                    *timer.borrow_mut() = Some(Interval::new(16, move || {
+                        n = (n + 3).min(total);
+                        typed.set(n);
+                    }));
+                }
+                move || {
+                    timer.borrow_mut().take();
+                }
+            },
+        );
     }
-    let example = &EXAMPLES[*selected];
+    let example = &t.examples[*selected];
     let done = *typed >= example.vitesse.chars().count();
     html! {
         <section class="section" id="express">
-            <Head num="05" label="D'Express à Vitesse"
-                  title="Vous savez déjà écrire du Vitesse."
-                  lead={Some("Mêmes idées, mêmes noms, même façon de penser. La différence : un compilateur qui vérifie tout, et des performances natives.")} />
+            <Head num="05" label={t.compare_label} title={t.compare_title} lead={Some(t.compare_lead)} />
             <div class="compare__tabs" data-reveal="">
-                { for EXAMPLES.iter().enumerate().map(|(i, ex)| {
+                { for t.examples.iter().enumerate().map(|(i, ex)| {
                     let selected = selected.clone();
                     html! {
                         <button class={classes!("chip", (i == *selected).then_some("is-active"))}
@@ -454,21 +427,22 @@ pub fn Compare() -> Html {
 
 #[component]
 pub fn Start() -> Html {
+    let t = use_lang().lang.texts();
     let steps: [(&str, &str, &str); 2] = [
         (
-            "Ajoutez Vitesse",
+            t.start_steps[0],
             "Cargo.toml",
-            "[dependencies.vitesse]\ngit = \"https://github.com/maxlestage/vitesse\"",
+            "[dependencies]\nvitesse = \"0.1\"",
         ),
         (
-            "Écrivez votre application",
+            t.start_steps[1],
             "src/main.rs",
             "use vitesse::prelude::*;\n\nfn main() -> std::io::Result<()> {\n    let mut app = App::new();\n    app.get(\"/\", |_| async { \"Hello World!\" });\n    app.run(3000)\n}",
         ),
     ];
     html! {
         <section class="section" id="demarrer">
-            <Head num="06" label="Démarrer" title="En ligne en trente secondes." />
+            <Head num="06" label={t.start_label} title={t.start_title} />
             <div class="steps">
                 <span class="steps__line" data-reveal="" aria-hidden="true"></span>
                 { for steps.iter().enumerate().map(|(i, (title, file, code))| html! {
@@ -483,7 +457,7 @@ pub fn Start() -> Html {
                 }) }
                 <article class="step" data-reveal="" style="--d:280ms">
                     <span class="step__num">{ 3 }</span>
-                    <h3>{ "Lancez-la" }</h3>
+                    <h3>{ t.start_steps[2] }</h3>
                     <div class="window terminal">
                         <div class="window__bar"><span></span><span></span><span></span><em>{ "Terminal" }</em></div>
                         <pre class="code">
@@ -491,10 +465,18 @@ pub fn Start() -> Html {
                             <span class="term" style="--l:1"><span class="t-kw">{ "   Compiling" }</span>{ " vitesse v0.1.0" }</span>
                             <span class="term" style="--l:2"><span class="t-kw">{ "    Finished" }</span>{ " `release` profile [optimized]" }</span>
                             <span class="term" style="--l:3"><span class="t-kw">{ "     Running" }</span>{ " `target/release/app`" }</span>
-                            <span class="term term--ok" style="--l:4">{ "⚡ Vitesse écoute sur http://localhost:3000" }</span>
+                            <span class="term term--ok" style="--l:4">{ t.start_listening }</span>
                         </pre>
                     </div>
                 </article>
+            </div>
+            <div class="start__more" data-reveal="" style="--d:200ms">
+                <Magnetic href="#/docs" class={classes!("btn", "btn--primary")}>
+                    <Icon name="book" /><span>{ t.start_docs }</span>
+                </Magnetic>
+                <Magnetic href={HEROKU_DEPLOY} external=true class={classes!("btn", "btn--ghost")}>
+                    <Icon name="phone" /><span>{ t.start_heroku }</span>
+                </Magnetic>
             </div>
         </section>
     }
@@ -504,19 +486,20 @@ pub fn Start() -> Html {
 
 #[component]
 pub fn Cta() -> Html {
+    let t = use_lang().lang.texts();
     html! {
         <section class="cta">
             <div class="cta__bg" aria-hidden="true"></div>
             <h2 class="cta__title" data-reveal="">
-                <span>{ "Prêt à aller" }</span>
-                <span class="cta__outline" data-text="plus vite ?">{ "plus vite ?" }</span>
+                <span>{ t.cta_title[0] }</span>
+                <span class="cta__outline" data-text={t.cta_title[1]}>{ t.cta_title[1] }</span>
             </h2>
             <div class="cta__actions" data-reveal="" style="--d:150ms">
-                <Magnetic href="#demarrer" class={classes!("btn", "btn--primary", "btn--lg")} cursor={Some(AttrValue::from("Go"))}>
-                    <span>{ "Démarrer un projet" }</span><Icon name="arrow" />
+                <Magnetic href="#/docs/first-app" class={classes!("btn", "btn--primary", "btn--lg")} cursor={Some(AttrValue::from("Go"))}>
+                    <span>{ t.cta_start }</span><Icon name="arrow" />
                 </Magnetic>
                 <Magnetic href={GITHUB} external=true class={classes!("btn", "btn--ghost", "btn--lg")}>
-                    <Icon name="github" /><span>{ "Étoiler sur GitHub" }</span>
+                    <Icon name="github" /><span>{ t.cta_star }</span>
                 </Magnetic>
             </div>
         </section>

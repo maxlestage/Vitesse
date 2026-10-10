@@ -372,6 +372,19 @@ cargo test                               # tests unitaires, d'intégration et do
 bench/run.sh                             # benchmark (wrk, Node.js, et Drogon si installé)
 ```
 
+### Le site de présentation
+
+Le dossier [`site/`](site) contient le site du projet, écrit en Rust avec
+[Yew](https://yew.rs) et compilé en WebAssembly avec
+[Trunk](https://trunkrs.dev). Le workflow `Site` le publie sur GitHub Pages à
+chaque modification sur `master`.
+
+```sh
+rustup target add wasm32-unknown-unknown
+cargo install trunk --locked
+cd site && trunk serve --open            # http://127.0.0.1:8080, rechargement à chaud
+```
+
 ## Limites actuelles
 
 Vitesse fait volontairement peu de choses, comme Express. Ne sont pas (encore)

@@ -50,7 +50,7 @@ pub const CATEGORIES: [Category; 5] = [
     },
 ];
 
-pub const PAGES: [Page; 20] = [
+pub const PAGES: [Page; 22] = [
     Page {
         slug: "introduction",
         category: 0,
@@ -166,6 +166,16 @@ pub const PAGES: [Page; 20] = [
         ],
     },
     Page {
+        slug: "websocket",
+        category: 1,
+        title: ["WebSocket", "WebSocket", "WebSocket"],
+        summary: [
+            "Le temps réel : chat, notifications, jeux, avec app.ws.",
+            "Real time: chat, notifications, games, with app.ws.",
+            "Tiempo real: chat, notificaciones, juegos, con app.ws.",
+        ],
+    },
+    Page {
         slug: "testing",
         category: 2,
         title: ["Tests", "Testing", "Pruebas"],
@@ -187,6 +197,16 @@ pub const PAGES: [Page; 20] = [
             "Adresses, threads, limites, délais et arrêt propre.",
             "Addresses, threads, limits, timeouts and graceful shutdown.",
             "Direcciones, hilos, límites, tiempos de espera y apagado limpio.",
+        ],
+    },
+    Page {
+        slug: "http3",
+        category: 2,
+        title: ["HTTP/3 et QUIC", "HTTP/3 and QUIC", "HTTP/3 y QUIC"],
+        summary: [
+            "Servir l'application en HTTP/3 sur QUIC, à côté de HTTP/1.1.",
+            "Serve your app over HTTP/3 on QUIC, next to HTTP/1.1.",
+            "Sirve tu aplicación en HTTP/3 sobre QUIC, junto a HTTP/1.1.",
         ],
     },
     Page {

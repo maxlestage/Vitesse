@@ -21,7 +21,22 @@ fn main() -> std::io::Result<()> {
 }
 ```
 
-`use vitesse::prelude::*;` imports `App`, `Router`, `Request`, `Response`, `Next`, `Error`, `Json`, `Html`, `Redirect`, `Cookie`, `Body`, `ServeDir`, `StatusCode`, `Method`, `IntoResponse`, `HandlerExt`, `json!`, the `res` module and the `middleware` module.
+`use vitesse::prelude::*;` imports `App`, `Router`, `Request`, `Response`, `Next`, `Error`, `Json`, `Html`, `Redirect`, `Cookie`, `Body`, `ServeDir`, `StatusCode`, `Method`, `IntoResponse`, `HandlerExt`, `json!`, the `res` module, the `middleware` module and the `ws` module (WebSocket).
+
+## Cargo features
+
+| Feature | Default | Adds |
+|---|---|---|
+| `ws` | Enabled | `app.ws`, `router.ws` and the `vitesse::ws` module |
+| `http3` | Disabled | `app.http3`, `server.http3_addr` and the `vitesse::http3` module |
+
+```toml
+[dependencies]
+vitesse = { version = "0.1", features = ["http3"] }        # adds HTTP/3
+# vitesse = { version = "0.1", default-features = false } # without WebSocket
+```
+
+See [Installation](installation.md#cargo-features).
 
 ## App
 
@@ -38,6 +53,7 @@ fn main() -> std::io::Result<()> {
 | `app.body_limit(bytes)` | Maximum size of a body read in memory (default `DEFAULT_BODY_LIMIT`, 1 MiB) |
 | `app.workers(n)` | Number of threads for `run` (default: one per CPU) |
 | `app.thread_per_core(bool)` | Thread-per-core mode for `run` (default `true`, Linux only) |
+| `app.http3(config)` | Also serves the app over HTTP/3 (QUIC, UDP), next to HTTP/1.1 (`http3` feature) |
 
 All these setters return `&mut App`, so calls can be chained. See [Server configuration](server.md).
 
@@ -56,6 +72,7 @@ These methods exist on both `App` and `Router`, and can be chained.
 | `app.mount(prefix, router)` | Mounts a `Router` under a prefix (`app.use('/api', router)`) |
 | `app.static_dir(prefix, dir)` | Serves a folder under `prefix` |
 | `app.serve_dir(prefix, serve_dir)` | Same, with a configured `ServeDir` |
+| `app.ws(path, handler)` | WebSocket route (`GET`): `handler(req, socket)` takes over the connection (express-ws) |
 
 | Pattern | Matches |
 |---|---|
@@ -242,7 +259,7 @@ See [Middleware](middleware.md).
 | Usage | Description |
 |---|---|
 | `Router::new()` | An empty router (`express.Router()`) |
-| `router.get(…)`, `.post(…)`, … `.route(…)` | Same routing methods as `App` |
+| `router.get(…)`, `.post(…)`, … `.route(…)`, `.ws(…)` | Same routing methods as `App` |
 | `router.mount(prefix, other)` | Nested routers |
 | `router.static_dir(…)`, `router.serve_dir(…)` | Static files inside a router |
 | `router.middleware(mw)` | Middleware for this router: its routes and every other request under its prefix (`router.use`) |
@@ -264,6 +281,26 @@ See [Routers](routers.md).
 
 Built in: MIME types, `index.html`, `ETag` and `Last-Modified` (`304`), `Range` requests (`206`), streaming of large files, protection against `../` and hidden files. See [Static files](static-files.md).
 
+## WebSocket
+
+| Usage | Description |
+|---|---|
+| `app.ws("/chat/:room", \|req, mut socket\| async move { … })` | WebSocket route; `426` for plain HTTP, `400` for an invalid key, `405` for another method |
+| `socket.recv().await` | Next message: `Some(Ok(msg))`, `Some(Err(e))`, or `None` once closed |
+| `socket.send(value).await` | `String` / `&str` as text, `Vec<u8>` / `Bytes` / `&[u8]` as binary, or a `ws::Message` |
+| `socket.close(1000, "bye").await` | Closing handshake with a code and a reason |
+| `socket.protocol()` | The chosen subprotocol, if any |
+| `socket.split()` | `(WebSocketSender, WebSocketReceiver)`, to send and receive from two tasks |
+| `ws::Message::Text(String)`, `Binary(Bytes)`, `Ping(Bytes)`, `Pong(Bytes)`, `Close(Option<CloseFrame>)` | The messages; pings are answered automatically |
+| `msg.as_text()`, `msg.as_bytes()`, `msg.is_close()` | Helpers |
+| `err.is_closed()` | The connection is already closed (`ws::Error`) |
+| `ws::Upgrade::new(&req)?` | In a `GET` route: checks the handshake (`426`, `400`, `405`) |
+| `.protocols(["v2", "v1"])`, `.offered_protocols()` | Chooses a subprotocol offered by the client; the offered list |
+| `.max_message_size(bytes)` | Size limit of messages and frames (default `ws::DEFAULT_MAX_MESSAGE_SIZE`, 16 MiB) |
+| `.on_upgrade(req, \|req, socket\| async move { … })` | Returns the `101 Switching Protocols` response, then runs the handler |
+
+`WebSocket` implements `Stream` and `Sink`; global and router middleware run on the handshake. See [WebSocket](websocket.md).
+
 ## Server
 
 | Usage | Description |
@@ -272,10 +309,25 @@ Built in: MIME types, `index.html`, `ETag` and `Last-Modified` (`304`), `Range` 
 | `"127.0.0.1:8080"`, `"[::]:3000"`, `"localhost:3000"` | Listens on that address |
 | `String`, `SocketAddr`, `([127, 0, 0, 1], 8080)` | Other accepted forms (`ListenAddr`) |
 | `server.local_addr()` | The address actually used (port `0`) |
+| `server.http3_addr()` | The UDP address of HTTP/3, if configured |
 | `server.run().await` | Serves until `Ctrl+C` / `SIGTERM`, then stops cleanly |
 | `server.with_graceful_shutdown(signal).await` | Serves until `signal` completes, instead of `Ctrl+C` / `SIGTERM`; in-progress requests get 10 s to finish |
 
 See [Server configuration](server.md).
+
+## HTTP/3
+
+| Usage | Description |
+|---|---|
+| `app.http3(Http3::from_pem_files("fullchain.pem", "privkey.pem")?)` | HTTP/3 on UDP, next to HTTP/1.1 (`vitesse::http3::Http3`) |
+| `Http3::from_pem(chain, key)` | Certificate chain and private key from memory (PEM) |
+| `Http3::from_rustls(config)` | Your own `rustls::ServerConfig` (TLS 1.3; `h3` ALPN added if missing) |
+| `.port(443)` | UDP port (default: the same number as the TCP port) |
+| `.alt_svc(false)` | No `alt-svc` header on HTTP/1.1 responses (enabled by default) |
+| `.alt_svc_port(443)` | Public port announced in `alt-svc` (behind a proxy, Docker or NAT) |
+| `req.version()` | `HTTP/3.0` for a request received over HTTP/3 |
+
+Same routes, middleware and handlers in both protocols; request bodies are read in full before the handler. See [HTTP/3 and QUIC](http3.md).
 
 ## Testing
 
@@ -289,6 +341,7 @@ See [Server configuration](server.md).
 | `.await`, `.send().await` | Sends; returns a `TestResponse` |
 | `res.status()`, `res.header(name)`, `res.headers()` | Status and headers |
 | `res.text()`, `res.bytes()`, `res.json::<T>()` | The body |
+| `client.get("/ws-route")` | On a WebSocket route: only the handshake response (`426` for plain HTTP); test conversations on a real port |
 
 See [Testing](testing.md).
 
@@ -300,6 +353,7 @@ See [Testing](testing.md).
 | `vitesse::http`, `HeaderMap`, `Method`, `StatusCode`, `header` | The `http` crate and its common types |
 | `vitesse::serde_json`, `json!` | The `serde_json` crate and its macro |
 | `vitesse::tokio` | The `tokio` crate, with the features Vitesse uses |
+| `vitesse::http3::rustls` | The `rustls` crate used by HTTP/3 (`http3` feature) |
 | `vitesse::DEFAULT_BODY_LIMIT` | `1024 * 1024` bytes |
 | `Handler`, `Middleware`, `IntoResponse`, `IntoStatus`, `HandlerExt`, `ListenAddr` | The public traits |
 | `BoxFuture<T>`, `BoxError`, `Chained`, `Next`, `Server`, `SameSite`, `Cookie`, `Body` | The other public types |

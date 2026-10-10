@@ -20,7 +20,7 @@ use crate::request::Request;
 use crate::response::Response;
 
 /// Time given to in-flight requests during a graceful shutdown.
-const SHUTDOWN_GRACE: Duration = Duration::from_secs(10);
+pub(crate) const SHUTDOWN_GRACE: Duration = Duration::from_secs(10);
 
 /// An address to listen on: `3000`, `"127.0.0.1:8080"`, `([0, 0, 0, 0], 80)`…
 ///
@@ -125,15 +125,20 @@ pub struct Server {
     app: &'static AppService,
     listener: TcpListener,
     addr: SocketAddr,
+    #[cfg(feature = "http3")]
+    quic: Option<quinn::Endpoint>,
 }
 
 impl Server {
+    /// Must be called from a tokio runtime (it may open the HTTP/3 port).
     pub(crate) fn new(app: &'static AppService, listener: TcpListener) -> io::Result<Self> {
         let addr = listener.local_addr()?;
         Ok(Server {
             app,
             listener,
             addr,
+            #[cfg(feature = "http3")]
+            quic: crate::http3::bind(app, addr)?,
         })
     }
 
@@ -142,13 +147,20 @@ impl Server {
         self.addr
     }
 
+    /// The UDP address of HTTP/3, if [`App::http3`](crate::App::http3) is
+    /// configured.
+    #[cfg(feature = "http3")]
+    pub fn http3_addr(&self) -> Option<SocketAddr> {
+        self.quic.as_ref().and_then(|e| e.local_addr().ok())
+    }
+
     /// Serves requests until `Ctrl+C` or `SIGTERM`, then gives in-flight
     /// requests time to finish (10 s at most), like [`App::run`](crate::App::run).
     ///
     /// To stop on another signal, use
     /// [`with_graceful_shutdown`](Self::with_graceful_shutdown).
     pub async fn run(self) -> io::Result<()> {
-        serve(self.listener, self.app, shutdown_signal()).await
+        self.with_graceful_shutdown(shutdown_signal()).await
     }
 
     /// Serves requests until `signal` completes, then gives in-flight
@@ -157,6 +169,19 @@ impl Server {
     where
         F: Future<Output = ()>,
     {
+        #[cfg(feature = "http3")]
+        if let Some(endpoint) = self.quic {
+            // HTTP/3 tourne à côté et s'arrête sur le même signal.
+            let (stop, stopped) = tokio::sync::watch::channel(false);
+            let quic = tokio::spawn(crate::http3::serve(endpoint, self.app, stopped));
+            let result = serve(self.listener, self.app, async move {
+                signal.await;
+                let _ = stop.send(true);
+            })
+            .await;
+            let _ = quic.await;
+            return result;
+        }
         serve(self.listener, self.app, signal).await
     }
 }
@@ -258,7 +283,7 @@ pub(crate) fn run(
         .build()?;
     runtime.block_on(async {
         let listener = TcpListener::from_std(bind(addrs, false)?)?;
-        serve(listener, app, shutdown_signal()).await
+        Server::new(app, listener)?.run().await
     })
 }
 
@@ -274,6 +299,16 @@ fn run_thread_per_core(
     let first = bind(addrs, true)?;
     // On réutilise l'adresse effective (utile avec le port 0).
     let addr = first.local_addr()?;
+    // Le thread principal surveille les signaux, et sert HTTP/3 s'il est
+    // configuré (un seul socket UDP).
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()?;
+    #[cfg(feature = "http3")]
+    let quic = {
+        let _context = runtime.enter();
+        crate::http3::bind(app, addr)?
+    };
     let mut listeners = vec![first];
     for _ in 1..workers {
         listeners.push(listener(addr, true)?);
@@ -300,11 +335,18 @@ fn run_thread_per_core(
         threads.push(thread);
     }
 
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()?;
-    runtime.block_on(shutdown_signal());
-    let _ = stop_tx.send(true);
+    runtime.block_on(async {
+        #[cfg(feature = "http3")]
+        let quic = quic.map(|endpoint| tokio::spawn(crate::http3::serve(endpoint, app, stop_rx)));
+        #[cfg(not(feature = "http3"))]
+        drop(stop_rx);
+        shutdown_signal().await;
+        let _ = stop_tx.send(true);
+        #[cfg(feature = "http3")]
+        if let Some(quic) = quic {
+            let _ = quic.await;
+        }
+    });
 
     let mut result = Ok(());
     for thread in threads {

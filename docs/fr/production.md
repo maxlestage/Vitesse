@@ -208,16 +208,15 @@ Un redémarrage prend une fraction de seconde, mais les connexions tentées pend
 
 ## Arrêt propre
 
-`app.run` surveille `Ctrl+C` (`SIGINT`) et `SIGTERM`, que systemd, Docker, Kubernetes ou Heroku envoient avant d'arrêter une application. Vitesse alors :
+`app.run`, `app.listen(port).await` et `Server::run` surveillent `Ctrl+C` (`SIGINT`) et `SIGTERM`, que systemd, Docker, Kubernetes ou Heroku envoient avant d'arrêter une application. Vitesse alors :
 
 1. cesse d'accepter de nouvelles connexions ;
 2. laisse les requêtes en cours se terminer, pendant **10 secondes** au maximum ;
-3. ferme les connexions restantes et rend la main depuis `app.run`.
+3. ferme les connexions restantes et rend la main depuis `app.run` (ou `app.listen`).
 
 Ce délai de grâce de 10 secondes est fixe. Vérifiez que votre plateforme attend un peu plus longtemps avant de tuer le processus : systemd attend 90 secondes par défaut (`TimeoutStopSec`), Kubernetes 30 secondes (`terminationGracePeriodSeconds`), Heroku 30 secondes, mais Docker seulement 10 secondes (utilisez `--stop-timeout 15`).
 
-> [!NOTE]
-> `app.listen(port).await`, utilisé dans votre propre runtime tokio, ne surveille **pas** les signaux : il sert indéfiniment. Dans ce cas, ouvrez le port avec `app.bind` et passez votre propre signal d'arrêt à `with_graceful_shutdown`.
+Pour exécuter votre propre code à l'arrivée du signal (une ligne de journal, vider un tampon), ou pour vous arrêter sur un autre événement, ouvrez le port avec `app.bind` et passez votre propre futur à `with_graceful_shutdown`. Il remplace `Ctrl+C` et `SIGTERM` : incluez-les si vous en avez encore besoin :
 
 ```rust
 use tokio::signal::unix::{SignalKind, signal};
@@ -260,7 +259,7 @@ Si l'application dépend d'une base de données, ajoutez une route séparée (pa
 
 - `middleware::logger()` écrit une ligne par requête sur la sortie standard, comme `GET /users/42 200 0.084 ms`. Les couleurs ne sont utilisées que si la sortie est un terminal : les journaux de journald, de Docker et des plateformes restent propres.
 - Quand une erreur `5xx` a une cause (une erreur Rust convertie avec `?`, ou `Error::with_source`), cette cause est affichée sur la sortie d'erreur, préfixée par `[vitesse]` ; le client ne reçoit qu'un message générique.
-- Une panique dans un handler devient une `500`, et Rust affiche le message de la panique sur la sortie d'erreur.
+- Une panique dans un handler ou un middleware devient une `500`, et Rust affiche le message de la panique sur la sortie d'erreur.
 
 Besoin de journaux JSON pour un collecteur ? Écrivez votre propre middleware (voir [Middlewares](middleware.md)) :
 

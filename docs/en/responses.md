@@ -209,7 +209,7 @@ app.get("/invoice", |_| async {
 });
 ```
 
-`res::file` guesses the `Content-Type` from the extension, streams large files, and answers `404 {"error":"Not Found"}` if the file doesn't exist. `res::download` also adds `Content-Disposition: attachment` so the browser saves the file under the given name (non-ASCII names are supported). `.attachment("export.csv")` does the same on any response, which is handy for generated content. Relative paths start from the directory the server was launched from. To serve a whole folder, see [Static files](static-files.md).
+`res::file` guesses the `Content-Type` from the extension, streams large files, and answers `404 {"error":"Not Found"}` if the file doesn't exist. Like Express, it also sends `ETag` and `Last-Modified`, answers `304 Not Modified` when the browser already has the file, and `206 Partial Content` to `Range` requests from video players and download managers (see [Static files](static-files.md#range-requests)). `res::download` also adds `Content-Disposition: attachment` so the browser saves the file under the given name (non-ASCII names are supported). `.attachment("export.csv")` does the same on any response, which is handy for generated content. Relative paths start from the directory the server was launched from. To serve a whole folder, see [Static files](static-files.md).
 
 ## Streaming
 

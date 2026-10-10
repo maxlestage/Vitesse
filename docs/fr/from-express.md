@@ -34,7 +34,7 @@ Si vous connaissez Express, vous connaissez déjà l'essentiel de Vitesse : les 
 | `/files/*path` (Express 5) | `/files/*path`, lu avec `req.param("path")` |
 | `express.Router()` | `Router::new()` |
 | `app.use('/api', router)` | `app.mount("/api", router)` |
-| `router.use(mw)` | `router.middleware(mw)` |
+| `router.use(mw)` | `router.middleware(mw)`, qui s'exécute aussi pour les `404` sous le préfixe du routeur |
 
 ### Requête
 
@@ -423,7 +423,7 @@ Les requêtes sont traitées en parallèle sur plusieurs threads : pas de variab
 
 ## Les pièges
 
-- **Les middlewares globaux s'exécutent avant le routage, pour chaque requête.** Que `app.middleware(...)` soit appelé avant ou après vos routes ne change rien : tous les middlewares globaux s'exécutent, dans l'ordre d'ajout, avant le routage, 404 comprises. Pour ne cibler que certaines routes, utilisez un [routeur](routers.md) ou `handler.with(mw)`.
+- **Les middlewares globaux s'exécutent avant le routage, pour chaque requête.** Que `app.middleware(...)` soit appelé avant ou après vos routes ne change rien : tous les middlewares globaux s'exécutent, dans l'ordre d'ajout, avant le routage, 404 comprises. Pour ne cibler que certaines routes, utilisez un [routeur](routers.md) (dont les middlewares couvrent tout le préfixe, comme `router.use`) ou `handler.with(mw)`.
 - **Les routes sont sensibles à la casse.** `/Users` ne correspond pas à `/users` (Express ignore la casse par défaut). Une barre oblique finale est ignorée : `/users/` correspond à `/users`, comme en Express.
 - **Une mauvaise méthode répond `405`, pas `404`,** avec un en-tête `Allow`. `HEAD` utilise la route `GET` et `OPTIONS` répond `204` automatiquement.
 - **Un seul handler par méthode et par chemin.** Définir deux fois la même route fait paniquer au démarrage ; l'habitude d'Express d'enchaîner plusieurs handlers sur une même route avec `next()` devient un middleware.

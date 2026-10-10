@@ -105,7 +105,7 @@ app.get("/config", |_| async {
 | Cuerpo mayor que `app.body_limit` | `413 Payload Too Large` |
 | Ninguna ruta coincide | `404`, `{"error":"Cannot GET /ruta"}` |
 | La ruta existe, pero no para este método | `405 Method Not Allowed`, con una cabecera `Allow` |
-| Un handler entra en pánico | `500 Internal Server Error` |
+| Un handler o un middleware entra en pánico | `500 Internal Server Error` |
 | Vence `middleware::timeout` | `503`, `request timed out` |
 
 ## Tus propios tipos de error
@@ -234,13 +234,16 @@ app.fallback(|req: Request| async move {
 });
 ```
 
-Los middlewares globales también se ejecutan para el handler de respaldo. No se llama cuando la ruta existe con otro método (eso es un `405`). Si devuelve un `Error`, la respuesta pasa por `on_error`. Para aplicaciones de una sola página, consulta [Archivos estáticos](static-files.md).
+Los middlewares globales también se ejecutan para el handler de respaldo, igual que los de un [router](routers.md) cuyo prefijo cubra la ruta. No se llama cuando la ruta existe con otro método (eso es un `405`). Si devuelve un `Error`, la respuesta pasa por `on_error`. Para aplicaciones de una sola página, consulta [Archivos estáticos](static-files.md).
 
 ## Pánicos
 
-Un pánico en un handler (un `unwrap()` sobre `None`, un índice fuera de rango, `req.state::<T>()` con un tipo que nunca se registró…) no tumba el servidor: Vitesse lo captura y responde `500 {"error":"Internal Server Error"}`. Rust escribe el mensaje del pánico en la salida de error, las demás peticiones siguen con normalidad, y el `500` pasa por tus middlewares y por `on_error` como cualquier otro error.
+Un pánico en un handler o en un middleware (un `unwrap()` sobre `None`, un índice fuera de rango, `req.state::<T>()` con un tipo que nunca se registró…) no tumba el servidor: Vitesse lo captura y responde `500 {"error":"Internal Server Error"}`. Rust escribe el mensaje del pánico en la salida de error, las demás peticiones siguen con normalidad, y el `500` vuelve a pasar por los middlewares que lo rodean (las cabeceras CORS, por ejemplo, se conservan) y por `on_error`, como cualquier otro error.
 
 Aun así, prefiere `?` y errores explícitos: un pánico es un bug, no una forma de responder.
 
 > [!WARNING]
-> Los pánicos solo se pueden capturar con la estrategia por defecto (*unwinding*). Con `panic = "abort"` en un `[profile]` de tu `Cargo.toml`, un pánico detiene todo el proceso. Además, un pánico dentro de un *middleware* se captura en lo más alto de la cadena: el cliente recibe igualmente un `500`, pero los middlewares exteriores y `on_error` no se ejecutan para esa petición.
+> Los pánicos solo se pueden capturar con la estrategia por defecto (*unwinding*). Con `panic = "abort"` en un `[profile]` de tu `Cargo.toml`, un pánico detiene todo el proceso.
+
+> [!NOTE]
+> Esto vale para los middlewares escritos como closure o como `async fn`, tanto si se añaden con `app.middleware` como con `router.middleware` o `.with`. La única excepción es un `impl Middleware for MiTipo` escrito a mano que entra en pánico: el pánico se captura más arriba, en lo más alto de la cadena si ningún middleware closure o `async fn` lo rodea, y el cliente recibe entonces un simple `500 {"error":"Internal Server Error"}` que no pasa por `on_error`.

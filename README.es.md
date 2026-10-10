@@ -56,8 +56,7 @@ servidor por cada petición (cuanto menos, mejor):
 - **Frente a axum**: de 1,7 a 2,4 veces más peticiones por segundo, la mitad
   de CPU por petición y 13 veces más con pipelining.
 - **Frente a Drogon (C++)**: de 1,4 a 3,8 veces más rápido.
-- **Frente a Express**: unas 50 veces más rápido (y todavía 25 veces más que
-  Express en modo clúster con los mismos 2 núcleos).
+- **Frente a Express**: unas 50 veces más rápido.
 
 **¿Por qué la diferencia con actix es menor en `GET /`?** En la petición más
 simple, todos los servidores rápidos chocan con el mismo suelo: unos 4,7 µs
@@ -77,7 +76,13 @@ y misma sesión para todos. Node 22.22 / Express 5.3.0, Drogon 1.9.13 (GCC 13,
 Sin pipelining, los servidores más rápidos saturan wrk: el tiempo de CPU por
 petición, medido del lado del servidor, es entonces el juez más fiable. Las
 mediciones varían unos pocos puntos porcentuales de una ejecución a otra.
-Para reproducirlo: `bench/run.sh` (código de los servidores en `bench/`).</sub>
+Para reproducirlo:
+`cargo run --release --manifest-path bench/runner/Cargo.toml` (código de
+los servidores en `bench/`). El servidor Express, medido en la misma sesión,
+se retiró después del repositorio para que el proyecto siga siendo 100 %
+Rust, sin JavaScript: sigue en el historial de git
+(`git show 484eed3:bench/express/server.js`), y la herramienta de benchmark
+compara ahora Drogon, axum, actix-web y Vitesse.</sub>
 
 ## Instalación
 
@@ -243,7 +248,7 @@ cargo run --release --example hello      # Hello World
 cargo run --release --example rest_api   # API CRUD completa
 cargo run --release --example demo       # la app de demostración desplegada en Heroku (lee $PORT)
 cargo test                               # tests unitarios, de integración y doctests
-bench/run.sh                             # benchmark (wrk, Node.js, y Drogon si está instalado)
+cargo run --release --manifest-path bench/runner/Cargo.toml   # benchmark (Linux, wrk, y Drogon si está instalado)
 docker build -t vitesse-demo . && docker run --rm -p 8080:8080 vitesse-demo
 ```
 
@@ -274,6 +279,10 @@ cargo fmt --check
 cargo clippy --all-targets -- -D warnings
 cargo test
 ```
+
+La herramienta de benchmark ([`bench/runner`](bench/runner)) y el sitio web
+([`site/`](site)) son crates aparte, fuera de la compilación principal: si
+los modificas, ejecuta también `cargo test` en su carpeta.
 
 La documentación está en [`docs/`](docs), en inglés, francés y español:
 cuando modifiques una página, actualiza también los otros idiomas, o

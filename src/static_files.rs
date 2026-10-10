@@ -1,9 +1,12 @@
 //! Static files (`express.static`, `res.sendFile`).
 
+use std::cell::RefCell;
 use std::fs::Metadata;
+use std::future::Future;
 use std::io::{self, SeekFrom};
 use std::path::{Component, Path, PathBuf};
 use std::pin::Pin;
+use std::sync::Arc;
 use std::task::{Context, Poll};
 use std::time::{Duration, UNIX_EPOCH};
 
@@ -121,7 +124,9 @@ impl ServeDir {
         if !meta.is_file() {
             return None;
         }
-        Some(file_response(&path, &meta, Some(req), self.max_age).await)
+        let conditional = Conditional::from_request(req);
+        let head = *req.method() == Method::HEAD;
+        Some(file_response(&path, &meta, Some(&conditional), head, self.max_age).await)
     }
 }
 
@@ -153,10 +158,75 @@ impl Middleware for ServeDir {
     }
 }
 
-/// `res.sendFile`: sends a specific file.
-pub(crate) async fn send_file(path: &Path, req: Option<&Request>) -> Response {
+/// The headers of a conditional or partial request.
+#[derive(Debug, Default)]
+pub(crate) struct Conditional {
+    if_none_match: Option<String>,
+    if_modified_since: Option<String>,
+    range: Option<String>,
+    if_range: Option<String>,
+}
+
+impl Conditional {
+    pub(crate) fn from_request(req: &Request) -> Self {
+        let get = |name| req.header(name).map(str::to_owned);
+        Conditional {
+            if_none_match: get(header::IF_NONE_MATCH),
+            if_modified_since: get(header::IF_MODIFIED_SINCE),
+            range: get(header::RANGE),
+            if_range: get(header::IF_RANGE),
+        }
+    }
+}
+
+thread_local! {
+    /// The conditional headers of the request being handled on this thread,
+    /// for `res::file` (which does not receive the request).
+    static CURRENT: RefCell<Option<Arc<Conditional>>> = const { RefCell::new(None) };
+}
+
+/// Makes the conditional headers of a request visible to `res::file` while
+/// `fut` (the processing of that request) is polled.
+pub(crate) fn with_conditional(
+    conditional: Conditional,
+    fut: BoxFuture<Response>,
+) -> BoxFuture<Response> {
+    Box::pin(WithConditional {
+        fut,
+        conditional: Arc::new(conditional),
+    })
+}
+
+struct WithConditional {
+    fut: BoxFuture<Response>,
+    conditional: Arc<Conditional>,
+}
+
+impl Future for WithConditional {
+    type Output = Response;
+
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Response> {
+        struct Restore(Option<Arc<Conditional>>);
+        impl Drop for Restore {
+            fn drop(&mut self) {
+                let previous = self.0.take();
+                CURRENT.with(|c| *c.borrow_mut() = previous);
+            }
+        }
+        let previous = CURRENT.with(|c| c.replace(Some(self.conditional.clone())));
+        let _restore = Restore(previous);
+        self.fut.as_mut().poll(cx)
+    }
+}
+
+/// `res.sendFile`: sends a specific file. Like Express, it answers `304`
+/// and `206` when the request asks for it.
+pub(crate) async fn send_file(path: &Path) -> Response {
+    let conditional = CURRENT.with(|c| c.borrow().clone());
     match tokio::fs::metadata(path).await {
-        Ok(meta) if meta.is_file() => file_response(path, &meta, req, 0).await,
+        Ok(meta) if meta.is_file() => {
+            file_response(path, &meta, conditional.as_deref(), false, 0).await
+        }
         _ => Error::from_status(StatusCode::NOT_FOUND).into_response(),
     }
 }
@@ -165,7 +235,8 @@ pub(crate) async fn send_file(path: &Path, req: Option<&Request>) -> Response {
 async fn file_response(
     path: &Path,
     meta: &Metadata,
-    req: Option<&Request>,
+    conditional: Option<&Conditional>,
+    head: bool,
     max_age: u64,
 ) -> Response {
     let len = meta.len();
@@ -189,24 +260,28 @@ async fn file_response(
     }
 
     let mut range = None;
-    let mut head = false;
-    if let Some(req) = req {
-        head = *req.method() == Method::HEAD;
+    if let Some(c) = conditional {
         // Requêtes conditionnelles : le navigateur a déjà la bonne version.
-        let fresh = match req.header(header::IF_NONE_MATCH) {
+        let fresh = match &c.if_none_match {
             Some(inm) => inm.split(',').any(|t| {
                 let t = t.trim();
                 t == "*" || t.trim_start_matches("W/") == etag.trim_start_matches("W/")
             }),
             None => matches!(
-                (req.header(header::IF_MODIFIED_SINCE), &last_modified),
+                (&c.if_modified_since, &last_modified),
                 (Some(ims), Some(lm)) if ims == lm
             ),
         };
         if fresh {
             return res.status(StatusCode::NOT_MODIFIED);
         }
-        if let Some(value) = req.header(header::RANGE) {
+        // `If-Range` : la plage ne vaut que si le fichier n'a pas changé
+        // (date identique ; un ETag faible ne suffit pas, RFC 9110).
+        let same_file = match &c.if_range {
+            None => true,
+            Some(v) => last_modified.as_deref() == Some(v.as_str()),
+        };
+        if let Some(value) = c.range.as_deref().filter(|_| same_file) {
             match parse_range(value, len) {
                 Some(Ok(r)) => range = Some(r),
                 Some(Err(())) => {

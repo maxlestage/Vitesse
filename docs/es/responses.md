@@ -209,7 +209,7 @@ app.get("/factura", |_| async {
 });
 ```
 
-`res::file` adivina el `Content-Type` a partir de la extensión, envía los archivos grandes por partes, y responde `404 {"error":"Not Found"}` si el archivo no existe. `res::download` añade además `Content-Disposition: attachment` para que el navegador guarde el archivo con el nombre indicado (se admiten nombres no ASCII). `.attachment("export.csv")` hace lo mismo con cualquier respuesta, algo práctico para contenido generado. Las rutas relativas parten de la carpeta desde la que se lanzó el servidor. Para servir una carpeta entera, consulta [Archivos estáticos](static-files.md).
+`res::file` adivina el `Content-Type` a partir de la extensión, envía los archivos grandes por partes, y responde `404 {"error":"Not Found"}` si el archivo no existe. Como Express, también envía `ETag` y `Last-Modified`, responde `304 Not Modified` cuando el navegador ya tiene el archivo, y `206 Partial Content` a las peticiones `Range` de los reproductores de vídeo y los gestores de descargas (consulta [Archivos estáticos](static-files.md#peticiones-parciales)). `res::download` añade además `Content-Disposition: attachment` para que el navegador guarde el archivo con el nombre indicado (se admiten nombres no ASCII). `.attachment("export.csv")` hace lo mismo con cualquier respuesta, algo práctico para contenido generado. Las rutas relativas parten de la carpeta desde la que se lanzó el servidor. Para servir una carpeta entera, consulta [Archivos estáticos](static-files.md).
 
 ## Streaming
 

@@ -1,0 +1,10 @@
+[package]
+name = "bench-runner"
+version = "0.0.0"
+edition = "2024"
+publish = false
+description = "Lance le benchmark de Vitesse contre actix-web, axum et Drogon avec wrk."
+
+# Crate indépendante : ne fait pas partie du build de Vitesse, et sans
+# dépendance (bibliothèque standard uniquement).
+[workspace]

@@ -78,9 +78,9 @@ In short:
 - **Against actix-web**, often called the fastest Rust framework: up to **+62%** throughput with a real browser request, +45 to +49% with parameters or a JSON body, **2.2 times more** with pipelining, and 15 to 59% less CPU per request.
 - **Against axum**: 1.7 to 2.4 times more requests per second, half the CPU per request, and 13 times more with pipelining.
 - **Against Drogon (C++)**: 1.4 to 3.8 times faster.
-- **Against Express**: about 50 times faster, and still 25 times faster than Express in cluster mode on the same 2 cores.
+- **Against Express**: about 50 times faster.
 
-All of these ran on a 4 vCPU VM, with the server pinned to 2 cores, [wrk](https://github.com/wg/wrk) on the other 2, 128 keep-alive connections and 10 s per scenario. The [Performance](performance.md) page covers the methodology, how to reproduce the numbers (`bench/run.sh`) and why Vitesse is fast. The raw results are also in the [README](https://github.com/maxlestage/Vitesse#benchmark).
+All of these ran on a 4 vCPU VM, with the server pinned to 2 cores, [wrk](https://github.com/wg/wrk) on the other 2, 128 keep-alive connections and 10 s per scenario. The Express server used for these numbers has since been removed from the repository to keep it 100% Rust (it is still in the git history), and the benchmark now compares Drogon, axum, actix-web and Vitesse. The [Performance](performance.md) page covers the methodology, how to reproduce the numbers (with the Rust runner in `bench/runner`) and why Vitesse is fast. The raw results are also in the [README](https://github.com/maxlestage/Vitesse#benchmark).
 
 ## Current limitations
 

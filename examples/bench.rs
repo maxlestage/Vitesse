@@ -1,4 +1,5 @@
-//! Server used by `bench/run.sh` (same routes as `bench/express/server.js`).
+//! Server used by the benchmark runner (`bench/runner`), with the same routes
+//! as the axum, actix-web and Drogon servers in `bench/`.
 //!
 //! Environment variables: `PORT`, `WORKERS`, and `VITESSE_MODE=mt` to use
 //! tokio's multi-threaded runtime instead of one thread per core.

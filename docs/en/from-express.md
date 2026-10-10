@@ -34,7 +34,7 @@ If you know Express, you already know most of Vitesse: the same routes, the same
 | `/files/*path` (Express 5) | `/files/*path`, read with `req.param("path")` |
 | `express.Router()` | `Router::new()` |
 | `app.use('/api', router)` | `app.mount("/api", router)` |
-| `router.use(mw)` | `router.middleware(mw)` |
+| `router.use(mw)` | `router.middleware(mw)`, which also runs for the `404`s under the router's prefix |
 
 ### Request
 
@@ -423,7 +423,7 @@ Requests are handled in parallel on several threads, so there are no mutable glo
 
 ## Gotchas
 
-- **Global middleware runs before routing, for every request.** Whether `app.middleware(...)` is called before or after your routes does not matter: all global middleware runs, in the order it was added, before routing, including for 404s. To target some routes only, use a [router](routers.md) or `handler.with(mw)`.
+- **Global middleware runs before routing, for every request.** Whether `app.middleware(...)` is called before or after your routes does not matter: all global middleware runs, in the order it was added, before routing, including for 404s. To target some routes only, use a [router](routers.md) (whose middleware covers its whole prefix, like `router.use`) or `handler.with(mw)`.
 - **Routes are case-sensitive.** `/Users` does not match `/users` (Express ignores case by default). A trailing slash is ignored: `/users/` matches `/users`, like in Express.
 - **A wrong method answers `405`, not `404`,** with an `Allow` header. `HEAD` uses the `GET` route and `OPTIONS` answers `204` automatically.
 - **One handler per method and path.** Defining the same route twice panics at startup; the Express habit of chaining several handlers on one route with `next()` becomes middleware.

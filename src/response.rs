@@ -831,11 +831,17 @@ pub mod res {
     }
 
     /// `res.sendFile(path)`: sends a file (404 if it does not exist).
+    ///
+    /// Like Express, it sends `ETag` and `Last-Modified`, answers `304 Not
+    /// Modified` when the browser already has this version
+    /// (`If-None-Match`, `If-Modified-Since`), and `206 Partial Content` to
+    /// `Range` requests (video, resumed downloads), honoring `If-Range`.
     pub async fn file(path: impl AsRef<Path>) -> Response {
-        crate::static_files::send_file(path.as_ref(), None).await
+        crate::static_files::send_file(path.as_ref()).await
     }
 
-    /// `res.download(path, name)`: sends a file as an attachment.
+    /// `res.download(path, name)`: sends a file as an attachment (with the
+    /// same `304` / `206` handling as [`file()`]).
     pub async fn download(path: impl AsRef<Path>, filename: &str) -> Response {
         let res = file(path).await;
         if res.status_code().is_success() {

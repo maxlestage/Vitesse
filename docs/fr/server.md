@@ -8,7 +8,7 @@ Cette page couvre tout ce qui touche au serveur lui-même : les trois façons de
 |---|---|---|---|
 | Nécessite `#[tokio::main]` | Non | Oui | Oui |
 | Threads | Un par cœur, voir `workers` et `thread_per_core` | Ceux de votre runtime | Ceux de votre runtime |
-| S'arrête proprement sur `Ctrl+C` / `SIGTERM` | Oui | Non | Oui, avec `with_graceful_shutdown` |
+| S'arrête proprement sur `Ctrl+C` / `SIGTERM` | Oui | Oui | Oui avec `run()`, ou sur votre propre signal avec `with_graceful_shutdown` |
 | Connaît le port avant de servir | Non | Non | Oui, avec `local_addr()` |
 | Usage typique | La plupart des applications, la production | Une application tokio existante | Tests, arrêt personnalisé, port `0` |
 
@@ -45,14 +45,14 @@ async fn main() -> std::io::Result<()> {
     app.state(greeting);
     app.get("/", |req: Request| async move { req.state::<String>().clone() });
 
-    app.listen(3000).await // tourne indéfiniment, sur le runtime courant
+    app.listen(3000).await // jusqu'à Ctrl+C / SIGTERM, sur le runtime courant
 }
 ```
 
 Il faut alors tokio dans votre `Cargo.toml` (`tokio = { version = "1", features = ["full"] }`).
 
-> [!WARNING]
-> `listen` sert indéfiniment : elle n'intercepte ni `Ctrl+C` ni `SIGTERM`, le processus est donc tué net, avec les requêtes en cours. `app.workers` et `app.thread_per_core` n'ont pas d'effet non plus : les threads sont ceux de votre runtime. Pour un arrêt propre dans votre propre runtime, utilisez `bind` et `with_graceful_shutdown`.
+> [!NOTE]
+> Comme `run`, `listen` s'arrête proprement sur `Ctrl+C` ou `SIGTERM` et laisse les requêtes en cours se terminer (voir [Arrêt propre](#arrêt-propre)). En revanche, `app.workers` et `app.thread_per_core` n'ont pas d'effet : les threads sont ceux de votre runtime.
 
 ### `app.bind` et `Server` : le contrôle total
 
@@ -69,37 +69,17 @@ async fn main() -> std::io::Result<()> {
     let server = app.bind("127.0.0.1:0").await?; // port 0 : l'OS choisit un port libre
     println!("Écoute sur http://{}", server.local_addr());
 
-    server.with_graceful_shutdown(shutdown_signal()).await
-}
-
-/// Se termine sur Ctrl+C ou, sous Unix, sur SIGTERM.
-async fn shutdown_signal() {
-    let ctrl_c = async {
-        tokio::signal::ctrl_c().await.ok();
-    };
-    #[cfg(unix)]
-    let terminate = async {
-        use tokio::signal::unix::{SignalKind, signal};
-        signal(SignalKind::terminate())
-            .expect("impossible d'écouter SIGTERM")
-            .recv()
-            .await;
-    };
-    #[cfg(not(unix))]
-    let terminate = std::future::pending::<()>();
-
-    tokio::select! {
-        _ = ctrl_c => {}
-        _ = terminate => {}
-    }
+    server.run().await // jusqu'à Ctrl+C / SIGTERM, comme app.run
 }
 ```
 
 | Méthode de `Server` | Rôle |
 |---|---|
 | `server.local_addr()` | L'adresse réellement utilisée (pratique avec le port `0`) |
-| `server.run().await` | Sert indéfiniment |
+| `server.run().await` | Sert jusqu'à `Ctrl+C` / `SIGTERM`, puis s'arrête proprement |
 | `server.with_graceful_shutdown(signal).await` | Sert jusqu'à ce que le futur `signal` se termine, puis s'arrête proprement |
+
+`with_graceful_shutdown` remplace `Ctrl+C` / `SIGTERM` par le futur de votre choix : un canal dans les [tests](testing.md), ou les signaux habituels suivis de votre propre code, comme dans [Mise en production](production.md#arrêt-propre).
 
 C'est le mode utilisé pour les [tests d'intégration](testing.md) sur un vrai port.
 
@@ -204,7 +184,7 @@ Le moteur HTTP/1.1 protège le serveur contre les requêtes malformées ou abusi
 | Gros corps que le handler ne lit pas | Réponse envoyée avec `connection: close`, puis la fin de l'envoi est absorbée (2 s et 8 Mio au plus) pour que le client reçoive bien la réponse |
 | Requêtes pipelinées | Traitées dans l'ordre ; les réponses d'un lot partent en un seul appel système |
 | HTTP/1.0 | Connexion fermée après la réponse, sauf si le client demande le keep-alive |
-| Panique dans un handler | `500`, et le serveur continue de tourner |
+| Panique dans un handler ou un middleware | `500`, et le serveur continue de tourner |
 
 Côté réponse, le moteur calcule `content-length`, ajoute l'en-tête `date`, envoie les corps de taille inconnue (flux) en `chunked`, n'envoie pas de corps pour les `204`, les `304` et les requêtes `HEAD`, et ferme la connexion après la réponse si votre handler pose un en-tête `connection: close`.
 
@@ -217,13 +197,13 @@ app.middleware(middleware::timeout(Duration::from_secs(30))); // std::time::Dura
 
 ## Arrêt propre
 
-Avec `app.run`, `Ctrl+C` (SIGINT) et, sous Unix, `SIGTERM` déclenchent un arrêt propre :
+Avec `app.run`, `app.listen` et `Server::run`, `Ctrl+C` (SIGINT) et, sous Unix, `SIGTERM` déclenchent un arrêt propre :
 
 1. le serveur n'accepte plus de nouvelles connexions ;
 2. les requêtes en cours ont jusqu'à **10 secondes** pour se terminer, et leurs réponses portent `connection: close` ;
-3. les connexions restantes (keep-alive inactives, requêtes encore en cours après 10 s) sont fermées, et `run` renvoie `Ok(())`.
+3. les connexions restantes (keep-alive inactives, requêtes encore en cours après 10 s) sont fermées, et `run` (ou `listen`) renvoie `Ok(())`.
 
-C'est exactement ce qu'attendent Docker, Kubernetes ou Heroku : ils envoient `SIGTERM` et patientent un moment avant de forcer l'arrêt du processus. Avec `bind`, `with_graceful_shutdown(signal)` suit les mêmes étapes dès que votre futur `signal` se termine : c'est vous qui décidez ce qui déclenche l'arrêt. `app.listen()` et `Server::run()` ne s'arrêtent jamais d'eux-mêmes. Le délai de grâce de 10 secondes n'est pas configurable.
+C'est exactement ce qu'attendent Docker, Kubernetes ou Heroku : ils envoient `SIGTERM` et patientent un moment avant de forcer l'arrêt du processus. Avec `bind`, `with_graceful_shutdown(signal)` suit les mêmes étapes dès que votre futur `signal` se termine : c'est vous qui décidez ce qui déclenche l'arrêt. `Ctrl+C` et `SIGTERM` ne sont alors plus surveillés : incluez-les dans votre futur si vous en avez encore besoin. Le délai de grâce de 10 secondes n'est pas configurable.
 
 ## HTTP/1.1 uniquement
 

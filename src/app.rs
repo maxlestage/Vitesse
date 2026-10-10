@@ -10,8 +10,9 @@ use crate::error::Error;
 use crate::handler::{BoxFuture, Chain, Handler, Middleware, Next};
 use crate::request::{Request, Shared, StateMap};
 use crate::response::{IntoResponse, Response};
-use crate::router::{MethodMap, Route, routing_methods};
+use crate::router::{MethodMap, Route, Scope, routing_methods};
 use crate::server::{self, ListenAddr, Server};
+use crate::static_files::{Conditional, with_conditional};
 use crate::tree::{Tree, param_names, parse_pattern};
 
 /// Default maximum size of a request body read into memory: 1 MiB.
@@ -37,6 +38,8 @@ pub const DEFAULT_BODY_LIMIT: usize = 1024 * 1024;
 pub struct App {
     tree: Tree<MethodMap>,
     middlewares: Vec<Arc<dyn Middleware>>,
+    /// Middlewares of the mounted routers, by prefix.
+    scopes: Vec<Scope>,
     fallback: Option<Arc<dyn Handler>>,
     error_handler: Option<Arc<dyn Fn(Error) -> Response + Send + Sync>>,
     state: StateMap,
@@ -57,6 +60,7 @@ impl App {
         App {
             tree: Tree::new(),
             middlewares: Vec::new(),
+            scopes: Vec::new(),
             fallback: None,
             error_handler: None,
             state: StateMap::default(),
@@ -175,9 +179,13 @@ impl App {
     /// so requests never have to touch a reference count.
     pub(crate) fn build(self) -> &'static AppService {
         let fallback = self.fallback.unwrap_or_else(|| Arc::new(not_found));
-        let dispatcher: Arc<dyn Handler> = Arc::new(Dispatcher {
+        let core = Arc::new(Core {
             tree: self.tree,
             fallback,
+        });
+        let dispatcher: Arc<dyn Handler> = Arc::new(Dispatcher {
+            scopes: build_scopes(self.scopes, &core),
+            core,
         });
         let mut middlewares = self.middlewares;
         if let Some(handler) = self.error_handler {
@@ -203,6 +211,10 @@ impl App {
     }
 
     /// Starts the server on the current tokio runtime (`app.listen(3000)`).
+    ///
+    /// Like [`App::run`], it stops gracefully on `Ctrl+C` or `SIGTERM`:
+    /// in-flight requests get up to 10 s to finish. [`App::workers`] and
+    /// [`App::thread_per_core`] do not apply here: the runtime is yours.
     ///
     /// ```no_run
     /// # use vitesse::prelude::*;
@@ -240,18 +252,99 @@ pub(crate) struct AppService {
 impl AppService {
     #[inline]
     pub(crate) fn handle(&'static self, req: Request) -> BoxFuture<Response> {
+        if req.is_conditional() {
+            // Rare : `Range`, `If-None-Match`… restent lisibles par
+            // `res::file` pendant tout le traitement.
+            let conditional = Conditional::from_request(&req);
+            return with_conditional(conditional, Next::new(&self.chain).run(req));
+        }
         Next::new(&self.chain).run(req)
     }
 }
 
 /// Routing: finds the route and calls its handler.
 struct Dispatcher {
-    tree: Tree<MethodMap>,
-    fallback: Arc<dyn Handler>,
+    core: Arc<Core>,
+    /// Chains of the mounted routers' middlewares, longest prefix first.
+    scopes: Box<[(Box<str>, Chain)]>,
 }
 
 impl Handler for Dispatcher {
     #[inline]
+    fn call(&'static self, mut req: Request) -> BoxFuture<Response> {
+        if let Some(route) = req
+            .find_route(&self.core.tree)
+            .and_then(|methods| methods.find(req.method()))
+        {
+            if !route.names.is_empty() {
+                req.set_params(&route.names);
+            }
+            return route.handler.call(req);
+        }
+        // Aucune route ne répond : les middlewares des routeurs montés sur ce
+        // préfixe passent d'abord, puis le 404, le 405 ou l'OPTIONS automatique.
+        let path = req.path();
+        match self.scopes.iter().find(|(prefix, _)| under(path, prefix)) {
+            Some((_, chain)) => Next::new(chain).run(req),
+            None => self.core.call(req),
+        }
+    }
+}
+
+/// `path` est sous `prefix`, segment par segment : `/api` couvre `/api` et
+/// `/api/x` (pas `/apix`), un segment `:param` du préfixe accepte n'importe
+/// quel segment, et un joker `*` tout le reste.
+fn under(path: &str, prefix: &str) -> bool {
+    let mut segments = path.split('/').filter(|s| !s.is_empty());
+    for expected in prefix.split('/').filter(|s| !s.is_empty()) {
+        if expected.starts_with('*') {
+            return true;
+        }
+        match segments.next() {
+            Some(segment) if expected.starts_with(':') || segment == expected => {}
+            _ => return false,
+        }
+    }
+    true
+}
+
+/// Pour chaque préfixe, la chaîne de tous les middlewares qui le couvrent :
+/// les préfixes les plus courts (routeurs extérieurs) d'abord, puis dans
+/// l'ordre de montage.
+fn build_scopes(scopes: Vec<Scope>, core: &Arc<Core>) -> Box<[(Box<str>, Chain)]> {
+    let depth = |p: &str| p.split('/').filter(|s| !s.is_empty()).count();
+    let mut ordered: Vec<(usize, Scope)> = scopes.into_iter().enumerate().collect();
+    ordered.sort_by_key(|(i, (prefix, _))| (depth(prefix), *i));
+    let mut prefixes: Vec<&str> = ordered.iter().map(|(_, (p, _))| p.as_str()).collect();
+    // Le préfixe le plus précis d'abord : le plus de segments.
+    prefixes.sort_by_key(|p| std::cmp::Reverse((depth(p), p.len())));
+    prefixes.dedup();
+    prefixes
+        .into_iter()
+        .map(|prefix| {
+            let middlewares: Vec<Arc<dyn Middleware>> = ordered
+                .iter()
+                .filter(|(_, (p, _))| under(prefix, p))
+                .flat_map(|(_, (_, m))| m.iter().cloned())
+                .collect();
+            let chain = Chain {
+                middlewares: middlewares.into(),
+                endpoint: core.clone(),
+            };
+            (prefix.into(), chain)
+        })
+        .collect()
+}
+
+/// Routing without the routers' middlewares: the route, or else the `405` /
+/// automatic `OPTIONS`, or else the fallback (`404`). A router middleware may
+/// have rewritten the path, hence the new lookup.
+struct Core {
+    tree: Tree<MethodMap>,
+    fallback: Arc<dyn Handler>,
+}
+
+impl Handler for Core {
     fn call(&'static self, mut req: Request) -> BoxFuture<Response> {
         let Some(methods) = req.find_route(&self.tree) else {
             return self.fallback.call(req);

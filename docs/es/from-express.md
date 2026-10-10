@@ -34,7 +34,7 @@ Si conoces Express, ya conoces casi todo Vitesse: las mismas rutas, el mismo `re
 | `/files/*path` (Express 5) | `/files/*path`, que se lee con `req.param("path")` |
 | `express.Router()` | `Router::new()` |
 | `app.use('/api', router)` | `app.mount("/api", router)` |
-| `router.use(mw)` | `router.middleware(mw)` |
+| `router.use(mw)` | `router.middleware(mw)`, que también se ejecuta para los `404` bajo el prefijo del router |
 
 ### Petición
 
@@ -423,7 +423,7 @@ Las peticiones se atienden en paralelo en varios hilos, así que no hay variable
 
 ## Trampas habituales
 
-- **Los middlewares globales se ejecutan antes del enrutamiento, en todas las peticiones.** Da igual que llames a `app.middleware(...)` antes o después de tus rutas: todos los middlewares globales se ejecutan, en el orden en que se añadieron, antes del enrutamiento, incluidos los 404. Para afectar solo a algunas rutas, usa un [router](routers.md) o `handler.with(mw)`.
+- **Los middlewares globales se ejecutan antes del enrutamiento, en todas las peticiones.** Da igual que llames a `app.middleware(...)` antes o después de tus rutas: todos los middlewares globales se ejecutan, en el orden en que se añadieron, antes del enrutamiento, incluidos los 404. Para afectar solo a algunas rutas, usa un [router](routers.md) (cuyos middlewares cubren todo su prefijo, como `router.use`) o `handler.with(mw)`.
 - **Las rutas distinguen mayúsculas y minúsculas.** `/Users` no coincide con `/users` (Express las ignora por defecto). La barra final se ignora: `/users/` coincide con `/users`, como en Express.
 - **Un método equivocado responde `405`, no `404`,** con una cabecera `Allow`. `HEAD` usa la ruta `GET` y `OPTIONS` responde `204` automáticamente.
 - **Un solo handler por método y ruta.** Definir dos veces la misma ruta provoca un pánico al arrancar; la costumbre de Express de encadenar varios handlers en una ruta con `next()` se convierte en un middleware.

@@ -115,6 +115,24 @@ Pon estas líneas en la etapa de ejecución, antes de `USER`, y comprueba que `.
 > [!WARNING]
 > Nunca escribas secretos en el `Dockerfile` (`ENV API_TOKEN=…`): cualquiera que tenga la imagen puede leerlos, por ejemplo con `docker history`. Pásalos al arrancar el contenedor.
 
+## HTTP/3: publicar el puerto UDP
+
+`EXPOSE` y `-p` se refieren a TCP salvo que se indique otra cosa. Si tu aplicación sirve [HTTP/3](http3.md) (la feature `http3`) en el puerto UDP 443, declara y publica también ese puerto, y dale al contenedor su certificado:
+
+```dockerfile
+EXPOSE 8080
+EXPOSE 443/udp
+```
+
+```sh
+docker run --rm -p 127.0.0.1:8080:8080 -p 443:443/udp \
+  -v /etc/mi-app/tls:/etc/mi-app/tls:ro mi-app
+```
+
+Aquí, el puerto TCP 8080 solo es accesible desde el host, para el proxy inverso que gestiona HTTPS, mientras que el puerto UDP 443 es público. El usuario del contenedor debe poder leer los archivos montados (por defecto, las claves de Let's Encrypt solo las puede leer root). Si el contenedor escucha en otro puerto UDP, por ejemplo con `-p 443:8443/udp`, anuncia el puerto público con `.alt_svc_port(443)`.
+
+HTTP/3 necesita que el UDP llegue hasta el contenedor: Heroku no enruta UDP, y plataformas como Cloud Run o Render terminan HTTP/3 en su borde cuando lo ofrecen. En esas plataformas, deja la feature desactivada.
+
 ## Registros y comprobaciones de salud
 
 - **Registros**: `middleware::logger()` escribe una línea por petición en la salida estándar, sin códigos de color cuando no está conectada a una terminal. Léelos con `docker logs -f <contenedor>`. Las causas de los errores `5xx` van a la salida de error.

@@ -1,6 +1,6 @@
 # Configuration du serveur
 
-Cette page couvre tout ce qui touche au serveur lui-même : les trois façons de le démarrer, les adresses d'écoute, les threads, la taille des corps, les limites intégrées au moteur HTTP et l'arrêt propre. Les valeurs par défaut sont pensées pour la production : la plupart des applications n'ont besoin que de `app.run(port)`.
+Cette page couvre tout ce qui touche au serveur lui-même : les trois façons de le démarrer, les adresses d'écoute, les threads, la taille des corps, les limites intégrées au moteur HTTP, l'arrêt propre et les protocoles qu'il parle. Les valeurs par défaut sont pensées pour la production : la plupart des applications n'ont besoin que de `app.run(port)`.
 
 ## Trois façons de démarrer le serveur
 
@@ -76,6 +76,7 @@ async fn main() -> std::io::Result<()> {
 | Méthode de `Server` | Rôle |
 |---|---|
 | `server.local_addr()` | L'adresse réellement utilisée (pratique avec le port `0`) |
+| `server.http3_addr()` | L'adresse UDP de [HTTP/3](http3.md), si `app.http3` est configuré (feature `http3`) |
 | `server.run().await` | Sert jusqu'à `Ctrl+C` / `SIGTERM`, puis s'arrête proprement |
 | `server.with_graceful_shutdown(signal).await` | Sert jusqu'à ce que le futur `signal` se termine, puis s'arrête proprement |
 
@@ -203,10 +204,14 @@ Avec `app.run`, `app.listen` et `Server::run`, `Ctrl+C` (SIGINT) et, sous Unix, 
 2. les requêtes en cours ont jusqu'à **10 secondes** pour se terminer, et leurs réponses portent `connection: close` ;
 3. les connexions restantes (keep-alive inactives, requêtes encore en cours après 10 s) sont fermées, et `run` (ou `listen`) renvoie `Ok(())`.
 
+Avec [HTTP/3](http3.md), le côté UDP s'arrête en même temps : les connexions ouvertes reçoivent un `GOAWAY`, et leurs requêtes en cours disposent des mêmes 10 secondes. Les connexions [WebSocket](websocket.md) ne sont pas attendues : elles sont fermées au plus tard à la fin du délai de grâce, et les clients doivent se reconnecter.
+
 C'est exactement ce qu'attendent Docker, Kubernetes ou Heroku : ils envoient `SIGTERM` et patientent un moment avant de forcer l'arrêt du processus. Avec `bind`, `with_graceful_shutdown(signal)` suit les mêmes étapes dès que votre futur `signal` se termine : c'est vous qui décidez ce qui déclenche l'arrêt. `Ctrl+C` et `SIGTERM` ne sont alors plus surveillés : incluez-les dans votre futur si vous en avez encore besoin. Le délai de grâce de 10 secondes n'est pas configurable.
 
-## HTTP/1.1 uniquement
+## Protocoles : HTTP/1.1, WebSocket et HTTP/3
 
-Vitesse parle HTTP/1.1 (et HTTP/1.0) en TCP simple. Pour HTTPS et HTTP/2, placez-le derrière un reverse proxy (Nginx, Caddy, ou le load balancer de votre hébergeur) qui termine le TLS et transmet les requêtes à Vitesse en HTTP/1.1, comme on le fait souvent avec Express. Le proxy peut aussi se charger de la compression.
+Vitesse parle HTTP/1.1 (et HTTP/1.0) en TCP simple, et fait passer les connexions en [WebSocket](websocket.md) (feature `ws`, activée par défaut). Avec la feature `http3`, `app.http3(...)` sert aussi l'application en [HTTP/3](http3.md), sur un port UDP à côté du port TCP ; `server.http3_addr()` renvoie son adresse.
 
-Derrière un proxy, `req.ip()` renvoie l'adresse du proxy : celle du client se trouve dans l'en-tête `X-Forwarded-For`. Tout cela est détaillé dans [Production](production.md).
+Vitesse ne fait ni TLS sur TCP, ni HTTP/2. Pour HTTPS et HTTP/2, placez-le derrière un reverse proxy (Nginx, Caddy, ou le load balancer de votre hébergeur) qui termine le TLS et transmet les requêtes à Vitesse en HTTP/1.1, comme on le fait souvent avec Express. Le proxy peut aussi se charger de la compression.
+
+Derrière un proxy, `req.ip()` renvoie l'adresse du proxy pour les requêtes qu'il transmet : celle du client se trouve dans l'en-tête `X-Forwarded-For`. Tout cela est détaillé dans [Production](production.md).

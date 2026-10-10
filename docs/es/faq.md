@@ -26,7 +26,7 @@ Los dos son frameworks excelentes y maduros. Vitesse encaja bien si:
 - vienes de Express y quieres mantener la misma forma de pensar: una sola `Request`, middlewares con `next`, routers y handlers que simplemente devuelven su respuesta, sin extractores ni capas de servicios que aprender;
 - buscas el máximo rendimiento: en el [benchmark](performance.md), Vitesse atiende más peticiones por segundo que ambos, con menos CPU por petición.
 
-Elige actix-web o axum si necesitas lo que Vitesse (todavía) no hace: HTTP/2, TLS o WebSocket integrados, el ecosistema de middlewares de [tower](https://github.com/tower-rs/tower) o una API 1.x estable.
+Elige actix-web o axum si necesitas lo que Vitesse (todavía) no hace: HTTP/2 o TLS sobre TCP integrados, el ecosistema de middlewares de [tower](https://github.com/tower-rs/tower) o una API 1.x estable.
 
 ### ¿En qué se diferencia de Express?
 
@@ -48,11 +48,16 @@ Sí: la batería de pruebas se ejecuta en Linux, macOS y Windows. El modo de un 
 
 ### ¿Soporta Vitesse HTTPS y HTTP/2?
 
-No directamente: Vitesse habla HTTP/1.1 sobre TCP sin cifrar. Ponlo detrás de un proxy inverso (Nginx, Caddy o el balanceador de carga de tu plataforma) que gestione TLS y HTTP/2 y reenvíe las peticiones en HTTP/1.1, como es habitual con Express. Plataformas como Heroku ya lo hacen por ti. Consulta [Producción](production.md).
+No sobre TCP: Vitesse habla HTTP/1.1 sobre TCP sin cifrar. Ponlo detrás de un proxy inverso (Nginx, Caddy o el balanceador de carga de tu plataforma) que gestione TLS y HTTP/2 y reenvíe las peticiones en HTTP/1.1, como es habitual con Express. Plataformas como Heroku ya lo hacen por ti. Consulta [Producción](production.md). La excepción es HTTP/3, cuyo TLS está integrado en QUIC: consulta la pregunta siguiente.
 
-### ¿Y WebSocket?
+### ¿Soporta Vitesse WebSocket y HTTP/3?
 
-No está soportado. Para enviar datos del servidor al cliente, muchas veces basta con una respuesta en flujo: `Body::from_stream` envía cada fragmento en cuanto se produce, que es todo lo que necesitas para [Server-Sent Events](https://developer.mozilla.org/es/docs/Web/API/Server-sent_events) con el tipo de contenido `text/event-stream` (consulta [Respuestas](responses.md)). Para un WebSocket bidireccional de verdad, ejecuta un servicio dedicado junto a Vitesse.
+Sí, los dos:
+
+- **WebSocket** viene integrado (la feature `ws`, activada por defecto): `app.ws("/chat", |req, socket| async move { … })`, al estilo de `express-ws`. Consulta [WebSocket](websocket.md).
+- **HTTP/3** sobre QUIC está disponible con la feature opcional `http3`: `app.http3(Http3::from_pem_files(...)?)` sirve la misma aplicación por UDP, junto a HTTP/1.1. Consulta [HTTP/3 y QUIC](http3.md).
+
+WebSocket solo funciona sobre HTTP/1.1, no sobre HTTP/3. Para enviar datos del servidor al cliente en un solo sentido, una respuesta en flujo también es una opción: `Body::from_stream` envía cada fragmento en cuanto se produce, que es todo lo que necesitas para [Server-Sent Events](https://developer.mozilla.org/es/docs/Web/API/Server-sent_events) con el tipo de contenido `text/event-stream` (consulta [Respuestas](responses.md)).
 
 ### ¿Compresión?
 
@@ -124,8 +129,9 @@ Vitesse tiene doble licencia, [MIT](https://github.com/maxlestage/Vitesse/blob/m
 
 Como Express, Vitesse hace pocas cosas a propósito. No incluye (todavía):
 
-- **HTTP/2 y TLS**: pon Vitesse detrás de un proxy inverso como Nginx o Caddy (consulta [Producción](production.md));
-- **WebSocket**;
+- **HTTP/2 y TLS sobre TCP** (HTTPS): pon Vitesse detrás de un proxy inverso como Nginx o Caddy (consulta [Producción](production.md)). [HTTP/3](http3.md), cuyo TLS va integrado, sí está soportado;
+- **WebSocket sobre HTTP/3**: [WebSocket](websocket.md) funciona sobre HTTP/1.1;
+- **0-RTT y lectura por partes de los cuerpos de las peticiones en HTTP/3**: en HTTP/3, los cuerpos de las peticiones se leen enteros antes de ejecutar el handler;
 - **Compresión**: déjasela al proxy inverso;
 - **Motores de plantillas**: usa un crate de plantillas y devuelve `Html(...)`;
 - **Parámetros parciales dentro de un segmento** (`/vuelos/:desde-:hasta`), ni parámetros opcionales (`/:id?`) ni expresiones regulares en las rutas;

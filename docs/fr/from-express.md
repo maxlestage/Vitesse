@@ -35,6 +35,7 @@ Si vous connaissez Express, vous connaissez déjà l'essentiel de Vitesse : les 
 | `express.Router()` | `Router::new()` |
 | `app.use('/api', router)` | `app.mount("/api", router)` |
 | `router.use(mw)` | `router.middleware(mw)`, qui s'exécute aussi pour les `404` sous le préfixe du routeur |
+| `app.ws('/echo', (ws, req) => …)` (express-ws) | `app.ws("/echo", \|req, socket\| async move { … })` : la requête vient en premier, et une boucle remplace `ws.on('message')` (voir [WebSocket](websocket.md)) |
 
 ### Requête
 

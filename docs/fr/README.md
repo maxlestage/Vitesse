@@ -18,11 +18,13 @@ Tout ce qu'il faut pour créer des applications web rapides avec Vitesse, le fra
 - [État partagé](state.md) : partager une configuration, des compteurs ou un pool de connexions entre les requêtes.
 - [Gestion des erreurs](errors.md) : `vitesse::Error`, l'opérateur `?`, réponses d'erreur personnalisées et paniques.
 - [Fichiers statiques](static-files.md) : servir un dossier de fichiers avec cache, requêtes partielles et protections intégrées.
+- [WebSocket](websocket.md) : des connexions bidirectionnelles en temps réel avec `app.ws`, du serveur d'écho au salon de discussion.
 
 ## Aller plus loin
 
 - [Tests](testing.md) : tester votre application en mémoire avec `TestClient`, sans réseau.
 - [Configuration du serveur](server.md) : `run`, `listen` et `bind`, adresses d'écoute, workers, limites et arrêt.
+- [HTTP/3 et QUIC](http3.md) : servir votre application en HTTP/3 à côté de HTTP/1.1, certificats et déploiement.
 - [Performances](performance.md) : pourquoi Vitesse est rapide, les benchmarks et des conseils de réglage.
 - [Venir d'Express](from-express.md) : la table de correspondance Express → Vitesse et des conseils de migration.
 

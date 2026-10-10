@@ -24,7 +24,7 @@ let mut app = App::new();
 app.mount("/users", users); // GET /users, GET /users/:id
 ```
 
-Un `Router` tiene los mismos métodos de enrutamiento que `App`: `get`, `post`, `put`, `patch`, `delete`, `head`, `options`, `all`, `route(método, ruta, handler)`, además de `mount`, `static_dir` y `serve_dir`. Igual que en `App`, devuelven un `&mut Router`, así que puedes encadenarlos:
+Un `Router` tiene los mismos métodos de enrutamiento que `App`: `get`, `post`, `put`, `patch`, `delete`, `head`, `options`, `all`, `route(método, ruta, handler)`, además de `ws`, `mount`, `static_dir` y `serve_dir`. Igual que en `App`, devuelven un `&mut Router`, así que puedes encadenarlos:
 
 ```rust
 let mut users = Router::new();
@@ -116,6 +116,20 @@ posts.get("/", |req: Request| async move {
 });
 
 app.mount("/users/:user_id/posts", posts); // GET /users/42/posts
+```
+
+## Rutas WebSocket
+
+`router.ws(ruta, handler)` declara una ruta [WebSocket](websocket.md), exactamente igual que `app.ws`. Se aplica el prefijo del router, y sus middlewares se ejecutan sobre la petición del handshake, antes de aceptar la conexión: un middleware que responde `401` rechaza la conexión.
+
+```rust
+let mut live = Router::new();
+live.middleware(require_token); // también comprueba el handshake WebSocket
+live.ws("/feed", |_req, mut socket| async move {
+    let _ = socket.send("bienvenido al directo").await;
+});
+
+app.mount("/live", live); // ws://example.com/live/feed
 ```
 
 ## Cómo funciona el montaje

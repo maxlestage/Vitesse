@@ -37,6 +37,7 @@ use crate::body::{Body, BoxError, Kind};
 use crate::request::{RawHeaders, ReqBody, Request};
 use crate::response::{Response, header_pool};
 use crate::server::ResponseFuture;
+use crate::upgrade::{OnUpgrade, UpgradeHandle, Upgraded};
 use crate::util::http_date;
 
 /// Maximum number of headers per request.
@@ -133,8 +134,22 @@ pub(crate) async fn serve_connection(
         state,
         linger: false,
         raw: RawHeaders::default(),
+        upgrade: None,
     };
-    if conn.run().await.is_ok() && conn.linger {
+    let result = conn.run().await;
+    if let Some(on_upgrade) = conn.upgrade.take() {
+        // `101 Switching Protocols` envoyée : la connexion change de protocole.
+        if result.is_ok() {
+            let Conn { io, rbuf, .. } = conn;
+            on_upgrade(Upgraded {
+                io,
+                read: rbuf.to_vec(),
+            })
+            .await;
+        }
+        return;
+    }
+    if result.is_ok() && conn.linger {
         conn.linger_close().await;
     }
 }
@@ -150,6 +165,8 @@ struct Conn {
     linger: bool,
     /// Positions of the headers of the request being parsed.
     raw: RawHeaders,
+    /// Set by a `101` response: what to do with the connection afterwards.
+    upgrade: Option<OnUpgrade>,
 }
 
 /// A request whose response is being prepared.
@@ -457,6 +474,13 @@ impl Conn {
     fn encode(&mut self, res: &mut Response, job: &Job) -> (bool, Rest) {
         res.log_server_error();
         let status = res.status;
+        let upgrade = if status == StatusCode::SWITCHING_PROTOCOLS {
+            res.extensions()
+                .get::<UpgradeHandle>()
+                .and_then(UpgradeHandle::take)
+        } else {
+            None
+        };
         let ctype = res.ctype;
         let headers = res.headers.take();
         let body = std::mem::take(&mut res.body);
@@ -491,10 +515,22 @@ impl Conn {
             None => buf.extend_from_slice(ctype.line()),
         }
         date::write(buf);
+        #[cfg(feature = "http3")]
+        if let Some(line) = self.app.alt_svc.get() {
+            buf.extend_from_slice(line);
+        }
 
         let bodyless = status.is_informational()
             || status == StatusCode::NO_CONTENT
             || status == StatusCode::NOT_MODIFIED;
+        if let Some(on_upgrade) = upgrade {
+            buf.extend_from_slice(b"connection: upgrade\r\n\r\n");
+            if let Some(map) = headers {
+                header_pool::recycle(map);
+            }
+            self.upgrade = Some(on_upgrade);
+            return (false, Rest::None);
+        }
         let mut chunked = false;
         if !bodyless {
             let exact = body.size_hint().exact();

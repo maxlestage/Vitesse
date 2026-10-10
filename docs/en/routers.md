@@ -24,7 +24,7 @@ let mut app = App::new();
 app.mount("/users", users); // GET /users, GET /users/:id
 ```
 
-A `Router` has the same routing methods as `App`: `get`, `post`, `put`, `patch`, `delete`, `head`, `options`, `all`, `route(method, path, handler)`, as well as `mount`, `static_dir` and `serve_dir`. Like on `App`, they return `&mut Router`, so you can chain them:
+A `Router` has the same routing methods as `App`: `get`, `post`, `put`, `patch`, `delete`, `head`, `options`, `all`, `route(method, path, handler)`, as well as `ws`, `mount`, `static_dir` and `serve_dir`. Like on `App`, they return `&mut Router`, so you can chain them:
 
 ```rust
 let mut users = Router::new();
@@ -116,6 +116,20 @@ posts.get("/", |req: Request| async move {
 });
 
 app.mount("/users/:user_id/posts", posts); // GET /users/42/posts
+```
+
+## WebSocket routes
+
+`router.ws(path, handler)` declares a [WebSocket](websocket.md) route, exactly like `app.ws`. The router's prefix applies, and its middleware runs on the handshake request, before the connection is accepted: a middleware that answers `401` refuses the connection.
+
+```rust
+let mut live = Router::new();
+live.middleware(require_token); // also checks the WebSocket handshake
+live.ws("/feed", |_req, mut socket| async move {
+    let _ = socket.send("welcome to the live feed").await;
+});
+
+app.mount("/live", live); // ws://example.com/live/feed
 ```
 
 ## How mounting works

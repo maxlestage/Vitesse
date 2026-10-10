@@ -90,10 +90,15 @@ mod router;
 mod server;
 mod static_files;
 mod tree;
+mod upgrade;
 mod util;
 
+#[cfg(feature = "http3")]
+pub mod http3;
 pub mod middleware;
 pub mod test;
+#[cfg(feature = "ws")]
+pub mod ws;
 
 pub use app::{App, DEFAULT_BODY_LIMIT};
 pub use body::{Body, BoxError};
@@ -115,6 +120,8 @@ pub use tokio;
 /// Everything you need to write an application: `use vitesse::prelude::*;`
 pub mod prelude {
     pub use crate::middleware;
+    #[cfg(feature = "ws")]
+    pub use crate::ws;
     pub use crate::{
         App, Body, Cookie, Error, HandlerExt, Html, IntoResponse, Json, Method, Next, Redirect,
         Request, Response, Router, ServeDir, StatusCode, json, res,

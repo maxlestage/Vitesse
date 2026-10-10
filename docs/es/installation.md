@@ -67,6 +67,25 @@ vitesse = "0.1"
 
 Vitesse trae consigo `tokio`, `serde_json`, `http` y `bytes`, y los reexporta. Para una aplicación sencilla, es la única dependencia que necesitas.
 
+## Features de Cargo
+
+Dos partes de Vitesse son features de Cargo, que activas o desactivas en `Cargo.toml`:
+
+| Feature | Por defecto | Añade |
+|---|---|---|
+| `ws` | Activada | `app.ws(...)` y el módulo `vitesse::ws`: consulta [WebSocket](websocket.md) |
+| `http3` | Desactivada | `app.http3(...)` y el módulo `vitesse::http3`: HTTP/3 sobre QUIC, consulta [HTTP/3 y QUIC](http3.md) |
+
+```toml
+[dependencies]
+# HTTP/3 además de las features por defecto:
+vitesse = { version = "0.1", features = ["http3"] }
+# o sin WebSocket, para compilar un poco menos:
+# vitesse = { version = "0.1", default-features = false }
+```
+
+Con `cargo add`: `cargo add vitesse --features http3`, o `cargo add vitesse --no-default-features`.
+
 ## Dependencias opcionales
 
 ### serde, para JSON tipado

@@ -3,14 +3,14 @@ name = "vitesse"
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.85"
-description = "An Express.js-style web framework in native Rust, built for speed: familiar API (app.get, req.params, middleware, Router), its own HTTP/1.1 engine on tokio."
+description = "An Express.js-style web framework in native Rust, built for speed: familiar API (app.get, req.params, middleware, Router), its own HTTP/1.1 engine on tokio, WebSocket and HTTP/3 (QUIC)."
 authors = ["Maxime Lestage"]
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/maxlestage/Vitesse"
 homepage = "https://maxlestage.github.io/Vitesse/"
 documentation = "https://docs.rs/vitesse"
 readme = "README.md"
-keywords = ["web", "http", "framework", "express", "server"]
+keywords = ["web", "framework", "express", "websocket", "http3"]
 categories = ["web-programming::http-server", "network-programming", "asynchronous"]
 # The published package only contains the library (not the website, the
 # docs or the benchmarks).
@@ -39,8 +39,40 @@ serde_urlencoded = "0.7"
 socket2 = { version = "0.6", features = ["all"] }
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "net", "time", "fs", "io-util", "signal", "sync", "macros"] }
 
+# WebSocket (`ws`, activé par défaut).
+futures-util = { version = "0.3", default-features = false, features = ["sink", "std"], optional = true }
+tokio-tungstenite = { version = "0.30", default-features = false, features = ["handshake"], optional = true }
+
+# QUIC / HTTP/3 (`http3`), avec rustls et ring : du Rust, sans OpenSSL.
+h3 = { version = "0.0.8", optional = true }
+h3-quinn = { version = "0.0.10", optional = true }
+quinn = { version = "0.11", default-features = false, features = ["runtime-tokio", "rustls-ring", "log"], optional = true }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "logging"], optional = true }
+
+[features]
+default = ["ws"]
+# `app.ws(...)` et le module `vitesse::ws`.
+ws = ["dep:tokio-tungstenite", "dep:futures-util"]
+# `app.http3(...)` : HTTP/3 sur QUIC (UDP), à côté de HTTP/1.1.
+http3 = ["dep:quinn", "dep:h3", "dep:h3-quinn", "dep:rustls"]
+
+[[example]]
+name = "chat"
+required-features = ["ws"]
+
+[[example]]
+name = "http3"
+required-features = ["http3"]
+
+[package.metadata.docs.rs]
+all-features = true
+
 [dev-dependencies]
 futures-core = "0.3"
+futures-util = { version = "0.3", features = ["sink"] }
+# Certificats auto-signés pour les tests et l'exemple HTTP/3.
+rcgen = "0.14"
+tokio-tungstenite = { version = "0.30", features = ["connect"] }
 serde = { version = "1", features = ["derive"] }
 tokio = { version = "1", features = ["full"] }
 

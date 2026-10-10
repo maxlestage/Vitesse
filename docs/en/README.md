@@ -18,11 +18,13 @@ Everything you need to build fast web apps with Vitesse, the Express.js-style fr
 - [Shared state](state.md): share configuration, counters or connection pools between requests.
 - [Error handling](errors.md): `vitesse::Error`, the `?` operator, custom error responses and panics.
 - [Static files](static-files.md): serve a folder of files with caching, ranges and built-in safety checks.
+- [WebSocket](websocket.md): real-time, two-way connections with `app.ws`, from an echo server to a chat room.
 
 ## Going further
 
 - [Testing](testing.md): test your app in memory with `TestClient`, without any network.
 - [Server configuration](server.md): `run`, `listen` and `bind`, listening addresses, workers, limits and shutdown.
+- [HTTP/3 and QUIC](http3.md): serve your app over HTTP/3 next to HTTP/1.1, certificates and deployment.
 - [Performance](performance.md): why Vitesse is fast, the benchmarks, and tuning tips.
 - [Coming from Express](from-express.md): the Express → Vitesse equivalence table and migration tips.
 

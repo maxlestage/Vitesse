@@ -354,7 +354,7 @@ Les middlewares fournis se testent de la même manière, par exemple `middleware
 
 ## Tests d'intégration sur un vrai port
 
-`TestClient` court-circuite le moteur HTTP/1.1. Pour ce qui n'existe que sur une vraie connexion (`content-length`, keep-alive, pipelining, corps `chunked`, `Expect: 100-continue`, limites de taille des en-têtes), ou pour utiliser un vrai client HTTP, démarrez le serveur sur un vrai port :
+`TestClient` court-circuite le moteur HTTP/1.1. Pour ce qui n'existe que sur une vraie connexion (`content-length`, keep-alive, pipelining, corps `chunked`, `Expect: 100-continue`, limites de taille des en-têtes, conversations [WebSocket](#tester-les-websockets)), ou pour utiliser un vrai client HTTP, démarrez le serveur sur un vrai port :
 
 - `app.bind("127.0.0.1:0")` ouvre le socket ; le port `0` laisse l'OS choisir un port libre, si bien que des tests lancés en parallèle n'entrent jamais en collision ;
 - `server.local_addr()` donne l'adresse réellement utilisée ;
@@ -432,6 +432,60 @@ async fn repond_dans_l_ordre_aux_requetes_pipelinees() {
 ```
 
 Voir [Configuration du serveur](server.md) pour `bind`, `Server` et l'arrêt propre.
+
+## Tester les WebSockets
+
+`TestClient` n'a pas de vrai socket : il ne peut donc pas tenir une conversation [WebSocket](websocket.md). Sur une route WebSocket, il ne voit que la réponse à la poignée de main. Cela suffit pour tester les refus :
+
+```rust
+use vitesse::test::TestClient;
+
+#[tokio::test]
+async fn websocket_route_refuses_plain_http() {
+    let client = TestClient::new(my_api::app());
+    // Un simple GET sur une route WebSocket : 426 Upgrade Required.
+    assert_eq!(client.get("/echo").await.status(), 426);
+}
+```
+
+Pour échanger des messages, démarrez le serveur sur un vrai port comme ci-dessus, et connectez-vous avec le client de [tokio-tungstenite](https://docs.rs/tokio-tungstenite), la bibliothèque sur laquelle repose la prise en charge de WebSocket dans Vitesse :
+
+```toml
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt"] }
+tokio-tungstenite = { version = "0.30", features = ["connect"] }
+futures-util = "0.3"
+```
+
+```rust
+// tests/ws.rs
+use futures_util::{SinkExt, StreamExt};
+use tokio_tungstenite::connect_async;
+use tokio_tungstenite::tungstenite::Message;
+use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+
+#[tokio::test]
+async fn echo_over_a_real_websocket() {
+    let server = my_api::app().bind("127.0.0.1:0").await.unwrap();
+    let addr = server.local_addr();
+    tokio::spawn(server.run());
+
+    // Une poignée de main avec des en-têtes en plus (cookie, origine…), pour les routes qui les vérifient.
+    let mut request = format!("ws://{addr}/echo").into_client_request().unwrap();
+    request.headers_mut().insert("cookie", "session=abc".parse().unwrap());
+    let (mut socket, response) = connect_async(request).await.unwrap();
+    assert_eq!(response.status(), 101);
+
+    socket.send(Message::text("salut")).await.unwrap();
+    assert_eq!(socket.next().await.unwrap().unwrap(), Message::text("écho : salut"));
+
+    // Le client ferme ; le serveur répond à la fermeture, puis le flux se termine.
+    socket.close(None).await.unwrap();
+    while let Some(Ok(_)) = socket.next().await {}
+}
+```
+
+`connect_async` échoue si le serveur refuse la poignée de main : pour vérifier le statut d'un refus, utilisez `TestClient` comme plus haut.
 
 ## Organiser ses tests
 

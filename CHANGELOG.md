@@ -47,6 +47,20 @@ or actix-web"):
 - tower interop (feature `tower`): `middleware::layer(…)` runs any tower
   layer (tower-http, tower-governor…), and `app.into_service()` turns the
   application into a tower `Service`.
+- Route patterns: several parameters in a segment (`/flights/:from-:to`,
+  `/files/:name.:ext`), constraints (`/users/:id(\d+)`), optional trailing
+  parameters (`/archive/:year?/:month?`), and `app.case_sensitive(false)`.
+- Named routes and URL generation: `.name("user")`, `req.path_for(…)` and
+  `req.url_for(…)` (actix-web's `url_for`).
+- Signed cookies and sessions (feature `session`): `app.cookie_secret`,
+  `req.sign_cookie`, `req.signed_cookie`, `middleware::session(store)` and
+  `req.session()`, with `MemoryStore` and a `SessionStore` trait.
+- HTML templates (feature `templates`): `app.views(dir)`, `app.templates(env)`
+  and `req.render(name, context)`, with minijinja.
+- WebSocket over HTTP/2 (RFC 8441): browsers on HTTPS + HTTP/2 open their
+  WebSockets on the same connection; `app.ws` handlers are unchanged.
+- HTTP/3 request bodies are streamed to the handler (they were read in full
+  before routing), so per-route body limits apply.
 - `req.set_method(…)`; a body limited upstream reads as `413`.
 - Examples `https` (TLS + HTTP/2) and `live` (SSE + uploads).
 

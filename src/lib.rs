@@ -58,8 +58,9 @@
 //!   a single system call.
 //! - **One thread per core** ([`App::run`] on Linux): each core has its own
 //!   event loop and its own `SO_REUSEPORT` socket, with no synchronization.
-//! - **A regex-free router**: a tree of path segments, with no allocation
-//!   for routes without parameters.
+//! - **A tree router**: a tree of path segments, with no allocation for
+//!   routes without parameters; regular expressions only run for the
+//!   parameters that declare a constraint (`/users/:id(\d+)`).
 //! - **Zero shared atomic counters per request**: the application is frozen
 //!   at startup (`&'static`).
 //! - **Few allocations**: a request travels through middlewares and

@@ -51,7 +51,7 @@ pub const CATEGORIES: [Category; 5] = [
     },
 ];
 
-pub const PAGES: [Page; 24] = [
+pub const PAGES: [Page; 26] = [
     Page {
         slug: "introduction",
         category: 0,
@@ -117,6 +117,16 @@ pub const PAGES: [Page; 24] = [
         ],
     },
     Page {
+        slug: "templates",
+        category: 1,
+        title: ["Gabarits HTML", "HTML templates", "Plantillas HTML"],
+        summary: [
+            "Des pages HTML avec minijinja : héritage, boucles et échappement.",
+            "HTML pages with minijinja: inheritance, loops and escaping.",
+            "Páginas HTML con minijinja: herencia, bucles y escapado.",
+        ],
+    },
+    Page {
         slug: "middleware",
         category: 1,
         title: ["Middlewares", "Middleware", "Middlewares"],
@@ -144,6 +154,20 @@ pub const PAGES: [Page; 24] = [
             "Partager configuration, compteurs ou base de données.",
             "Share configuration, counters or a database.",
             "Comparte configuración, contadores o una base de datos.",
+        ],
+    },
+    Page {
+        slug: "sessions",
+        category: 1,
+        title: [
+            "Cookies signés et sessions",
+            "Signed cookies and sessions",
+            "Cookies firmadas y sesiones",
+        ],
+        summary: [
+            "Des cookies infalsifiables et des données par visiteur.",
+            "Tamper-proof cookies and data per visitor.",
+            "Cookies a prueba de manipulaciones y datos por visitante.",
         ],
     },
     Page {

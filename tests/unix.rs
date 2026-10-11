@@ -50,6 +50,30 @@ async fn serves_over_a_unix_socket() {
         .unwrap();
     // Le fichier du socket est retiré à l'arrêt.
     assert!(!path.exists());
+    // Derrière un proxy sur un socket Unix, `trust_proxy` lit `X-Forwarded-*`.
+    let mut app = App::new();
+    app.trust_proxy(true);
+    app.get("/", |req: Request| async move {
+        format!("{:?} {}", req.ip(), req.protocol())
+    });
+    let server = app.bind_unix(&path).await.unwrap();
+    let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
+    let running = tokio::spawn(server.with_graceful_shutdown(async {
+        let _ = stopped.await;
+    }));
+    let mut stream = UnixStream::connect(&path).await.unwrap();
+    stream
+        .write_all(
+            b"GET / HTTP/1.1\r\nhost: x\r\nx-forwarded-for: 203.0.113.9\r\nx-forwarded-proto: https\r\nconnection: close\r\n\r\n",
+        )
+        .await
+        .unwrap();
+    let mut out = String::new();
+    stream.read_to_string(&mut out).await.unwrap();
+    assert!(out.ends_with("Some(203.0.113.9) https"), "{out}");
+    stop.send(()).unwrap();
+    running.await.unwrap().unwrap();
+
     // Un fichier ordinaire n'est jamais supprimé.
     std::fs::write(&path, "not a socket").unwrap();
     let mut app = App::new();

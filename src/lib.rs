@@ -106,6 +106,8 @@ pub mod multipart;
 #[cfg(feature = "session")]
 pub mod session;
 pub mod sse;
+#[cfg(feature = "templates")]
+pub mod templates;
 pub mod test;
 #[cfg(feature = "tls")]
 pub mod tls;

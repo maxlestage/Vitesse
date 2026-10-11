@@ -31,6 +31,9 @@ pub(crate) struct Shared {
     /// The secret that signs cookies ([`App::cookie_secret`](crate::App::cookie_secret)).
     #[cfg(feature = "session")]
     pub(crate) cookie_key: Option<crate::session::Key>,
+    /// The templates ([`App::views`](crate::App::views)).
+    #[cfg(feature = "templates")]
+    pub(crate) templates: Option<minijinja::Environment<'static>>,
     pub(crate) state: StateMap,
     pub(crate) body_limit: usize,
     pub(crate) trust_proxy: crate::proxy::TrustProxy,
@@ -737,6 +740,22 @@ impl Request {
             }
         }
         None
+    }
+
+    /// Renders a template of [`App::views`](crate::App::views) with a
+    /// context (anything that serializes: `json!({...})`, a struct…), as
+    /// an HTML response (`res.render(view, locals)` in Express). Needs the
+    /// `templates` feature: see [`templates`](crate::templates).
+    ///
+    /// A missing template or a rendering error is a `500`, whose cause is
+    /// logged.
+    #[cfg(feature = "templates")]
+    pub fn render(
+        &self,
+        template: &str,
+        context: impl serde::Serialize,
+    ) -> Result<crate::Html<String>, Error> {
+        crate::templates::render(self.inner.shared.templates.as_ref(), template, context)
     }
 
     /// The secret that signs cookies, if the application has one.

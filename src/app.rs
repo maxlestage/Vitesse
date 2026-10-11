@@ -57,6 +57,8 @@ pub struct App {
     config: ServerConfig,
     #[cfg(feature = "session")]
     cookie_key: Option<crate::session::Key>,
+    #[cfg(feature = "templates")]
+    templates: Option<minijinja::Environment<'static>>,
     #[cfg(feature = "http3")]
     http3: Option<crate::http3::Http3>,
     #[cfg(feature = "tls")]
@@ -88,6 +90,8 @@ impl App {
             config: ServerConfig::default(),
             #[cfg(feature = "session")]
             cookie_key: None,
+            #[cfg(feature = "templates")]
+            templates: None,
             #[cfg(feature = "http3")]
             http3: None,
             #[cfg(feature = "tls")]
@@ -194,6 +198,37 @@ impl App {
     #[track_caller]
     pub fn cookie_secret(&mut self, secret: impl AsRef<[u8]>) -> &mut Self {
         self.cookie_key = Some(crate::session::Key::new(secret.as_ref()));
+        self
+    }
+
+    /// The directory of the HTML templates (`app.set('views', dir)` in
+    /// Express), rendered with [`Request::render`]. Needs the `templates`
+    /// feature: see [`templates`](crate::templates).
+    #[cfg(feature = "templates")]
+    pub fn views(&mut self, dir: impl Into<std::path::PathBuf>) -> &mut Self {
+        self.templates = Some(crate::templates::from_dir(dir.into()));
+        self
+    }
+
+    /// A minijinja environment of your own (filters, functions, globals,
+    /// templates embedded in the binary…), rendered with
+    /// [`Request::render`]. Needs the `templates` feature.
+    ///
+    /// ```
+    /// use vitesse::prelude::*;
+    /// use vitesse::templates::minijinja::Environment;
+    ///
+    /// let mut env = Environment::new();
+    /// env.add_template("hello.html", "<h1>Hello {{ name|upper }}</h1>").unwrap();
+    /// let mut app = App::new();
+    /// app.templates(env);
+    /// app.get("/hello/:name", |req: Request| async move {
+    ///     req.render("hello.html", json!({ "name": req.param("name") }))
+    /// });
+    /// ```
+    #[cfg(feature = "templates")]
+    pub fn templates(&mut self, env: minijinja::Environment<'static>) -> &mut Self {
+        self.templates = Some(env);
         self
     }
 
@@ -341,6 +376,8 @@ impl App {
             shared: Shared {
                 #[cfg(feature = "session")]
                 cookie_key: self.cookie_key,
+                #[cfg(feature = "templates")]
+                templates: self.templates,
                 routes: Some(tree),
                 names: self
                     .names

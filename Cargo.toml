@@ -62,6 +62,9 @@ hmac = { version = "0.13", optional = true }
 sha2 = { version = "0.11", optional = true }
 getrandom = { version = "0.2", optional = true }
 
+# Gabarits HTML (`templates`) : `app.views(...)` et `req.render(...)`.
+minijinja = { version = "2", features = ["loader"], optional = true }
+
 # Interopérabilité avec tower (`tower`) : couches tower-http, service hyper.
 tower-layer = { version = "0.3", optional = true }
 tower-service = { version = "0.3", optional = true }
@@ -81,6 +84,8 @@ tls = ["dep:rustls", "dep:tokio-rustls", "rustls/tls12", "tokio-rustls/tls12"]
 http2 = ["dep:h2"]
 # `app.cookie_secret(...)`, `middleware::session(...)` et le module `vitesse::session`.
 session = ["dep:hmac", "dep:sha2", "dep:getrandom"]
+# `app.views(dossier)` et `req.render(gabarit, contexte)`, avec minijinja.
+templates = ["dep:minijinja"]
 # `middleware::layer(...)`, `app.into_service()` et le module `vitesse::tower`.
 tower = ["dep:tower-layer", "dep:tower-service"]
 # `req.multipart()` et le module `vitesse::multipart` : envois de fichiers.

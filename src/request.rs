@@ -706,10 +706,7 @@ impl Request {
     fn trusts_proxy(&self) -> bool {
         let trust = &self.inner.shared.trust_proxy;
         *trust != crate::proxy::TrustProxy::None
-            && self
-                .inner
-                .remote
-                .is_some_and(|peer| trust.trusts(peer.ip(), 0))
+            && trust.trusts_peer(self.inner.remote.map(|peer| peer.ip()))
     }
 
     /// The first value of an `X-Forwarded-*` header.
@@ -868,12 +865,12 @@ impl Request {
     /// address is read from `X-Forwarded-For`, like in Express.
     #[inline]
     pub fn ip(&self) -> Option<IpAddr> {
-        let peer = self.inner.remote?.ip();
+        let peer = self.inner.remote.map(|a| a.ip());
         let trust = &self.inner.shared.trust_proxy;
         if *trust == crate::proxy::TrustProxy::None {
-            return Some(peer);
+            return peer;
         }
-        Some(trust.client_ip(peer, self.header_all("x-forwarded-for")))
+        trust.client_ip(peer, self.header_all("x-forwarded-for"))
     }
 
     // ----- État global et données locales -----------------------------------

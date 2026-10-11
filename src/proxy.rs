@@ -16,6 +16,10 @@ use std::net::IpAddr;
 /// | `2` (a number) | The `n` proxies closest to the server |
 /// | `"loopback, 10.0.0.0/8"` | The proxies whose address is in these networks |
 ///
+/// On a Unix socket ([`App::bind_unix`](crate::App::bind_unix)), which
+/// only processes of the same machine can reach, the peer is trusted as
+/// soon as some proxy is (any value but `false` and `0`).
+///
 /// Addresses can be IPs or networks in CIDR notation, plus the names
 /// `loopback` (`127.0.0.1/8`, `::1`), `linklocal` (`169.254.0.0/16`,
 /// `fe80::/10`) and `uniquelocal` (`10.0.0.0/8`, `172.16.0.0/12`,
@@ -113,13 +117,28 @@ impl TrustProxy {
         }
     }
 
+    /// Whether a peer without an address (a Unix socket, which only
+    /// processes of the same machine can reach) is trusted: yes, as soon as
+    /// some proxy is.
+    pub(crate) fn trusts_local(&self) -> bool {
+        !matches!(self, TrustProxy::None | TrustProxy::Hops(0))
+    }
+
+    /// Whether the direct peer (`None`: a Unix socket) is trusted.
+    pub(crate) fn trusts_peer(&self, peer: Option<IpAddr>) -> bool {
+        match peer {
+            Some(ip) => self.trusts(ip, 0),
+            None => self.trusts_local(),
+        }
+    }
+
     /// The client's address: walks `X-Forwarded-For` from the right, as
     /// long as the addresses are trusted proxies.
     pub(crate) fn client_ip<'a>(
         &self,
-        peer: IpAddr,
+        peer: Option<IpAddr>,
         forwarded_for: impl Iterator<Item = &'a str>,
-    ) -> IpAddr {
+    ) -> Option<IpAddr> {
         if *self == TrustProxy::None {
             return peer;
         }
@@ -128,11 +147,15 @@ impl TrustProxy {
         hops.reverse();
         let mut client = peer;
         for (i, hop) in hops.into_iter().enumerate() {
-            if !self.trusts(client, i) {
+            let trusted = match client {
+                Some(ip) => self.trusts(ip, i),
+                None => self.trusts_peer(None),
+            };
+            if !trusted {
                 return client;
             }
             match parse_forwarded_ip(hop) {
-                Some(ip) => client = ip,
+                Some(ip) => client = Some(ip),
                 // Une valeur illisible : on s'arrête au dernier proxy de confiance.
                 None => return client,
             }
@@ -256,7 +279,7 @@ mod tests {
     fn client_ip_like_express() {
         let xff = ["203.0.113.9, 198.51.100.7", "10.0.0.2"];
         let peer = ip("127.0.0.1");
-        let walk = |trust: TrustProxy| trust.client_ip(peer, xff.iter().copied());
+        let walk = |trust: TrustProxy| trust.client_ip(Some(peer), xff.iter().copied()).unwrap();
         assert_eq!(walk(TrustProxy::None), peer);
         assert_eq!(walk(TrustProxy::All), ip("203.0.113.9"));
         assert_eq!(walk(TrustProxy::Hops(1)), ip("10.0.0.2"));
@@ -267,8 +290,20 @@ mod tests {
         // Ports et crochets.
         let xff = ["[2001:db8::1]:443, 198.51.100.7:8080"];
         assert_eq!(
-            TrustProxy::All.client_ip(peer, xff.iter().copied()),
-            ip("2001:db8::1")
+            TrustProxy::All.client_ip(Some(peer), xff.iter().copied()),
+            Some(ip("2001:db8::1"))
         );
+    }
+
+    #[test]
+    fn unix_sockets_count_as_trusted_local_peers() {
+        let xff = ["203.0.113.9, 10.0.0.2"];
+        let walk = |trust: TrustProxy| trust.client_ip(None, xff.iter().copied());
+        assert_eq!(walk(TrustProxy::None), None);
+        assert_eq!(walk(TrustProxy::Hops(0)), None);
+        assert_eq!(walk(TrustProxy::Hops(1)), Some(ip("10.0.0.2")));
+        assert_eq!(walk(TrustProxy::All), Some(ip("203.0.113.9")));
+        assert_eq!(walk("10.0.0.0/8".into()), Some(ip("203.0.113.9")));
+        assert_eq!(walk("192.168.0.0/16".into()), Some(ip("10.0.0.2")));
     }
 }

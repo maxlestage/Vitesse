@@ -26,6 +26,8 @@ use crate::util::percent_decode;
 pub(crate) struct Shared {
     /// The routes, for [`Request::route`] before routing.
     pub(crate) routes: Option<&'static Tree<MethodMap>>,
+    /// Named routes: name → pattern ([`Request::path_for`]).
+    pub(crate) names: HashMap<Box<str>, Box<str>>,
     pub(crate) state: StateMap,
     pub(crate) body_limit: usize,
     pub(crate) trust_proxy: crate::proxy::TrustProxy,
@@ -800,6 +802,45 @@ impl Request {
             .find(self.path(), &mut captures)?
             .find(self.method())
             .map(|route| &*route.pattern)
+    }
+
+    /// The path of a named route ([`App::name`](crate::App::name)), with
+    /// its parameters filled in order and percent-encoded (actix-web's
+    /// `url_for`). Optional parameters at the end can be left out; a
+    /// wildcard takes a whole sub-path.
+    ///
+    /// ```
+    /// use vitesse::prelude::*;
+    ///
+    /// let mut app = App::new();
+    /// app.get("/flights/:from-:to", |_| async { "flight" }).name("flight");
+    /// app.get("/", |req: Request| async move {
+    ///     let link = req.path_for("flight", &[&"LAX", &"SFO"])?;
+    ///     Ok::<_, Error>(Html(format!("<a href=\"{link}\">LAX → SFO</a>")))
+    /// });
+    /// ```
+    ///
+    /// Fails with a `500` if the name is unknown, if a parameter is missing
+    /// or in excess, or if a value doesn't satisfy its constraint.
+    pub fn path_for(&self, name: &str, params: &[&dyn fmt::Display]) -> Result<String, Error> {
+        let pattern = self
+            .inner
+            .shared
+            .names
+            .get(name)
+            .ok_or_else(|| Error::internal(format!("unknown route name '{name}'")))?;
+        crate::tree::build_path(pattern, params)
+            .map_err(|e| Error::internal(format!("cannot build the URL of '{name}': {e}")))
+    }
+
+    /// The absolute URL of a named route: [`Request::path_for`] preceded by
+    /// the protocol and the host of this request (`https://example.com/users/42`).
+    pub fn url_for(&self, name: &str, params: &[&dyn fmt::Display]) -> Result<String, Error> {
+        let path = self.path_for(name, params)?;
+        let host = self
+            .host()
+            .ok_or_else(|| Error::internal("cannot build an absolute URL without a host"))?;
+        Ok(format!("{}://{host}{path}", self.protocol()))
     }
 
     /// All route parameters, as `(name, value)` pairs.

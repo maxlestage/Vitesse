@@ -194,7 +194,8 @@ impl Server {
     }
 
     /// Serves requests until `Ctrl+C` or `SIGTERM`, then gives in-flight
-    /// requests time to finish (10 s at most), like [`App::run`](crate::App::run).
+    /// requests time to finish ([`App::shutdown_timeout`](crate::App::shutdown_timeout),
+    /// 10 s by default), like [`App::run`](crate::App::run).
     ///
     /// To stop on another signal, use
     /// [`with_graceful_shutdown`](Self::with_graceful_shutdown).
@@ -203,7 +204,8 @@ impl Server {
     }
 
     /// Serves requests until `signal` completes, then gives in-flight
-    /// requests time to finish (10 s at most).
+    /// requests time to finish ([`App::shutdown_timeout`](crate::App::shutdown_timeout),
+    /// 10 s by default).
     pub async fn with_graceful_shutdown<F>(self, signal: F) -> io::Result<()>
     where
         F: Future<Output = ()>,

@@ -268,13 +268,48 @@ macro_rules! routing_methods {
         /// [`fallback`](crate::Router::fallback), if it has one.
         #[track_caller]
         pub fn mount(&mut self, prefix: &str, router: $crate::Router) -> &mut Self {
-            let (routes, scopes) = router.into_parts();
+            let (routes, scopes, names) = router.into_parts();
             for (method, path, handler) in routes {
                 self.add_route(method, &$crate::router::join_paths(prefix, &path), handler);
             }
             for scope in scopes {
                 self.scopes.push(scope.under(prefix));
             }
+            for (name, path) in names {
+                self.add_name(&name, $crate::router::join_paths(prefix, &path));
+            }
+            self.last_route = None;
+            self
+        }
+
+        /// Names the route added just before, to build its URL with
+        /// [`Request::path_for`](crate::Request::path_for) and
+        /// [`Request::url_for`](crate::Request::url_for) (actix-web's named
+        /// resources). Names are global to the application, mounted routers
+        /// included.
+        ///
+        /// ```
+        /// use vitesse::prelude::*;
+        ///
+        /// let mut app = App::new();
+        /// app.get("/users/:id", |req: Request| async move {
+        ///     req.param("id").unwrap_or("").to_owned()
+        /// })
+        /// .name("user");
+        /// app.post("/users", |req: Request| async move {
+        ///     let link = req.path_for("user", &[&42])?; // "/users/42"
+        ///     Ok::<_, Error>(Redirect::see_other(link))
+        /// });
+        /// ```
+        ///
+        /// # Panics
+        /// If no route was added before, or if the name is already used.
+        #[track_caller]
+        pub fn name(&mut self, name: &str) -> &mut Self {
+            let Some(pattern) = self.last_route.take() else {
+                panic!("`name(\"{name}\")` must follow the route it names");
+            };
+            self.add_name(name, pattern);
             self
         }
 
@@ -330,6 +365,10 @@ pub struct Router {
     fallback: Option<Arc<dyn Handler>>,
     /// Middlewares of the routers mounted inside this one, by prefix.
     pub(crate) scopes: Vec<Scope>,
+    /// Named routes: (name, pattern).
+    names: Vec<(String, String)>,
+    /// The pattern of the last route added, for [`Router::name`].
+    last_route: Option<String>,
 }
 
 /// The middlewares and the fallback of a mounted router, with its prefix:
@@ -385,10 +424,19 @@ impl Router {
     }
 
     #[track_caller]
+    fn add_name(&mut self, name: &str, pattern: String) {
+        if self.names.iter().any(|(n, _)| n == name) {
+            panic!("duplicate route name: '{name}' is already used");
+        }
+        self.names.push((name.to_owned(), pattern));
+    }
+
+    #[track_caller]
     fn add_route(&mut self, method: Option<Method>, path: &str, handler: Arc<dyn Handler>) {
         if let Err(e) = parse_pattern(path) {
             panic!("invalid route: {e}");
         }
+        self.last_route = Some(path.to_owned());
         self.routes.push((method, path.to_owned(), handler));
     }
 
@@ -397,15 +445,21 @@ impl Router {
     #[allow(clippy::type_complexity)]
     pub(crate) fn into_parts(
         self,
-    ) -> (Vec<(Option<Method>, String, Arc<dyn Handler>)>, Vec<Scope>) {
+    ) -> (
+        Vec<(Option<Method>, String, Arc<dyn Handler>)>,
+        Vec<Scope>,
+        Vec<(String, String)>,
+    ) {
         let Router {
             routes,
             middlewares,
             fallback,
             scopes: inner,
+            names,
+            last_route: _,
         } = self;
         if middlewares.is_empty() && fallback.is_none() {
-            return (routes, inner);
+            return (routes, inner, names);
         }
         let routes = if middlewares.is_empty() {
             routes
@@ -425,7 +479,7 @@ impl Router {
             fallback,
         }];
         scopes.extend(inner);
-        (routes, scopes)
+        (routes, scopes, names)
     }
 }
 

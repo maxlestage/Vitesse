@@ -1,5 +1,6 @@
 //! The application (`express()`).
 
+use std::collections::HashMap;
 use std::io;
 use std::sync::Arc;
 use std::time::Duration;
@@ -15,7 +16,7 @@ use crate::response::{IntoResponse, Response};
 use crate::router::{MethodMap, Route, Scope, routing_methods};
 use crate::server::{self, ListenAddr, Server, ServerConfig};
 use crate::static_files::{Conditional, with_conditional};
-use crate::tree::{Tree, param_names, parse_pattern};
+use crate::tree::{Tree, param_names, parse_pattern, variants};
 
 /// Default maximum size of a request body read into memory: 1 MiB.
 pub const DEFAULT_BODY_LIMIT: usize = 1024 * 1024;
@@ -39,6 +40,10 @@ pub const DEFAULT_BODY_LIMIT: usize = 1024 * 1024;
 /// ```
 pub struct App {
     tree: Tree<MethodMap>,
+    /// Named routes: name → pattern.
+    names: HashMap<String, String>,
+    /// The pattern of the last route added, for [`App::name`].
+    last_route: Option<String>,
     middlewares: Vec<Arc<dyn Middleware>>,
     /// Middlewares of the mounted routers, by prefix.
     scopes: Vec<Scope>,
@@ -69,6 +74,8 @@ impl App {
             tree: Tree::new(),
             middlewares: Vec::new(),
             scopes: Vec::new(),
+            names: HashMap::new(),
+            last_route: None,
             fallback: None,
             error_handler: None,
             state: StateMap::default(),
@@ -87,6 +94,13 @@ impl App {
     routing_methods!();
 
     #[track_caller]
+    fn add_name(&mut self, name: &str, pattern: String) {
+        if self.names.insert(name.to_owned(), pattern).is_some() {
+            panic!("duplicate route name: '{name}' is already used");
+        }
+    }
+
+    #[track_caller]
     fn add_route(&mut self, method: Option<Method>, path: &str, handler: Arc<dyn Handler>) {
         // Un `match` plutôt qu'une closure : `#[track_caller]` désigne ainsi la
         // ligne de l'utilisateur.
@@ -94,15 +108,19 @@ impl App {
             Ok(segments) => segments,
             Err(e) => panic!("invalid route: {e}"),
         };
-        let route = Route {
-            handler,
-            names: param_names(&segments),
-            pattern: path.into(),
-        };
-        let methods = self.tree.entry(&segments, MethodMap::default);
-        if methods.insert(method.clone(), route).is_err() {
-            let method = method.map_or("ALL".to_owned(), |m| m.to_string());
-            panic!("duplicate route: {method} {path} is already defined");
+        self.last_route = Some(path.to_owned());
+        // `/archive/:year?` est enregistrée deux fois : `/archive` et `/archive/:year`.
+        for variant in variants(&segments) {
+            let route = Route {
+                handler: handler.clone(),
+                names: param_names(&variant),
+                pattern: path.into(),
+            };
+            let methods = self.tree.entry(&variant, MethodMap::default);
+            if methods.insert(method.clone(), route).is_err() {
+                let method = method.map_or("ALL".to_owned(), |m| m.to_string());
+                panic!("duplicate route: {method} {path} is already defined");
+            }
         }
     }
 
@@ -158,6 +176,14 @@ impl App {
     /// ```
     pub fn state<T: Send + Sync + 'static>(&mut self, value: T) -> &mut Self {
         self.state.insert(value);
+        self
+    }
+
+    /// Whether routes are case-sensitive (`true` by default, unlike Express):
+    /// with `false`, `/Users` matches the route `/users`. Parameters keep
+    /// the case of the request.
+    pub fn case_sensitive(&mut self, sensitive: bool) -> &mut Self {
+        self.tree.set_case_insensitive(!sensitive);
         self
     }
 
@@ -296,6 +322,11 @@ impl App {
             config: self.config,
             shared: Shared {
                 routes: Some(tree),
+                names: self
+                    .names
+                    .into_iter()
+                    .map(|(name, pattern)| (name.into_boxed_str(), pattern.into_boxed_str()))
+                    .collect(),
                 state: self.state,
                 body_limit: self.body_limit,
                 trust_proxy: self.trust_proxy,
@@ -377,7 +408,8 @@ impl App {
     /// Starts the server on the current tokio runtime (`app.listen(3000)`).
     ///
     /// Like [`App::run`], it stops gracefully on `Ctrl+C` or `SIGTERM`:
-    /// in-flight requests get up to 10 s to finish. [`App::workers`] and
+    /// in-flight requests get up to [`App::shutdown_timeout`] (10 s by
+    /// default) to finish. [`App::workers`] and
     /// [`App::thread_per_core`] do not apply here: the runtime is yours.
     ///
     /// ```no_run
@@ -456,7 +488,12 @@ impl Handler for Dispatcher {
         // Aucune route ne répond : les middlewares des routeurs montés sur ce
         // préfixe passent d'abord, puis le 404, le 405 ou l'OPTIONS automatique.
         let path = req.path();
-        match self.scopes.iter().find(|(prefix, _)| under(path, prefix)) {
+        let ci = self.core.tree.is_case_insensitive();
+        match self
+            .scopes
+            .iter()
+            .find(|(prefix, _)| under(path, prefix, ci))
+        {
             Some((_, chain)) => Next::new(chain).run(req),
             None => self.core.call(req),
         }
@@ -464,17 +501,25 @@ impl Handler for Dispatcher {
 }
 
 /// `path` est sous `prefix`, segment par segment : `/api` couvre `/api` et
-/// `/api/x` (pas `/apix`), un segment `:param` du préfixe accepte n'importe
-/// quel segment, et un joker `*` tout le reste.
-fn under(path: &str, prefix: &str) -> bool {
+/// `/api/x` (pas `/apix`), un segment avec des paramètres (`:id`,
+/// `v:version`) accepte n'importe quel segment, un paramètre optionnel peut
+/// manquer, et un joker `*` couvre tout le reste.
+fn under(path: &str, prefix: &str, case_insensitive: bool) -> bool {
     let mut segments = path.split('/').filter(|s| !s.is_empty());
     for expected in prefix.split('/').filter(|s| !s.is_empty()) {
         if expected.starts_with('*') {
             return true;
         }
-        match segments.next() {
-            Some(segment) if expected.starts_with(':') || segment == expected => {}
-            _ => return false,
+        let Some(segment) = segments.next() else {
+            return expected.starts_with(':') && expected.ends_with('?');
+        };
+        let same = if case_insensitive {
+            segment.eq_ignore_ascii_case(expected)
+        } else {
+            segment == expected
+        };
+        if !(same || expected.contains(':')) {
+            return false;
         }
     }
     true
@@ -499,7 +544,7 @@ fn build_scopes(scopes: Vec<Scope>, core: &Arc<Core>) -> Box<[(Box<str>, Chain)]
                 ordered
                     .iter()
                     .map(|(_, scope)| scope)
-                    .filter(|scope| under(prefix, &scope.prefix))
+                    .filter(|scope| under(prefix, &scope.prefix, false))
             };
             let middlewares: Vec<Arc<dyn Middleware>> = covering()
                 .flat_map(|scope| scope.middlewares.iter().cloned())

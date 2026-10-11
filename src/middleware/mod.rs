@@ -14,6 +14,7 @@
 //! | [`serve_static`] | Static files | `express.static` |
 //! | `compress` (`compress` feature) | Brotli / gzip responses | compression, actix-web's `Compress` |
 //! | `decompress` (`compress` feature) | Compressed request bodies | tower-http's `RequestDecompression` |
+//! | `session` (`session` feature) | Server-side sessions | express-session, actix-session, tower-sessions |
 //! | `layer` (`tower` feature) | Any tower layer | tower-http, tower-governor… |
 
 use std::io::{IsTerminal, Write};
@@ -39,6 +40,11 @@ pub use auth::{
 };
 pub use limit::{ConcurrencyLimit, RateLimit, concurrency_limit, rate_limit};
 pub use request_id::{RequestId, SetRequestId, request_id};
+
+/// Server-side sessions (`session` feature): see
+/// [`vitesse::session`](crate::session).
+#[cfg(feature = "session")]
+pub use crate::session::session;
 
 /// Runs a tower `Layer` as a middleware (`tower` feature): see
 /// [`vitesse::tower`](crate::tower).

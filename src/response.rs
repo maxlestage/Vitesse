@@ -708,6 +708,22 @@ impl Cookie {
         }
     }
 
+    /// The name of the cookie.
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// The value of the cookie.
+    pub fn value(&self) -> &str {
+        &self.value
+    }
+
+    /// The same cookie with another value.
+    pub fn with_value(mut self, value: impl Into<String>) -> Self {
+        self.value = value.into();
+        self
+    }
+
     /// The `Path` attribute.
     pub fn path(mut self, path: impl Into<String>) -> Self {
         self.path = Some(path.into());

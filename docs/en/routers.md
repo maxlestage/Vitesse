@@ -64,7 +64,7 @@ For a request, the order is: global middleware (`app.middleware`), then router m
 
 ### Requests that no route answers
 
-Router middleware also runs for the requests under the router's prefix that none of its routes answers: the `404` (or your `app.fallback`), the `405 Method Not Allowed` and the automatic `OPTIONS` response (`204` with `Allow`). In the example above, `GET /admin/unknown` goes through `require_token` too: without a token, the visitor gets a `401` and doesn't even learn whether the page exists.
+Router middleware also runs for the requests under the router's prefix that none of its routes answers: the `404` (the router's own [fallback](#router-fallback) if it has one, or else the app's), the `405 Method Not Allowed` and the automatic `OPTIONS` response (`204` with `Allow`). In the example above, `GET /admin/unknown` goes through `require_token` too: without a token, the visitor gets a `401` and doesn't even learn whether the page exists.
 
 This is what makes a logger or CORS on a router work as you would expect:
 
@@ -85,6 +85,33 @@ A few details:
 - Global middleware (`app.middleware`) still runs first, for every request. With nested routers, the outer router's middleware then runs first, followed by the inner router's.
 - If a router middleware rewrites the path of such a request with `req.set_uri(...)`, routing runs again on the new path.
 - A prefix can contain parameters: a router mounted at `/users/:user_id/posts` covers `/users/42/posts/...` whatever the value of `:user_id`.
+
+## Router fallback
+
+By default, an unknown path under a router's prefix gets the application's `404`: your `app.fallback`, or the default `{"error":"Cannot GET /nope"}`. `router.fallback(handler)` answers them instead. That lets an API keep JSON errors while the rest of the site shows an HTML page:
+
+```rust
+let mut api = Router::new();
+api.get("/users", |_| async { Json(vec!["ada", "grace"]) });
+api.fallback(|req: Request| async move {
+    (404, Json(json!({ "error": format!("no API route for {}", req.path()) })))
+});
+
+let mut app = App::new();
+app.mount("/api", api);
+app.fallback(|_| async { (404, Html("<h1>Page not found</h1>")) });
+```
+
+| Request | Answer |
+|---|---|
+| `GET /api/users` | the route |
+| `GET /api/nope` | the router's fallback: `404 {"error":"no API route for /api/nope"}` |
+| `POST /api/users` | `405 Method Not Allowed`: the path exists, so no fallback is called |
+| `GET /nope` | the app's fallback: the HTML page |
+
+- The fallback runs after the router's middleware, like one of its routes: a router protected by authentication protects its fallback too, and the headers its middleware adds are on the fallback's responses.
+- With nested routers, the deepest router that has a fallback wins: a fallback on the router mounted at `/api/admin` answers `/api/admin/nope`, the one on `/api` answers the rest of `/api`. A router without a fallback uses its parent's, and in the end the app's.
+- Like `app.fallback`, it can answer anything, not just a `404`: a redirect, an HTML page, or the `index.html` of a single-page app that lives under the prefix.
 
 ## Nesting routers
 
@@ -140,7 +167,7 @@ app.mount("/live", live); // ws://example.com/live/feed
 - **The router is consumed** by `mount`. To mount the same routes twice (`/api/v1` and `/api/latest`, say), build the router in a function and call it twice.
 - **Conflicts are caught at startup**: if the same method and path are defined twice, even across routers, the program panics as soon as it starts, with a message such as `duplicate route: GET /api/x is already defined`.
 - **Route priority** is global: a static segment wins over a parameter, which wins over a wildcard (`/users/new` before `/users/:id`), whatever router they come from.
-- The fallback (`app.fallback`), the error handler (`app.on_error`) and the state (`app.state`) belong to the application, not to routers.
+- The error handler (`app.on_error`) and the state (`app.state`) belong to the application, not to routers. A router can have its own [fallback](#router-fallback), though, which answers before `app.fallback`.
 
 ## Organising a project
 

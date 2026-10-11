@@ -22,6 +22,10 @@ If you know Express, you already know most of Vitesse: the same routes, the same
 | `process.env.PORT` | `std::env::var("PORT")` |
 | `app.locals.db = db` | `app.state(db)`, read with `req.state::<Db>()` |
 | `app.use((req, res) => res.status(404)…)` | `app.fallback(handler)` |
+| `app.set('trust proxy', 'loopback')` | `app.trust_proxy("loopback")` (also `true`, a number of hops, or IP ranges: see [Behind a proxy](requests.md#behind-a-proxy-trust_proxy)) |
+| `https.createServer({ key, cert }, app).listen(443)` | `app.tls(Tls::from_pem_files("fullchain.pem", "privkey.pem")?)` then `app.run(443)`, feature `tls` (see [HTTPS and HTTP/2](https.md)) |
+| `server.keepAliveTimeout = 5000` | `app.keep_alive(Duration::from_secs(5))` |
+| `server.headersTimeout = 10000` | `app.header_timeout(Duration::from_secs(10))` |
 
 ### Routing
 
@@ -35,6 +39,8 @@ If you know Express, you already know most of Vitesse: the same routes, the same
 | `express.Router()` | `Router::new()` |
 | `app.use('/api', router)` | `app.mount("/api", router)` |
 | `router.use(mw)` | `router.middleware(mw)`, which also runs for the `404`s under the router's prefix |
+| A last `router.use((req, res) => res.status(404)…)` | `router.fallback(handler)` (see [Router fallback](routers.md#router-fallback)) |
+| `method-override` | `req.set_method(...)` in a global middleware (see [Method override](requests.md#method-override)) |
 | `app.ws('/echo', (ws, req) => …)` (express-ws) | `app.ws("/echo", \|req, socket\| async move { … })`: the request comes first, and a loop replaces `ws.on('message')` (see [WebSocket](websocket.md)) |
 
 ### Request
@@ -46,11 +52,18 @@ If you know Express, you already know most of Vitesse: the same routes, the same
 | `express.json()` + `req.body` | `req.json::<T>().await?` |
 | `express.urlencoded()` + `req.body` | `req.form::<T>().await?` |
 | `express.text()` / `express.raw()` | `req.text().await?` / `req.bytes().await?` |
+| `express.json({ limit: '10mb' })` | `handler.with(middleware::body_limit(10 * 1024 * 1024))` for one route, `app.body_limit(...)` for the whole app |
+| `multer` + `req.file` / `req.files` | `req.multipart()?`, then `form.next_field().await?`, feature `multipart` (see [File uploads](requests.md#file-uploads-multipart)) |
 | `req.get('host')` | `req.header("host")` |
 | `req.cookies.session` (cookie-parser) | `req.cookie("session")`, built in |
-| `req.ip` / `req.hostname` | `req.ip()` / `req.hostname()` |
+| `req.ip` | `req.ip()`, which follows `app.trust_proxy` like Express |
+| `req.host` / `req.hostname` | `req.host()` / `req.hostname()` |
+| `req.protocol` / `req.secure` | `req.protocol()` / `req.secure()` |
 | `req.method` / `req.path` / `req.originalUrl` | `req.method()` / `req.path()` / `req.uri()` |
+| `req.route.path` | `req.route()` |
 | `req.is('json')` | `req.is("json")` |
+| `req.accepts(['html', 'json'])` | `req.accepts(&["html", "json"])`, an `Option` (`None`: answer `406`) |
+| `req.acceptsLanguages('en', 'fr')` | `req.accepts_language(&["en", "fr"])` |
 | `res.locals.user = user` | `req.set(user)`, read with `req.get::<User>()` |
 
 ### Response
@@ -70,6 +83,8 @@ If you know Express, you already know most of Vitesse: the same routes, the same
 | `res.attachment('report.csv')` | `.attachment("report.csv")` |
 | `res.sendFile(path)` | `res::file(path).await` |
 | `res.download(path, 'report.pdf')` | `res::download(path, "report.pdf").await` |
+| `res.write('data: …\n\n')` on a `text/event-stream` response (SSE) | `let (tx, stream) = sse::channel(16);`, return `stream`, then `tx.send(Event::new().data("…")).await` from a task (see [Server-Sent Events](responses.md#server-sent-events)) |
+| `req.on('close', …)` during SSE | `tx.send(…)` returns an error, or `tx.closed().await` |
 
 ### Middleware and errors
 
@@ -85,6 +100,10 @@ If you know Express, you already know most of Vitesse: the same routes, the same
 | `cors()` | `middleware::cors()` |
 | `helmet()` | `middleware::helmet()` |
 | `connect-timeout` | `middleware::timeout(duration)` |
+| `compression()` | `middleware::compress()`, feature `compress` |
+| `express-rate-limit` | `middleware::rate_limit(100, Duration::from_secs(15 * 60))` |
+| `express-basic-auth` | `middleware::basic_auth(("admin", "secret"))` |
+| `express-request-id` | `middleware::request_id()` |
 | `express.static('public')` | `app.middleware(ServeDir::new("public"))` |
 | `app.use('/static', express.static('public'))` | `app.static_dir("/static", "public")` |
 
@@ -432,6 +451,7 @@ Requests are handled in parallel on several threads, so there are no mutable glo
 - **Query strings are flat.** `?user[name]=ada` does not become a nested object. For a repeated key such as `?tag=a&tag=b`, iterate over `req.query_pairs()`.
 - **No optional or regex parameters,** and no partial parameters in a segment (`/:id?`, `/:id(\d+)`, `/flights/:from-:to`): declare separate routes, or parse the segment yourself.
 - **Errors are JSON by default** (`{"error": "..."}`), and internal details never reach the client, not even in development. Use `app.on_error` for another format.
+- **Behind a proxy, declare it.** As in Express without `trust proxy`, `req.ip()` and `req.protocol()` describe the proxy until you call `app.trust_proxy(...)`.
 - **`req.set(value)` requires `Clone`.** Add `#[derive(Clone)]` to the types you attach to a request.
 - **The body is read on demand, and only once from the network.** The result is cached: calling `req.text()` and then `req.bytes()` works.
 - **Reloading on change.** `cargo run` recompiles what changed; for a `nodemon`-style loop, use a tool such as [cargo-watch](https://crates.io/crates/cargo-watch) (`cargo watch -x run`). Use `cargo build --release` for production.

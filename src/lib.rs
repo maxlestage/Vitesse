@@ -125,6 +125,8 @@ pub use response::{
     Cookie, Html, IntoResponse, IntoStatus, Json, Redirect, Response, SameSite, res,
 };
 pub use router::Router;
+#[cfg(unix)]
+pub use server::UnixServer;
 pub use server::{ListenAddr, Server};
 pub use static_files::ServeDir;
 

@@ -48,7 +48,7 @@ const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
 /// Serves an HTTP/2 connection until it is closed.
 pub(crate) async fn serve<IO: Io>(
     io: IO,
-    peer: SocketAddr,
+    peer: Option<SocketAddr>,
     secure: bool,
     app: &'static AppService,
     state: &'static ServerState,
@@ -111,7 +111,7 @@ pub(crate) async fn serve<IO: Io>(
 async fn respond_to(
     req: http::Request<RecvStream>,
     mut respond: SendResponse<Bytes>,
-    peer: SocketAddr,
+    peer: Option<SocketAddr>,
     secure: bool,
     app: &'static AppService,
     state: &'static ServerState,
@@ -143,7 +143,7 @@ async fn respond_to(
             remaining: length,
         }))
     };
-    let req = Request::from_parts(parts, body, Some(peer), secure, &app.shared);
+    let req = Request::from_parts(parts, body, peer, secure, &app.shared);
     let res = ResponseFuture::new(app, req).await;
 
     let (mut head, body) = res.into_http().into_parts();

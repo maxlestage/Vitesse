@@ -17,6 +17,7 @@ use crate::handler::{BoxFuture, panic_response};
 use crate::http1::{ServerState, serve_connection};
 use crate::request::Request;
 use crate::response::Response;
+use crate::upgrade::Io;
 
 /// The engine's timeouts and limits (see [`App::keep_alive`](crate::App::keep_alive)
 /// and the following methods).
@@ -224,9 +225,39 @@ impl Server {
     }
 }
 
+/// A listening socket: TCP, or a Unix socket.
+pub(crate) trait Listener: Send {
+    type Io: Io;
+
+    /// The next connection, and the client's address if there is one.
+    fn next_connection(
+        &self,
+    ) -> impl Future<Output = io::Result<(Self::Io, Option<SocketAddr>)>> + Send;
+}
+
+impl Listener for TcpListener {
+    type Io = tokio::net::TcpStream;
+
+    async fn next_connection(&self) -> io::Result<(Self::Io, Option<SocketAddr>)> {
+        let (stream, peer) = self.accept().await?;
+        let _ = stream.set_nodelay(true);
+        Ok((stream, Some(peer)))
+    }
+}
+
+#[cfg(unix)]
+impl Listener for tokio::net::UnixListener {
+    type Io = tokio::net::UnixStream;
+
+    async fn next_connection(&self) -> io::Result<(Self::Io, Option<SocketAddr>)> {
+        let (stream, _) = self.accept().await?;
+        Ok((stream, None))
+    }
+}
+
 /// The accept loop.
-pub(crate) async fn serve(
-    listener: TcpListener,
+pub(crate) async fn serve<L: Listener>(
+    listener: L,
     app: &'static AppService,
     shutdown: impl Future<Output = ()>,
 ) -> io::Result<()> {
@@ -247,7 +278,7 @@ pub(crate) async fn serve(
         let (stream, peer) = tokio::select! {
             biased;
             _ = &mut shutdown => break,
-            accepted = listener.accept() => match accepted {
+            accepted = listener.next_connection() => match accepted {
                 Ok(conn) => conn,
                 Err(e) => {
                     if !is_transient(&e) {
@@ -258,7 +289,6 @@ pub(crate) async fn serve(
                 }
             },
         };
-        let _ = stream.set_nodelay(true);
         #[cfg(feature = "tls")]
         if let Some(acceptor) = &app.tls {
             connections.spawn(crate::tls::serve(
@@ -415,6 +445,78 @@ fn run_thread_per_core(
         }
     }
     result
+}
+
+/// A server listening on a Unix domain socket, created by
+/// [`App::bind_unix`](crate::App::bind_unix): the usual way to sit behind
+/// a reverse proxy on the same machine (Nginx's `proxy_pass
+/// http://unix:/run/my-app.sock`), without a TCP port.
+///
+/// Requests on a Unix socket have no client address: [`Request::ip`]
+/// returns `None` unless [`App::trust_proxy`](crate::App::trust_proxy) is
+/// set (the proxy then reports it in `X-Forwarded-For`).
+#[cfg(unix)]
+pub struct UnixServer {
+    app: &'static AppService,
+    listener: tokio::net::UnixListener,
+    path: std::path::PathBuf,
+}
+
+#[cfg(unix)]
+impl UnixServer {
+    pub(crate) fn new(
+        app: &'static AppService,
+        listener: tokio::net::UnixListener,
+        path: std::path::PathBuf,
+    ) -> Self {
+        UnixServer {
+            app,
+            listener,
+            path,
+        }
+    }
+
+    /// The path of the socket (to change its permissions, for example).
+    pub fn path(&self) -> &std::path::Path {
+        &self.path
+    }
+
+    /// Serves requests until `Ctrl+C` or `SIGTERM`, then shuts down
+    /// gracefully and removes the socket file.
+    pub async fn run(self) -> io::Result<()> {
+        self.with_graceful_shutdown(shutdown_signal()).await
+    }
+
+    /// Serves requests until `signal` completes, then shuts down gracefully
+    /// and removes the socket file.
+    pub async fn with_graceful_shutdown<F>(self, signal: F) -> io::Result<()>
+    where
+        F: Future<Output = ()>,
+    {
+        let result = serve(self.listener, self.app, signal).await;
+        let _ = std::fs::remove_file(&self.path);
+        result
+    }
+}
+
+/// Opens a Unix socket at `path`, replacing a socket file left over by a
+/// previous run (but not a live one, nor any other kind of file).
+#[cfg(unix)]
+pub(crate) fn bind_unix(path: &std::path::Path) -> io::Result<tokio::net::UnixListener> {
+    use std::os::unix::fs::FileTypeExt;
+
+    if let Ok(meta) = std::fs::symlink_metadata(path) {
+        if meta.file_type().is_socket() {
+            if std::os::unix::net::UnixStream::connect(path).is_ok() {
+                return Err(io::Error::new(
+                    io::ErrorKind::AddrInUse,
+                    format!("{} is used by a running server", path.display()),
+                ));
+            }
+            std::fs::remove_file(path)?;
+        }
+    }
+    tokio::net::UnixListener::bind(path)
 }
 
 /// The `Future` of a response, which turns a panic into a `500`.

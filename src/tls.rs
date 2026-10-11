@@ -29,7 +29,6 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
-use tokio::net::TcpStream;
 use tokio_rustls::TlsAcceptor;
 
 pub use rustls;
@@ -37,6 +36,7 @@ pub use rustls;
 use crate::app::AppService;
 use crate::http1::{ServerState, serve_connection};
 use crate::pem::invalid;
+use crate::upgrade::Io;
 
 /// Time given to a client to complete the TLS handshake.
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
@@ -112,10 +112,10 @@ impl Tls {
 
 /// Performs the TLS handshake, then serves the connection in HTTP/2 if the
 /// client chose it (ALPN), in HTTP/1.1 otherwise.
-pub(crate) async fn serve(
+pub(crate) async fn serve<IO: Io>(
     acceptor: TlsAcceptor,
-    stream: TcpStream,
-    peer: SocketAddr,
+    stream: IO,
+    peer: Option<SocketAddr>,
     app: &'static AppService,
     state: &'static ServerState,
 ) {

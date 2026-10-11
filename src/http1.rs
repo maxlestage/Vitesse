@@ -135,7 +135,7 @@ impl Drop for Busy {
 /// Serves a connection until it is closed.
 pub(crate) async fn serve_connection<IO: Io>(
     io: IO,
-    peer: SocketAddr,
+    peer: Option<SocketAddr>,
     secure: bool,
     app: &'static AppService,
     state: &'static ServerState,
@@ -189,7 +189,8 @@ struct Conn<IO> {
     io: IO,
     rbuf: BytesMut,
     wbuf: Vec<u8>,
-    peer: SocketAddr,
+    /// The client's address (`None` on a Unix socket).
+    peer: Option<SocketAddr>,
     /// The connection is encrypted (TLS).
     secure: bool,
     app: &'static AppService,
@@ -261,7 +262,7 @@ impl<IO: Io> Conn<IO> {
                     head.version,
                     head.target,
                     &self.raw,
-                    Some(self.peer),
+                    self.peer,
                     self.secure,
                     &self.app.shared,
                 );

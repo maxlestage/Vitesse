@@ -324,6 +324,56 @@ impl App {
         Server::new(self.build(), tokio::net::TcpListener::from_std(listener)?)
     }
 
+    /// Opens a Unix domain socket instead of a TCP port (actix-web's
+    /// `bind_uds`), without starting the server. A socket file left over by
+    /// a previous run is replaced; it is removed again when the server
+    /// stops. Not available on Windows.
+    ///
+    /// ```no_run
+    /// # use vitesse::prelude::*;
+    /// #[tokio::main]
+    /// async fn main() -> std::io::Result<()> {
+    ///     let mut app = App::new();
+    ///     app.get("/", |_| async { "Hello over a Unix socket!" });
+    ///     app.trust_proxy(true); // the proxy reports the client's address
+    ///     app.listen_unix("/run/my-app/app.sock").await
+    /// }
+    /// ```
+    #[cfg(unix)]
+    pub async fn bind_unix(
+        self,
+        path: impl AsRef<std::path::Path>,
+    ) -> io::Result<crate::server::UnixServer> {
+        let path = path.as_ref();
+        let listener = server::bind_unix(path)?;
+        Ok(crate::server::UnixServer::new(
+            self.build(),
+            listener,
+            path.to_path_buf(),
+        ))
+    }
+
+    /// Serves the application on a Unix domain socket, in the current tokio
+    /// runtime, until `Ctrl+C` or `SIGTERM` (see [`App::bind_unix`]).
+    #[cfg(unix)]
+    pub async fn listen_unix(self, path: impl AsRef<std::path::Path>) -> io::Result<()> {
+        self.bind_unix(path).await?.run().await
+    }
+
+    /// Like [`App::listen_unix`], without needing `#[tokio::main]`: starts
+    /// tokio's multi-threaded runtime ([`App::workers`] threads).
+    #[cfg(unix)]
+    pub fn run_unix(self, path: impl AsRef<std::path::Path>) -> io::Result<()> {
+        let workers = self
+            .workers
+            .unwrap_or_else(|| std::thread::available_parallelism().map_or(1, |n| n.get()));
+        tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(workers)
+            .enable_all()
+            .build()?
+            .block_on(self.listen_unix(path))
+    }
+
     /// Starts the server on the current tokio runtime (`app.listen(3000)`).
     ///
     /// Like [`App::run`], it stops gracefully on `Ctrl+C` or `SIGTERM`:

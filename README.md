@@ -88,14 +88,6 @@ cargo add vitesse
 cargo add serde --features derive   # for your JSON structs
 ```
 
-Or, to follow the development version on GitHub:
-
-```toml
-[dependencies]
-vitesse = { git = "https://maxlestage.github.io/Vitesse/" }
-serde = { version = "1", features = ["derive"] }
-```
-
 Vitesse requires Rust 1.85 or later. No `#[tokio::main]` needed:
 `app.run(port)` creates the runtime, uses every core and shuts down
 gracefully on `Ctrl+C` / `SIGTERM`. If you already run a tokio runtime, use
@@ -221,9 +213,10 @@ The documentation is also available in [French](docs/fr/README.md) and
 
 ## Deploy to Heroku
 
-One tap deploys the demo app (`examples/demo.rs`) to your Heroku account:
-Heroku builds the Docker image itself, so you don't even need a computer
-(Heroku has no free plan, so a paid dyno is required). The step-by-step
+Open `https://heroku.com/deploy?template=<the address of your repository>` on your
+phone to deploy the demo app (`examples/demo.rs`) to your Heroku account: Heroku
+reads `app.json` and builds the Docker image itself, so you don't even need a
+computer (Heroku has no free plan, so a paid dyno is required). The step-by-step
 guide also covers automatic deployments with GitHub Actions:
 [Deploy to Heroku from your phone](docs/en/heroku-mobile.md).
 

@@ -2082,6 +2082,9 @@ body.has-cursor .cursor {
 
 /* ----- Pied de page ---------------------------------------------------------------------------- */
 
+/* Le pied de page signature : l'appel à l'action et la commande d'installation, les
+   colonnes de liens, les projets frères, la signature de l'auteur, le mot géant et la
+   ligne légale. */
 .footer {
   position: relative;
   z-index: 1;
@@ -2134,13 +2137,45 @@ body.has-cursor .cursor {
   justify-self: start;
 }
 
+/* Le bouton et la commande d'installation, côte à côte. */
+.footer__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 14px;
+}
+
+.footer__actions .install {
+  margin-top: 0;
+}
+
+/* Version, « 100 % Rust », crates.io : de petites pastilles sous le texte. */
+.footer__badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.footer__badges a {
+  color: inherit;
+  transition: color 0.3s;
+}
+
+.footer__badges a:hover {
+  color: var(--text);
+}
+
 .footer__cols {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   gap: 30px;
 }
 
-.footer__col h4 {
+.footer__col h4,
+.footer__eco-head h4 {
   font-family: var(--font-mono);
   font-size: 12.5px;
   font-weight: 500;
@@ -2194,12 +2229,224 @@ body.has-cursor .cursor {
   color: var(--hot-1);
 }
 
+/* L'écosystème : les six projets de l'auteur, une grille à filets, le projet courant marqué. */
+.footer__eco {
+  position: relative;
+  max-width: var(--max);
+  margin: 80px auto 0;
+}
+
+.footer__eco-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px 32px;
+  margin-bottom: 22px;
+}
+
+.footer__eco-head h4 {
+  margin: 0;
+}
+
+.footer__eco-head p {
+  margin: 0;
+  max-width: 44em;
+  color: var(--muted);
+  font-size: 15px;
+}
+
+.footer__eco-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--border);
+  overflow: hidden;
+}
+
+.footer__eco-grid li {
+  min-width: 0;
+}
+
+.eco {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 6px 14px;
+  align-items: start;
+  height: 100%;
+  padding: 24px 26px;
+  background: var(--bg-2);
+  color: var(--muted);
+  transition: background 0.4s, color 0.4s;
+}
+
+.eco__name {
+  grid-column: 1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 17px;
+  letter-spacing: -0.02em;
+  color: var(--text);
+}
+
+.eco__text {
+  grid-column: 1;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.eco .icon {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  align-self: start;
+  width: 16px;
+  height: 16px;
+  margin-top: 2px;
+  opacity: 0;
+  transform: translate(-6px, 6px) rotate(-45deg);
+  transition: opacity 0.3s, transform 0.4s var(--ease-out), color 0.3s;
+}
+
+.eco:hover {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+.eco:hover .icon {
+  opacity: 1;
+  transform: rotate(-45deg);
+  color: var(--hot-1);
+}
+
+.eco--here {
+  background:
+    radial-gradient(120% 140% at 0% 0%, rgba(255, 122, 26, 0.18), transparent 60%),
+    var(--bg-2);
+}
+
+.eco--here .icon {
+  display: none;
+}
+
+.eco__here {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 170, 40, 0.35);
+  background: rgba(255, 140, 30, 0.08);
+  color: var(--hot-1);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.eco__here::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--hot-2);
+  animation: ping 2.4s ease-out infinite;
+}
+
+@keyframes ping {
+  from { box-shadow: 0 0 0 0 rgba(255, 122, 26, 0.6); }
+  to { box-shadow: 0 0 0 7px rgba(255, 122, 26, 0); }
+}
+
+/* La signature : qui a conçu et développé tout cela. */
+.footer__credits {
+  position: relative;
+  display: grid;
+  justify-items: center;
+  max-width: var(--max);
+  margin: 80px auto 0;
+  padding-top: 72px;
+  border-top: 1px solid var(--border);
+  text-align: center;
+}
+
+.footer__by {
+  margin: 0 0 18px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+
+.footer__name {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0 0.26em;
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: clamp(34px, 6.4vw, 92px);
+  letter-spacing: -0.04em;
+  line-height: 1.05;
+  background: linear-gradient(
+    100deg,
+    var(--text) 0%,
+    var(--text) 34%,
+    var(--hot-1) 44%,
+    var(--hot-2) 50%,
+    var(--hot-3) 56%,
+    var(--text) 66%,
+    var(--text) 100%
+  );
+  background-size: 300% 100%;
+  background-position: 50% 0;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* Un reflet traverse le nom quand il entre à l'écran. */
+.footer__credits.in .footer__name {
+  animation: name-shine 1.8s var(--ease-out) both;
+}
+
+@keyframes name-shine {
+  from { background-position: 100% 0; }
+  to { background-position: 50% 0; }
+}
+
+.footer__name span {
+  display: inline-block;
+  transition: transform 0.5s var(--ease-out);
+  transition-delay: calc(var(--i) * 60ms);
+}
+
+.footer__name:hover span {
+  transform: translateY(-4px);
+}
+
+.footer__crafted {
+  margin: 18px 0 0;
+  color: var(--muted);
+  font-size: 17px;
+}
+
 .footer__word {
   position: relative;
   display: flex;
   justify-content: space-between;
   max-width: var(--max);
-  margin: 90px auto 30px;
+  margin: 70px auto 30px;
   font-family: var(--font-display);
   font-weight: 700;
   font-size: clamp(64px, 17.5vw, 250px);
@@ -2216,15 +2463,15 @@ body.has-cursor .cursor {
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
-  transform: translateY(100%) skewY(8deg);
-  opacity: 0;
   transition: transform 1.2s var(--ease-out), opacity 1s;
   transition-delay: calc(var(--i) * 70ms);
 }
 
-.footer__word.in span {
-  transform: none;
-  opacity: 1;
+/* Les lettres montent quand le mot entre à l'écran (sans le code du navigateur, elles
+   sont simplement là). */
+.hydrated .footer__word:not(.in) span {
+  transform: translateY(100%) skewY(8deg);
+  opacity: 0;
 }
 
 .footer__word span:hover {
@@ -2241,13 +2488,22 @@ body.has-cursor .cursor {
   flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: 20px;
+  gap: 14px 24px;
   max-width: var(--max);
   margin: 0 auto;
   padding-top: 26px;
   border-top: 1px solid var(--border);
   font-size: 13.5px;
   color: var(--dim);
+}
+
+.footer__bottom > a:not(.totop) {
+  color: var(--muted);
+  transition: color 0.3s;
+}
+
+.footer__bottom > a:not(.totop):hover {
+  color: var(--hot-1);
 }
 
 .clock {
@@ -3484,6 +3740,10 @@ body.has-cursor .cursor {
     gap: 50px;
   }
 
+  .footer__eco-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
   /* Le parcours devient une simple liste verticale. */
   .journey__sticky {
     position: static;
@@ -3534,6 +3794,19 @@ body.has-cursor .cursor {
   .footer__cols {
     grid-template-columns: repeat(2, 1fr);
     gap: 34px 20px;
+  }
+
+  .footer__eco-grid {
+    grid-template-columns: 1fr;
+    border-radius: 16px;
+  }
+
+  .eco {
+    padding: 18px 20px;
+  }
+
+  .footer__actions .install {
+    width: 100%;
   }
 
   .bar {

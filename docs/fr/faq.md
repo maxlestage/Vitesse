@@ -123,7 +123,7 @@ La documentation se trouve dans [`docs/`](https://github.com/maxlestage/Vitesse/
 
 ### Quelle est la licence ?
 
-Vitesse est distribué sous double licence [MIT](https://github.com/maxlestage/Vitesse/blob/master/LICENSE-MIT) ou [Apache 2.0](https://github.com/maxlestage/Vitesse/blob/master/LICENSE-APACHE), au choix (`MIT OR Apache-2.0`), comme la plupart de l'écosystème Rust.
+Vitesse est un logiciel propriétaire : © Maxime Nathan Lestage, tous droits réservés. Son code source est publié sur crates.io et GitHub pour que vous puissiez le lire, l'auditer et le compiler, et vous pouvez l'utiliser librement comme dépendance de vos propres programmes, y compris commerciaux. Le modifier ou redistribuer son code source demande l'accord écrit de l'auteur. Les conditions complètes sont dans le fichier [LICENSE](https://github.com/maxlestage/Vitesse/blob/master/LICENSE) du dépôt.
 
 ## Limites actuelles
 

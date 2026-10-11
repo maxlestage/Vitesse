@@ -8,7 +8,9 @@ use super::Site;
 use super::docs::Doc;
 use super::{csp, pwa};
 use crate::catalog::{self, CATEGORIES};
-use crate::data::{FEATURES, GITHUB, HEROKU_DEPLOY, INSTALL};
+use crate::data::{
+    AUTHOR, AUTHOR_URL, CRATES, ECOSYSTEM, FEATURES, GITHUB, HEROKU_DEPLOY, INSTALL, LICENSE,
+};
 use crate::highlight::{to_html, tokenize};
 use crate::i18n::{Lang, Texts, number};
 use crate::icons::{icon, logo};
@@ -69,11 +71,13 @@ fn head_tags() -> String {
     format!(
         concat!(
             r#"<meta name="color-scheme" content="dark"/>"#,
+            r#"<meta name="author" content="{author}"/>"#,
             r#"<link rel="icon" href="{b}/assets/favicon.svg" type="image/svg+xml"/>"#,
             r#"<link rel="preload" href="{b}/assets/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin=""/>"#,
             r#"<link rel="preload" href="{b}/assets/fonts/space-grotesk-latin.woff2" as="font" type="font/woff2" crossorigin=""/>"#,
         ),
-        b = b
+        b = b,
+        author = AUTHOR
     )
 }
 
@@ -395,80 +399,148 @@ fn site_menu(ctx: &Ctx<'_>) -> Element {
         )
 }
 
+/// Le pied de page signature, commun dans l'esprit à tous les sites de l'écosystème :
+/// l'appel à l'action et la commande d'installation, les colonnes de liens, les projets
+/// frères, la signature de l'auteur, le mot géant et la ligne légale.
 fn site_footer(ctx: &Ctx<'_>) -> Element {
     let t = ctx.t();
     let lang = ctx.lang();
-    let project = [
+    let external = |link: Element| link.attr("target", "_blank").attr("rel", "noopener");
+    let project = vec![
         GITHUB.to_owned(),
         format!("{GITHUB}/tree/master/bench"),
         format!("{GITHUB}/tree/master/examples"),
         format!("{GITHUB}/tree/master/site"),
+        LICENSE.to_owned(),
     ];
-    let docs = [
+    let docs = vec![
         docs_href(lang),
         doc_href(lang, "from-express", None),
         doc_href(lang, "performance", None),
         doc_href(lang, "heroku-mobile", None),
     ];
-    let community = [
+    let community = vec![
         format!("{GITHUB}/issues/new"),
         format!("{GITHUB}/issues"),
         format!("{GITHUB}/pulls"),
         format!("{GITHUB}/commits/master"),
     ];
-    let columns: [(&str, &[&str; 4], [String; 4], bool); 3] = [
+    let columns: [(&str, &[&str], Vec<String>, bool); 3] = [
         (t.footer_cols[0], &t.footer_project, project, true),
         (t.footer_cols[1], &t.footer_docs, docs, false),
         (t.footer_cols[2], &t.footer_community, community, true),
     ];
+    let pitch = div()
+        .class("footer__pitch")
+        .attr("data-reveal", "")
+        .child(p().class("eyebrow").text(t.footer_eyebrow))
+        .child(p().class("footer__lead").text(t.footer_lead))
+        .child(
+            div()
+                .class("footer__actions")
+                .child(magnetic(
+                    &doc_href(lang, "installation", None),
+                    "btn btn--primary",
+                    false,
+                    label_arrow(t.footer_cta),
+                ))
+                .child(
+                    div()
+                        .class("install")
+                        .attr("aria-label", format!("{}: {INSTALL}", t.footer_install))
+                        .child(span().class("install__prompt").text("$"))
+                        .child(code().text(INSTALL))
+                        .child(copy_button(lang, INSTALL)),
+                ),
+        )
+        .child(
+            ul().class("footer__badges")
+                .attr("aria-label", "Vitesse")
+                .child(
+                    li().class("pill pill--hot")
+                        .text(format!("v{}", vitesse::VERSION)),
+                )
+                .child(li().class("pill").text(t.footer_rust))
+                .child(
+                    li().class("pill")
+                        .child(external(a().href(CRATES).text("crates.io"))),
+                ),
+        );
+    let cols =
+        div()
+            .class("footer__cols")
+            .children(columns.into_iter().enumerate().map(
+                |(c, (title, texts, hrefs, opens_tab))| {
+                    div()
+                        .class("footer__col")
+                        .attr("data-reveal", "")
+                        .style(format!("--d:{}ms", c * 90))
+                        .child(h4().text(title))
+                        .child(ul().children(texts.iter().zip(hrefs).map(|(text, href)| {
+                            let link = a()
+                                .href(href)
+                                .class("footer__link")
+                                .child(span().text(*text))
+                                .child(icon("arrow"));
+                            li().child(if opens_tab { external(link) } else { link })
+                        })))
+                },
+            ));
+    let ecosystem = nav()
+        .class("footer__eco")
+        .attr("aria-label", t.footer_ecosystem)
+        .attr("data-reveal", "")
+        .child(
+            div()
+                .class("footer__eco-head")
+                .child(h4().text(t.footer_ecosystem))
+                .child(p().text(t.footer_ecosystem_text)),
+        )
+        .child(
+            ul().class("footer__eco-grid")
+                .children(
+                    ECOSYSTEM
+                        .iter()
+                        .zip(t.footer_projects)
+                        .map(|((name, url), text)| {
+                            let here = *name == "Vitesse";
+                            let mut title = span().class("eco__name").text(*name);
+                            if here {
+                                title = title.child(span().class("eco__here").text(t.footer_here));
+                            }
+                            let link = a()
+                                .class(if here { "eco eco--here" } else { "eco" })
+                                .href(*url)
+                                .child(title)
+                                .child(span().class("eco__text").text(text))
+                                .child(icon("arrow"));
+                            li().child(if here {
+                                link.attr("aria-current", "page")
+                            } else {
+                                external(link)
+                            })
+                        }),
+                ),
+        );
+    let credits = div()
+        .class("footer__credits")
+        .attr("data-reveal", "")
+        .child(p().class("footer__by").text(t.footer_by))
+        .child(external(
+            a().class("footer__name").href(AUTHOR_URL).children(
+                AUTHOR
+                    .split(' ')
+                    .enumerate()
+                    .map(|(i, word)| span().style(format!("--i:{i}")).text(word.to_owned())),
+            ),
+        ))
+        .child(p().class("footer__crafted").text(t.footer_crafted));
     footer()
         .class("footer")
         .child(div().class("footer__glow").attr("aria-hidden", "true"))
-        .child(
-            div()
-                .class("footer__top")
-                .child(
-                    div()
-                        .class("footer__pitch")
-                        .attr("data-reveal", "")
-                        .child(p().class("eyebrow").text(t.footer_eyebrow))
-                        .child(p().class("footer__lead").text(t.footer_lead))
-                        .child(magnetic(
-                            &doc_href(lang, "installation", None),
-                            "btn btn--primary",
-                            false,
-                            label_arrow(t.footer_cta),
-                        )),
-                )
-                .child(
-                    div()
-                        .class("footer__cols")
-                        .children(columns.into_iter().enumerate().map(
-                            |(c, (title, texts, hrefs, external))| {
-                                div()
-                                    .class("footer__col")
-                                    .attr("data-reveal", "")
-                                    .style(format!("--d:{}ms", c * 90))
-                                    .child(h4().text(title))
-                                    .child(ul().children(texts.iter().zip(hrefs).map(
-                                        |(text, href)| {
-                                            let link = a()
-                                                .href(href)
-                                                .class("footer__link")
-                                                .child(span().text(*text))
-                                                .child(icon("arrow"));
-                                            li().child(if external {
-                                                link.attr("target", "_blank")
-                                                    .attr("rel", "noopener")
-                                            } else {
-                                                link
-                                            })
-                                        },
-                                    )))
-                            },
-                        )),
-                ),
-        )
+        .child(div().class("footer__top").child(pitch).child(cols))
+        .child(ecosystem)
+        .child(credits)
         .child(
             div()
                 .class("footer__word")
@@ -484,7 +556,9 @@ fn site_footer(ctx: &Ctx<'_>) -> Element {
         .child(
             div()
                 .class("footer__bottom")
-                .child(span().text(t.footer_copyright))
+                .child(span().text(t.footer_rights))
+                .child(external(a().href(LICENSE).text(t.footer_proprietary)))
+                .child(span().text(t.footer_built))
                 .child(island("clock", lang.code(), crate::islands::clock))
                 .child(
                     a().href("#top")
@@ -985,7 +1059,7 @@ fn home(ctx: &Ctx<'_>) -> String {
         ctx.route,
     )
     .json_ld(format!(
-        r#"{{"@context":"https://schema.org","@type":"SoftwareSourceCode","name":"Vitesse","description":"{}","codeRepository":"{GITHUB}","programmingLanguage":"Rust","license":"https://opensource.org/licenses/MIT","url":"{}/{}/"}}"#,
+        r#"{{"@context":"https://schema.org","@type":"SoftwareSourceCode","name":"Vitesse","description":"{}","codeRepository":"{GITHUB}","programmingLanguage":"Rust","license":"{LICENSE}","author":{{"@type":"Person","name":"{AUTHOR}","url":"{AUTHOR_URL}"}},"url":"{}/{}/"}}"#,
         json(t.meta_description),
         ctx.origin,
         lang.code()

@@ -100,6 +100,9 @@ pub mod test;
 #[cfg(feature = "ws")]
 pub mod ws;
 
+/// The version of this crate, e.g. `"0.1.0"`: handy for a footer or a `Server` header.
+pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+
 pub use app::{App, DEFAULT_BODY_LIMIT};
 pub use body::{Body, BoxError};
 pub use error::{Error, Result};

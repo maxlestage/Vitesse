@@ -4,8 +4,8 @@ version = "0.1.0"
 edition = "2024"
 rust-version = "1.85"
 description = "An Express.js-style web framework in native Rust, built for speed: familiar API (app.get, req.params, middleware, Router), its own HTTP/1.1 engine on tokio, WebSocket and HTTP/3 (QUIC)."
-authors = ["Maxime Lestage"]
-license = "MIT OR Apache-2.0"
+authors = ["Maxime Nathan Lestage"]
+license-file = "LICENSE"
 repository = "https://github.com/maxlestage/Vitesse"
 homepage = "https://maxlestage.github.io/Vitesse/"
 documentation = "https://docs.rs/vitesse"
@@ -20,8 +20,7 @@ include = [
     "/tests",
     "/README.md",
     "/CHANGELOG.md",
-    "/LICENSE-MIT",
-    "/LICENSE-APACHE",
+    "/LICENSE",
 ]
 
 [dependencies]

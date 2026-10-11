@@ -385,7 +385,7 @@ pub const FR: Texts = Texts {
     footer_install: "S'installe en une ligne",
     footer_rust: "100 % Rust",
     footer_cols: ["Projet", "Documentation"],
-    footer_project: ["crates.io", "docs.rs", "Licence"],
+    footer_project: ["GitHub", "docs.rs", "Licence"],
     footer_docs: [
         "Guide",
         "Venir d'Express",
@@ -573,7 +573,7 @@ pub const EN: Texts = Texts {
     footer_install: "Install in one line",
     footer_rust: "100 % Rust",
     footer_cols: ["Project", "Documentation"],
-    footer_project: ["crates.io", "docs.rs", "License"],
+    footer_project: ["GitHub", "docs.rs", "License"],
     footer_docs: [
         "Guide",
         "Coming from Express",
@@ -767,7 +767,7 @@ pub const ES: Texts = Texts {
     footer_install: "Se instala en una línea",
     footer_rust: "100 % Rust",
     footer_cols: ["Proyecto", "Documentación"],
-    footer_project: ["crates.io", "docs.rs", "Licencia"],
+    footer_project: ["GitHub", "docs.rs", "Licencia"],
     footer_docs: [
         "Guía",
         "Viniendo de Express",

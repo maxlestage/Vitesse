@@ -8,7 +8,7 @@ HTTP/3 is an opt-in Cargo feature:
 
 ```toml
 [dependencies]
-vitesse = { version = "0.1", features = ["http3"] }
+vitesse = { git = "https://github.com/maxlestage/Vitesse", features = ["http3"] }
 ```
 
 It brings in [quinn](https://crates.io/crates/quinn) (QUIC), [h3](https://crates.io/crates/h3) (HTTP/3) and rustls (TLS 1.3, with the ring cryptography library): all Rust, no OpenSSL to install. The feature is off by default because it adds compilation time that most applications behind a proxy don't need.

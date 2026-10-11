@@ -48,14 +48,14 @@ my-app/
 ## Ajouter Vitesse
 
 ```sh
-cargo add vitesse
+cargo add vitesse --git https://github.com/maxlestage/Vitesse
 ```
 
 `cargo add` inscrit la dépendance dans `Cargo.toml`. Vous pouvez aussi l'ajouter à la main :
 
 ```toml
 [dependencies]
-vitesse = "0.1"
+vitesse = { git = "https://github.com/maxlestage/Vitesse" }
 ```
 
 Vitesse embarque `tokio`, `serde_json`, `http` et `bytes`, et les réexporte. Pour une application simple, c'est donc la seule dépendance nécessaire.
@@ -72,12 +72,12 @@ Deux parties de Vitesse sont des features Cargo, que vous activez ou désactivez
 ```toml
 [dependencies]
 # HTTP/3 en plus des features par défaut :
-vitesse = { version = "0.1", features = ["http3"] }
+vitesse = { git = "https://github.com/maxlestage/Vitesse", features = ["http3"] }
 # ou sans WebSocket, pour compiler un peu moins :
-# vitesse = { version = "0.1", default-features = false }
+# vitesse = { git = "https://github.com/maxlestage/Vitesse", default-features = false }
 ```
 
-Avec `cargo add` : `cargo add vitesse --features http3`, ou `cargo add vitesse --no-default-features`.
+Avec `cargo add` : `cargo add vitesse --git https://github.com/maxlestage/Vitesse --features http3`, ou `cargo add vitesse --git https://github.com/maxlestage/Vitesse --no-default-features`.
 
 ## Dépendances optionnelles
 

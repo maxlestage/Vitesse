@@ -434,7 +434,7 @@ fn site_footer(ctx: &Ctx<'_>) -> Element {
                 .child(li().class("pill").text(t.footer_rust))
                 .child(
                     li().class("pill")
-                        .child(external(a().href(CRATES).text("crates.io"))),
+                        .child(external(a().href(CRATES).text("GitHub"))),
                 ),
         );
     let cols =

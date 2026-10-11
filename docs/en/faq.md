@@ -8,7 +8,7 @@ Answers to the questions people ask most often about Vitesse, followed by an hon
 
 Vitesse is young (version 0.1), but its engine was built for production from the start: the test suite covers the HTTP engine in detail (pipelining, `chunked` bodies, `Expect: 100-continue`, size limits, graceful shutdown) and runs on Linux, macOS and Windows for every change. Panics become `500` responses instead of crashing the server, malformed requests are rejected, and `SIGTERM` lets in-flight requests finish.
 
-Until version 1.0, the API may still change between minor versions. Depend on `vitesse = "0.1"` (Cargo then only installs compatible `0.1.x` updates), read the changelog before upgrading, put a reverse proxy in front for HTTPS (see [Production](production.md)), and load-test with your own workload.
+Until version 1.0, the API may still change between minor versions. Depend on `vitesse = { git = "https://github.com/maxlestage/Vitesse" }` (Cargo then only installs compatible `0.1.x` updates), read the changelog before upgrading, put a reverse proxy in front for HTTPS (see [Production](production.md)), and load-test with your own workload.
 
 ### Is the project really 100% Rust?
 

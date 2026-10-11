@@ -4,13 +4,13 @@ Un WebSocket mantiene una conexión abierta en los dos sentidos, así que el ser
 
 ## Preparación
 
-El soporte de WebSocket es la feature de Cargo `ws`, **activada por defecto**: con `vitesse = "0.1"` no necesitas nada más. Se apoya en tokio-tungstenite, la implementación en Rust validada con la batería de pruebas Autobahn. El handshake (RFC 6455) y la entrega de la conexión TCP tras la respuesta `101 Switching Protocols` los realiza el propio motor HTTP/1.1 de Vitesse.
+El soporte de WebSocket es la feature de Cargo `ws`, **activada por defecto**: con `vitesse = { git = "https://github.com/maxlestage/Vitesse" }` no necesitas nada más. Se apoya en tokio-tungstenite, la implementación en Rust validada con la batería de pruebas Autobahn. El handshake (RFC 6455) y la entrega de la conexión TCP tras la respuesta `101 Switching Protocols` los realiza el propio motor HTTP/1.1 de Vitesse.
 
 Si no necesitas WebSocket, desactiva las features por defecto para compilar un poco menos:
 
 ```toml
 [dependencies]
-vitesse = { version = "0.1", default-features = false }
+vitesse = { git = "https://github.com/maxlestage/Vitesse", default-features = false }
 ```
 
 ## Una primera ruta WebSocket

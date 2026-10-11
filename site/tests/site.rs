@@ -165,10 +165,16 @@ async fn every_page_ends_with_the_signature_footer() {
         assert!(footer.contains(rights), "{lang}");
         assert!(footer.contains(r#"href="/assets/LICENSE.txt""#), "{lang}");
         assert!(!html.contains("MIT"), "{lang}");
-        // Aucun lien vers GitHub : le projet n'est pas open source.
-        assert!(!html.contains("github.com"), "{lang}");
+        // Le code est sur GitHub : seul moyen d'obtenir la crate tant qu'elle n'est pas sur crates.io.
+        assert!(
+            html.contains("https://github.com/maxlestage/Vitesse"),
+            "{lang}"
+        );
         // La commande d'installation et la version de la crate.
-        assert!(footer.contains("cargo add vitesse"), "{lang}");
+        assert!(
+            footer.contains("cargo add vitesse --git https://github.com/maxlestage/Vitesse"),
+            "{lang}"
+        );
         assert!(footer.contains(&format!("v{}", vitesse::VERSION)), "{lang}");
         // Les six projets de l'écosystème, celui-ci marqué comme la page courante.
         for project in [
@@ -207,7 +213,7 @@ async fn doc_pages_have_their_navigation() {
     // Précédent et suivant ; aucun lien vers GitHub.
     assert!(html.contains(r#"href="/es/docs/first-app/" rel="prev""#));
     assert!(html.contains(r#"href="/es/docs/requests/" rel="next""#));
-    assert!(!html.contains("github.com"));
+    assert!(html.contains("https://github.com/maxlestage/Vitesse"));
     assert!(html.contains(r#""@type":"BreadcrumbList""#));
     assert!(html.contains(r#"<a class="is-active" href="/es/docs/routing/" aria-current="page">"#));
     let hub = client().get("/en/docs/").await.text();

@@ -9,7 +9,7 @@ You'll need Rust installed first. See [Installation](installation.md).
 ```sh
 cargo new hello-vitesse
 cd hello-vitesse
-cargo add vitesse
+cargo add vitesse --git https://github.com/maxlestage/Vitesse
 cargo add serde --features derive
 ```
 

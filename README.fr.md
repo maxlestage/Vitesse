@@ -86,7 +86,7 @@ désormais Drogon, axum, actix-web et Vitesse.</sub>
 ## Installation
 
 ```sh
-cargo add vitesse
+cargo add vitesse --git https://github.com/maxlestage/Vitesse
 cargo add serde --features derive   # pour vos structures JSON
 ```
 
@@ -105,7 +105,7 @@ utilisez plutôt `app.listen(port).await`.
 
 ```toml
 [dependencies]
-vitesse = { version = "0.1", features = ["http3"] }
+vitesse = { git = "https://github.com/maxlestage/Vitesse", features = ["http3"] }
 ```
 
 ## Tour d'horizon
@@ -216,7 +216,7 @@ La documentation existe aussi en [anglais](docs/en/README.md) et en
 
 ## Déployer sur Heroku
 
-Ouvrez `https://heroku.com/deploy?template=<l'adresse de votre dépôt>` sur votre
+Ouvrez `https://heroku.com/deploy?template=https://github.com/maxlestage/Vitesse` sur votre
 téléphone pour déployer l'application de démonstration (`examples/demo.rs`) sur
 votre compte Heroku : Heroku lit `app.json` et construit lui-même l'image Docker,
 vous n'avez même pas besoin d'un ordinateur (Heroku n'a plus d'offre gratuite : un

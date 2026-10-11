@@ -84,7 +84,7 @@ Drogon, axum, actix-web and Vitesse.</sub>
 ## Installation
 
 ```sh
-cargo add vitesse
+cargo add vitesse --git https://github.com/maxlestage/Vitesse
 cargo add serde --features derive   # for your JSON structs
 ```
 
@@ -103,7 +103,7 @@ gracefully on `Ctrl+C` / `SIGTERM`. If you already run a tokio runtime, use
 
 ```toml
 [dependencies]
-vitesse = { version = "0.1", features = ["http3"] }
+vitesse = { git = "https://github.com/maxlestage/Vitesse", features = ["http3"] }
 ```
 
 ## Quick tour
@@ -214,7 +214,7 @@ The documentation is also available in [French](docs/fr/README.md) and
 
 ## Deploy to Heroku
 
-Open `https://heroku.com/deploy?template=<the address of your repository>` on your
+Open `https://heroku.com/deploy?template=https://github.com/maxlestage/Vitesse` on your
 phone to deploy the demo app (`examples/demo.rs`) to your Heroku account: Heroku
 reads `app.json` and builds the Docker image itself, so you don't even need a
 computer (Heroku has no free plan, so a paid dyno is required). The step-by-step

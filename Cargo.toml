@@ -87,6 +87,14 @@ required-features = ["ws"]
 name = "http3"
 required-features = ["http3"]
 
+[[example]]
+name = "https"
+required-features = ["tls", "http2"]
+
+[[example]]
+name = "live"
+required-features = ["multipart"]
+
 [package.metadata.docs.rs]
 all-features = true
 

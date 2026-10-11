@@ -1299,3 +1299,180 @@ async fn body_limit_per_route() {
     assert_eq!(c.post("/large").body(vec![0; 20_000]).await.status(), 413);
     assert_eq!(c.post("/tiny").body(vec![0; 11]).await.status(), 413);
 }
+
+#[tokio::test]
+async fn authentication_middlewares() {
+    use vitesse::middleware::BasicUser;
+
+    let mut app = App::new();
+    let mut admin = Router::new();
+    admin.middleware(
+        middleware::basic_auth([("admin", "s3cret"), ("ada", "lovelace")]).realm("Admin"),
+    );
+    admin.get("/", |req: Request| async move {
+        format!("hello {}", req.get::<BasicUser>().unwrap().0)
+    });
+    app.mount("/admin", admin);
+    let mut api = Router::new();
+    api.middleware(middleware::bearer_auth(["token-1", "token-2"]));
+    api.get("/", |_| async { "api" });
+    app.mount("/api", api);
+    app.get(
+        "/custom",
+        (|_| async { "custom" }).with(middleware::basic_auth(|user: &str, pass: &str| {
+            user.len() == pass.len()
+        })),
+    );
+    let c = TestClient::new(app);
+
+    let r = c.get("/admin").await;
+    assert_eq!(r.status(), 401);
+    assert_eq!(
+        r.header("www-authenticate"),
+        Some(r#"Basic realm="Admin", charset="UTF-8""#)
+    );
+    // admin:s3cret
+    let r = c
+        .get("/admin")
+        .header("authorization", "Basic YWRtaW46czNjcmV0")
+        .await;
+    assert_eq!(r.text(), "hello admin");
+    // ada:lovelace
+    let r = c
+        .get("/admin")
+        .header("authorization", "basic YWRhOmxvdmVsYWNl")
+        .await;
+    assert_eq!(r.text(), "hello ada");
+    // admin:wrong
+    let r = c
+        .get("/admin")
+        .header("authorization", "Basic YWRtaW46d3Jvbmc=")
+        .await;
+    assert_eq!(r.status(), 401);
+    let r = c.get("/admin").header("authorization", "Basic !!!").await;
+    assert_eq!(r.status(), 401);
+
+    let r = c.get("/api").await;
+    assert_eq!(r.status(), 401);
+    assert_eq!(r.header("www-authenticate"), Some("Bearer"));
+    let r = c.get("/api").header("authorization", "Bearer nope").await;
+    assert_eq!(
+        r.header("www-authenticate"),
+        Some(r#"Bearer error="invalid_token""#)
+    );
+    let r = c
+        .get("/api")
+        .header("authorization", "Bearer token-2")
+        .await;
+    assert_eq!(r.text(), "api");
+
+    // abc:xyz
+    let r = c
+        .get("/custom")
+        .header("authorization", "Basic YWJjOnh5eg==")
+        .await;
+    assert_eq!(r.text(), "custom");
+}
+
+#[tokio::test]
+async fn request_ids() {
+    use vitesse::middleware::RequestId;
+
+    let mut app = App::new();
+    app.middleware(middleware::request_id());
+    app.get("/", |req: Request| async move {
+        let id = req.get::<RequestId>().unwrap().to_string();
+        assert_eq!(req.header("x-request-id"), Some(id.as_str()));
+        id
+    });
+    let c = TestClient::new(app);
+    let r = c.get("/").await;
+    let id = r.header("x-request-id").unwrap().to_owned();
+    assert_eq!(id.len(), 36);
+    assert_eq!(r.text(), id);
+    assert_ne!(c.get("/").await.text(), id);
+    let r = c.get("/").header("x-request-id", "from-the-proxy").await;
+    assert_eq!(r.text(), "from-the-proxy");
+    assert_eq!(r.header("x-request-id"), Some("from-the-proxy"));
+    // Les 404 aussi.
+    assert!(c.get("/nope").await.header("x-request-id").is_some());
+
+    let mut app = App::new();
+    app.middleware(
+        middleware::request_id()
+            .header("x-correlation-id")
+            .trust_incoming(false),
+    );
+    app.get("/", |req: Request| async move {
+        req.get::<RequestId>().unwrap().0.clone()
+    });
+    let r = TestClient::new(app)
+        .get("/")
+        .header("x-correlation-id", "client")
+        .await;
+    assert_ne!(r.text(), "client");
+    assert_eq!(r.header("x-correlation-id"), Some(r.text().as_str()));
+}
+
+#[tokio::test]
+async fn concurrency_and_rate_limits() {
+    let mut app = App::new();
+    app.get(
+        "/slow",
+        (|_| async {
+            tokio::time::sleep(Duration::from_millis(200)).await;
+            "done"
+        })
+        .with(middleware::concurrency_limit(2).max_wait(Duration::ZERO)),
+    );
+    app.get(
+        "/limited",
+        (|_| async { "ok" }).with(middleware::rate_limit(2, Duration::from_secs(60))),
+    );
+    app.get(
+        "/per-key",
+        (|_| async { "ok" }).with(
+            middleware::rate_limit(1, Duration::from_secs(60))
+                .key(|req: &Request| req.header("x-api-key").map(str::to_owned)),
+        ),
+    );
+    let c = TestClient::new(app);
+
+    let requests: Vec<_> = (0..4)
+        .map(|_| tokio::spawn(c.get("/slow").send()))
+        .collect();
+    let mut statuses = Vec::new();
+    for r in requests {
+        statuses.push(r.await.unwrap().status().as_u16());
+    }
+    statuses.sort();
+    assert_eq!(statuses, [200, 200, 503, 503]);
+    assert_eq!(c.get("/slow").await.status(), 200);
+
+    let r = c.get("/limited").await;
+    assert_eq!(r.header("x-ratelimit-limit"), Some("2"));
+    assert_eq!(r.header("x-ratelimit-remaining"), Some("1"));
+    assert_eq!(
+        c.get("/limited").await.header("x-ratelimit-remaining"),
+        Some("0")
+    );
+    let r = c.get("/limited").await;
+    assert_eq!(r.status(), 429);
+    assert_eq!(r.header("retry-after"), Some("30"));
+
+    assert_eq!(
+        c.get("/per-key").header("x-api-key", "a").await.status(),
+        200
+    );
+    assert_eq!(
+        c.get("/per-key").header("x-api-key", "a").await.status(),
+        429
+    );
+    assert_eq!(
+        c.get("/per-key").header("x-api-key", "b").await.status(),
+        200
+    );
+    // Sans clé : pas de limite.
+    assert_eq!(c.get("/per-key").await.status(), 200);
+    assert_eq!(c.get("/per-key").await.status(), 200);
+}

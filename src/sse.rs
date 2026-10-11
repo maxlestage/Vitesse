@@ -152,9 +152,12 @@ impl Event {
     /// several times: the browser joins the parts with line breaks.
     pub fn data(mut self, data: impl AsRef<str>) -> Self {
         let data = data.as_ref();
-        let data = data.strip_suffix('\n').unwrap_or(data);
-        for line in data.split('\n') {
-            self.field("data", line.strip_suffix('\r').unwrap_or(line));
+        let data = data
+            .strip_suffix("\r\n")
+            .or_else(|| data.strip_suffix(['\n', '\r']))
+            .unwrap_or(data);
+        for line in lines(data) {
+            self.field("data", line);
         }
         self
     }
@@ -200,8 +203,8 @@ impl Event {
 
     /// A comment, ignored by the browser.
     pub fn comment(mut self, comment: impl AsRef<str>) -> Self {
-        for line in comment.as_ref().split('\n') {
-            self.field("", line.strip_suffix('\r').unwrap_or(line));
+        for line in lines(comment.as_ref()) {
+            self.field("", line);
         }
         self
     }
@@ -221,6 +224,27 @@ impl Event {
         text.push('\n');
         Bytes::from(text)
     }
+}
+
+/// The lines of a text: the browser ends a line at `\r\n`, `\n` or `\r`
+/// alike, so all three must start a new `data:` line (or a client's text
+/// could add fields of its own).
+fn lines(text: &str) -> impl Iterator<Item = &str> {
+    let mut rest = Some(text);
+    std::iter::from_fn(move || {
+        let text = rest?;
+        match text.find(['\r', '\n']) {
+            Some(i) => {
+                let skip = if text[i..].starts_with("\r\n") { 2 } else { 1 };
+                rest = Some(&text[i + skip..]);
+                Some(&text[..i])
+            }
+            None => {
+                rest = None;
+                Some(text)
+            }
+        }
+    })
 }
 
 fn single_line<'a>(field: &str, value: &'a str) -> &'a str {
@@ -269,7 +293,7 @@ impl KeepAlive {
 
     /// The delay without any event after which a comment is sent.
     pub fn interval(mut self, interval: Duration) -> Self {
-        self.interval = interval;
+        self.interval = interval.min(crate::util::MAX_DELAY);
         self
     }
 
@@ -433,6 +457,12 @@ mod tests {
             Event::new().data("a\n\nb").to_string(),
             "data: a\ndata:\ndata: b\n\n"
         );
+        // Un `\r` seul est aussi une fin de ligne pour le navigateur.
+        assert_eq!(
+            Event::new().data("hi\revent: admin\rid: 9").to_string(),
+            "data: hi\ndata: event: admin\ndata: id: 9\n\n"
+        );
+        assert_eq!(Event::new().comment("a\rb").to_string(), ": a\n: b\n\n");
         assert_eq!(
             Event::new()
                 .comment("hi")

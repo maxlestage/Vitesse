@@ -14,6 +14,11 @@ fn hex_val(b: u8) -> Option<u8> {
     }
 }
 
+/// The longest delay accepted by the settings (10 years): beyond it,
+/// `Instant + Duration` could overflow. It means "never" in practice.
+pub(crate) const MAX_DELAY: std::time::Duration =
+    std::time::Duration::from_secs(10 * 365 * 24 * 3600);
+
 /// Decodes the `%XX` sequences of a URL segment (`+` signs are left as is).
 ///
 /// Allocates nothing when there is nothing to decode.

@@ -152,3 +152,43 @@ async fn websocket_over_tls() {
     let echo = ws.next().await.unwrap().unwrap();
     assert_eq!(echo.into_text().unwrap().as_str(), "salut");
 }
+
+/// Une grosse réponse lue lentement : sans `flush` côté TLS, la fin restait
+/// dans le tampon de rustls jusqu'à la fermeture de la connexion inactive.
+#[tokio::test]
+async fn large_https_responses_are_flushed() {
+    let (cert, key) = pem();
+    let mut app = App::new();
+    app.get("/big", |_| async { vec![b'x'; 8 * 1024 * 1024] });
+    app.tls(Tls::from_pem(cert.as_bytes(), key.as_bytes()).unwrap());
+    let server = app.bind("127.0.0.1:0").await.unwrap();
+    let addr = server.local_addr();
+    tokio::spawn(server.run());
+
+    let mut tls = connect(addr, &[b"http/1.1"]).await;
+    tls.write_all(b"GET /big HTTP/1.1\r\nhost: localhost\r\n\r\n")
+        .await
+        .unwrap();
+    let start = std::time::Instant::now();
+    let mut received = 0usize;
+    let mut buf = vec![0u8; 16 * 1024];
+    let mut head = Vec::new();
+    while received < 8 * 1024 * 1024 {
+        // Un client lent (environ 8 Mo/s) : les tampons du serveur restent pleins.
+        tokio::time::sleep(std::time::Duration::from_millis(2)).await;
+        let n = tokio::time::timeout(std::time::Duration::from_secs(10), tls.read(&mut buf))
+            .await
+            .expect("the end of the response arrives without waiting for a timeout")
+            .unwrap();
+        assert!(n > 0);
+        if head.len() < 4096 && !head.windows(4).any(|w| w == b"\r\n\r\n") {
+            head.extend_from_slice(&buf[..n]);
+            if let Some(end) = head.windows(4).position(|w| w == b"\r\n\r\n") {
+                received += head.len() - end - 4;
+            }
+            continue;
+        }
+        received += n;
+    }
+    assert!(start.elapsed() < std::time::Duration::from_secs(10));
+}

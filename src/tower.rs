@@ -61,7 +61,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 use std::task::{Context, Poll};
 
 use bytes::Bytes;
-use http::{HeaderValue, StatusCode, header};
+use http::StatusCode;
 
 pub use tower_layer::Layer;
 pub use tower_service::Service;
@@ -284,17 +284,7 @@ where
     }
 
     fn call(&mut self, req: http::Request<B>) -> Self::Future {
-        let (mut parts, body) = req.into_parts();
-        // HTTP/2 : l'hôte est dans l'URI.
-        let missing_host = !parts.headers.contains_key(header::HOST);
-        if let Some(host) = parts
-            .uri
-            .authority()
-            .filter(|_| missing_host)
-            .and_then(|a| HeaderValue::from_str(a.as_str()).ok())
-        {
-            parts.headers.insert(header::HOST, host);
-        }
+        let (parts, body) = req.into_parts();
         let remote = parts.extensions.get::<SocketAddr>().copied();
         let secure = parts.uri.scheme() == Some(&http::uri::Scheme::HTTPS);
         let body = ReqBody::Stream(into_body(body));

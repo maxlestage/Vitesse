@@ -170,13 +170,20 @@ pub trait SessionStore: Send + Sync + 'static {
 /// single instance whose sessions may be lost on restart.
 #[derive(Default)]
 pub struct MemoryStore {
-    sessions: Mutex<HashMap<String, (Record, Instant)>>,
+    sessions: Mutex<MemorySessions>,
+}
+
+#[derive(Default)]
+struct MemorySessions {
+    map: HashMap<String, (Record, Instant)>,
+    /// Size from which expired sessions are removed.
+    cleanup_at: usize,
 }
 
 impl fmt::Debug for MemoryStore {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("MemoryStore")
-            .field("sessions", &self.lock().len())
+            .field("sessions", &self.lock().map.len())
             .finish()
     }
 }
@@ -187,7 +194,7 @@ impl MemoryStore {
         MemoryStore::default()
     }
 
-    fn lock(&self) -> std::sync::MutexGuard<'_, HashMap<String, (Record, Instant)>> {
+    fn lock(&self) -> std::sync::MutexGuard<'_, MemorySessions> {
         self.sessions.lock().unwrap_or_else(PoisonError::into_inner)
     }
 }
@@ -197,6 +204,7 @@ impl SessionStore for MemoryStore {
         let now = Instant::now();
         let record = self
             .lock()
+            .map
             .get(id)
             .filter(|(_, expires)| *expires > now)
             .map(|(record, _)| record.clone());
@@ -206,16 +214,20 @@ impl SessionStore for MemoryStore {
     fn save(&self, id: &str, record: &Record, ttl: Duration) -> BoxFuture<Result<(), BoxError>> {
         let now = Instant::now();
         let mut sessions = self.lock();
-        // De temps en temps, on oublie les sessions expirées.
-        if sessions.len() >= 1024 && sessions.len().is_power_of_two() {
-            sessions.retain(|_, (_, expires)| *expires > now);
+        // Quand la taille a doublé depuis le dernier nettoyage, on oublie les
+        // sessions expirées : un coût amorti, pas un parcours à chaque écriture.
+        if sessions.map.len() >= sessions.cleanup_at.max(1024) {
+            sessions.map.retain(|_, (_, expires)| *expires > now);
+            sessions.cleanup_at = sessions.map.len() * 2;
         }
-        sessions.insert(id.to_owned(), (record.clone(), now + ttl));
+        sessions
+            .map
+            .insert(id.to_owned(), (record.clone(), now + ttl));
         Box::pin(std::future::ready(Ok(())))
     }
 
     fn delete(&self, id: &str) -> BoxFuture<Result<(), BoxError>> {
-        self.lock().remove(id);
+        self.lock().map.remove(id);
         Box::pin(std::future::ready(Ok(())))
     }
 }
@@ -380,7 +392,7 @@ impl Sessions {
     /// How long a session lives after its last change (1 day by default),
     /// in the store and in the browser.
     pub fn max_age(mut self, max_age: Duration) -> Self {
-        self.max_age = max_age;
+        self.max_age = max_age.min(crate::util::MAX_DELAY);
         self
     }
 

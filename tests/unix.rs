@@ -82,3 +82,29 @@ async fn serves_over_a_unix_socket() {
     assert_eq!(std::fs::read_to_string(&path).unwrap(), "not a socket");
     std::fs::remove_dir_all(&dir).unwrap();
 }
+
+#[tokio::test]
+async fn rate_limits_apply_without_a_client_address() {
+    let dir = std::env::temp_dir().join(format!("vitesse-unix-rl-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("app.sock");
+    let mut app = App::new();
+    app.middleware(middleware::rate_limit(1, Duration::from_secs(60)));
+    app.get("/", |_| async { "ok" });
+    let server = app.bind_unix(&path).await.unwrap();
+    tokio::spawn(server.run());
+    let mut statuses = Vec::new();
+    for _ in 0..2 {
+        let mut stream = UnixStream::connect(&path).await.unwrap();
+        stream
+            .write_all(b"GET / HTTP/1.1\r\nhost: x\r\nconnection: close\r\n\r\n")
+            .await
+            .unwrap();
+        let mut out = String::new();
+        stream.read_to_string(&mut out).await.unwrap();
+        statuses.push(out[9..12].to_owned());
+    }
+    // Sans adresse, les requêtes partagent un compteur au lieu d'échapper à la limite.
+    assert_eq!(statuses, ["200", "429"]);
+    let _ = std::fs::remove_dir_all(&dir);
+}

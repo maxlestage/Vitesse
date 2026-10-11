@@ -223,6 +223,10 @@ impl SessionStore for MemoryStore {
 /// The session of a request (`req.session` in Express), from
 /// [`Request::session`](crate::Request::session). Cloning it gives another
 /// handle on the same session.
+///
+/// The session is saved when the response leaves the middleware: it stays
+/// readable afterwards (in a WebSocket handler, for example), but changes
+/// made then are not saved.
 #[derive(Clone)]
 pub struct Session {
     state: Arc<Mutex<State>>,
@@ -456,15 +460,20 @@ impl Middleware for Sessions {
             req.set(session.clone());
             let mut res = next.run(req).await;
 
+            // Une copie : la session reste lisible après la réponse (dans un
+            // handler WebSocket, qui tourne après le `101`).
             let (old_id, record, changed, destroyed, regenerate) = {
                 let mut state = session.lock();
-                (
-                    state.id.take(),
-                    std::mem::take(&mut state.record),
+                let snapshot = (
+                    state.id.clone(),
+                    state.record.clone(),
                     state.changed,
                     state.destroyed,
                     state.regenerate,
-                )
+                );
+                state.changed = false;
+                state.regenerate = false;
+                snapshot
             };
             if destroyed {
                 if let Some(id) = &old_id {
@@ -491,6 +500,7 @@ impl Middleware for Sessions {
                 return res;
             }
             let id = id.unwrap_or_else(new_id);
+            session.lock().id = Some(id.clone());
             if let Err(e) = self.store.save(&id, &record, self.max_age).await {
                 return Error::internal("Internal Server Error")
                     .with_source(e)

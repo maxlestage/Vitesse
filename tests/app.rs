@@ -1592,3 +1592,43 @@ fn invalid_constraints_panic() {
     let mut app = App::new();
     app.get("/a/:id([)", |_| async { "a" });
 }
+
+#[tokio::test]
+async fn constraints_in_mount_prefixes_also_bound_router_middleware_and_fallback() {
+    let mut docs = Router::new();
+    docs.get("/:page?", |req: Request| async move {
+        format!(
+            "{} {}",
+            req.param("lang").unwrap(),
+            req.param("page").unwrap_or("index")
+        )
+    });
+    docs.middleware(
+        |req: Request, next: Next| async move { next.run(req).await.header("x-docs", "1") },
+    );
+    docs.fallback(|_| async { (404, "docs 404") });
+    let mut app = App::new();
+    app.mount("/docs/:lang(en|fr|es)", docs);
+    app.fallback(|_| async { (404, "app 404") });
+    let c = TestClient::new(app);
+
+    assert_eq!(c.get("/docs/fr").await.text(), "fr index");
+    assert_eq!(c.get("/docs/es/routing").await.text(), "es routing");
+    let r = c.get("/docs/fr/a/b").await;
+    assert_eq!(r.text(), "docs 404");
+    assert_eq!(r.header("x-docs"), Some("1"));
+    // `de` ne satisfait pas la contrainte du préfixe : ni middleware ni fallback du routeur.
+    let r = c.get("/docs/de/routing").await;
+    assert_eq!(r.text(), "app 404");
+    assert_eq!(r.header("x-docs"), None);
+}
+
+#[tokio::test]
+async fn url_generation_errors_are_not_shown_to_clients() {
+    let mut app = App::new();
+    app.get("/users/:id", |_| async { "user" }).name("user");
+    app.get("/", |req: Request| async move { req.path_for("user", &[]) });
+    let r = TestClient::new(app).get("/").await;
+    assert_eq!(r.status(), 500);
+    assert_eq!(r.text(), r#"{"error":"Internal Server Error"}"#);
+}

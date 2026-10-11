@@ -33,8 +33,12 @@ fn main() -> std::io::Result<()> {
   Events, HTTPS and HTTP/2 (`tls` and `http2` features), and HTTP/3 over
   QUIC with a single line (`http3` feature).
 - **Batteries included**: CORS, compression, request ids, Basic and Bearer
-  authentication, rate and concurrency limits, trusted proxies, and any
-  [tower](https://crates.io/crates/tower) layer (`tower` feature).
+  authentication, rate and concurrency limits, trusted proxies, signed
+  cookies and sessions (`session` feature), HTML templates (`templates`
+  feature), and any [tower](https://crates.io/crates/tower) layer (`tower`
+  feature).
+- **Expressive routes**: `/flights/:from-:to`, `/users/:id(\d+)`,
+  `/archive/:year?`, named routes and URL generation.
 - **Fast**: faster than actix-web, axum and Drogon in the benchmark below.
 - **Sturdy**: panics become `500` responses, size limits and timeouts are
   built in, and the server shuts down gracefully.
@@ -108,6 +112,8 @@ gracefully on `Ctrl+C` / `SIGTERM`. If you already run a tokio runtime, use
 | `http3` | Disabled | HTTP/3 over QUIC: `app.http3(...)` and `vitesse::http3` ([guide](docs/en/http3.md)) |
 | `multipart` | Disabled | File uploads: `req.multipart()` and `vitesse::multipart` ([guide](docs/en/requests.md)) |
 | `compress` | Disabled | `middleware::compress()` and `middleware::decompress()`: Brotli, gzip ([guide](docs/en/middleware.md#compress)) |
+| `session` | Disabled | Signed cookies and sessions: `app.cookie_secret(...)`, `middleware::session(...)` ([guide](docs/en/sessions.md)) |
+| `templates` | Disabled | HTML templates with minijinja: `app.views(...)`, `req.render(...)` ([guide](docs/en/templates.md)) |
 | `tower` | Disabled | tower layers as middleware, the app as a tower `Service` ([guide](docs/en/middleware.md)) |
 
 ```toml
@@ -303,8 +309,9 @@ and a single one of each for a whole batch of pipelined requests.
   recycled per thread.
 - **One thread per core** (Linux): each core has its own event loop and its
   own `SO_REUSEPORT` socket, and a request never changes thread.
-- **A regex-free router**: a tree of segments, with no allocation for static
-  routes.
+- **A tree router**: a tree of segments, with no allocation for static
+  routes; regular expressions only run for the parameters that declare a
+  constraint.
 - **Zero shared atomic counters per request**: the app is frozen at startup
   (`&'static`), so handlers, middleware and state are read without `Arc`.
 
@@ -312,12 +319,11 @@ Details in [Performance](docs/en/performance.md).
 
 ## Current limitations
 
-Not included (yet): WebSocket over HTTP/2 or HTTP/3, a session store (use
-[tower-sessions](docs/en/from-axum-actix.md#sessions-with-tower-sessions)
-with the `tower` feature), named routes and URL generation, regular
-expressions in routes, partial parameters within a segment
-(`/flights/:from-:to`) and template engines (use any template crate and
-return `Html(...)`). The full list is in the [FAQ](docs/en/faq.md).
+Not included, on purpose: WebSocket over HTTP/3 (no browser uses it),
+HTTP/2 server push (removed from browsers), the `Upgrade: h2c` mechanism
+(removed from the HTTP/2 standard; h2c "prior knowledge" works) and 0-RTT
+over HTTP/3 (replayable requests). tokio is the only runtime, and the API
+may change until 1.0. The full list is in the [FAQ](docs/en/faq.md).
 
 ## Running the project
 

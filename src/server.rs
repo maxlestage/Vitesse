@@ -18,8 +18,47 @@ use crate::http1::{ServerState, serve_connection};
 use crate::request::Request;
 use crate::response::Response;
 
-/// Time given to in-flight requests during a graceful shutdown.
-pub(crate) const SHUTDOWN_GRACE: Duration = Duration::from_secs(10);
+/// The engine's timeouts and limits (see [`App::keep_alive`](crate::App::keep_alive)
+/// and the following methods).
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct ServerConfig {
+    /// How long an idle connection is kept open; zero: no keep-alive.
+    pub(crate) keep_alive: Duration,
+    /// Time given to a client to send a complete request head.
+    pub(crate) header_timeout: Duration,
+    /// Time given to in-flight requests during a graceful shutdown.
+    pub(crate) shutdown_timeout: Duration,
+    /// Open connections per accept loop (per thread with `thread_per_core`).
+    pub(crate) max_connections: usize,
+}
+
+impl Default for ServerConfig {
+    fn default() -> Self {
+        ServerConfig {
+            keep_alive: Duration::from_secs(60),
+            header_timeout: Duration::from_secs(30),
+            shutdown_timeout: Duration::from_secs(10),
+            max_connections: usize::MAX,
+        }
+    }
+}
+
+impl ServerConfig {
+    /// The period of the HTTP/1.1 inactivity timer, and the number of
+    /// periods after which an idle connection, or one whose request head is
+    /// incomplete, is closed. A single timer per connection, which is not
+    /// reset by each request: the delays are respected to within one period.
+    pub(crate) fn ticks(&self) -> (Duration, u32, u32) {
+        let shortest = if self.keep_alive.is_zero() {
+            self.header_timeout
+        } else {
+            self.keep_alive.min(self.header_timeout)
+        };
+        let tick = (shortest / 2).max(Duration::from_millis(10));
+        let count = |d: Duration| (d.as_nanos().div_ceil(tick.as_nanos()) as u32).max(1);
+        (tick, count(self.keep_alive), count(self.header_timeout))
+    }
+}
 
 /// An address to listen on: `3000`, `"127.0.0.1:8080"`, `([0, 0, 0, 0], 80)`…
 ///
@@ -197,6 +236,14 @@ pub(crate) async fn serve(
     let mut shutdown = pin!(shutdown);
 
     loop {
+        if connections.len() >= app.config.max_connections {
+            // Plein : on attend qu'une connexion se termine avant d'en accepter une autre.
+            tokio::select! {
+                biased;
+                _ = &mut shutdown => break,
+                _ = connections.join_next() => continue,
+            }
+        }
         let (stream, peer) = tokio::select! {
             biased;
             _ = &mut shutdown => break,
@@ -233,7 +280,7 @@ pub(crate) async fn serve(
     // se terminer, puis on ferme les connexions inactives.
     drop(listener);
     state.stop();
-    let deadline = tokio::time::Instant::now() + SHUTDOWN_GRACE;
+    let deadline = tokio::time::Instant::now() + app.config.shutdown_timeout;
     while state.busy() > 0 && tokio::time::Instant::now() < deadline {
         tokio::time::sleep(Duration::from_millis(5)).await;
     }

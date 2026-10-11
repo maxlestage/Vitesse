@@ -44,8 +44,6 @@ const CONNECTION_WINDOW: u32 = 1024 * 1024;
 const MAX_HEADER_LIST: u32 = 64 * 1024;
 /// Time given to the client to send its preface and settings.
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
-/// A connection without any request in flight is closed after this delay.
-const IDLE_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// Serves an HTTP/2 connection until it is closed.
 pub(crate) async fn serve<IO: Io>(
@@ -68,7 +66,12 @@ pub(crate) async fn serve<IO: Io>(
 
     let mut streams = JoinSet::new();
     let mut stopped = pin!(state.stopped());
-    let mut idle = pin!(tokio::time::sleep(IDLE_TIMEOUT));
+    // Une connexion sans requête en cours est fermée après le délai de keep-alive.
+    let idle_timeout = match app.config.keep_alive {
+        d if d.is_zero() => app.config.header_timeout,
+        d => d,
+    };
+    let mut idle = pin!(tokio::time::sleep(idle_timeout));
     // Pendant l'arrêt propre, la connexion compte comme occupée jusqu'à ce
     // que ses dernières réponses soient parties.
     let mut stopping: Option<Busy> = None;
@@ -87,14 +90,14 @@ pub(crate) async fn serve<IO: Io>(
                     stopping = Some(Busy::new(state));
                     conn.graceful_shutdown();
                 } else {
-                    idle.as_mut().reset(Instant::now() + IDLE_TIMEOUT);
+                    idle.as_mut().reset(Instant::now() + idle_timeout);
                 }
                 continue;
             }
         };
         match next {
             Some(Ok((req, respond))) => {
-                idle.as_mut().reset(Instant::now() + IDLE_TIMEOUT);
+                idle.as_mut().reset(Instant::now() + idle_timeout);
                 streams.spawn(respond_to(req, respond, peer, secure, app, state));
                 while streams.try_join_next().is_some() {}
             }

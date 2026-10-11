@@ -53,12 +53,6 @@ const INLINE_BODY: usize = 16 * 1024;
 /// Beyond this size, the write buffer is flushed even in the middle of a
 /// batch.
 const WRITE_HIGH_WATER: usize = 64 * 1024;
-/// Period of the inactivity timer.
-const TICK: Duration = Duration::from_secs(15);
-/// The connection is closed after ~60 s without a request…
-const IDLE_TICKS: u32 = 4;
-/// … or ~30 s without a complete head.
-const HEAD_TICKS: u32 = 2;
 
 /// State shared between the accept loop and its connections.
 pub(crate) struct ServerState {
@@ -239,7 +233,10 @@ enum Event {
 
 impl<IO: Io> Conn<IO> {
     async fn run(&mut self) -> io::Result<()> {
-        let mut tick = pin!(tokio::time::sleep(TICK));
+        // Par défaut : une période de 15 s, fermeture après ~60 s sans requête
+        // ou ~30 s sans tête complète.
+        let (period, idle_ticks, head_ticks) = self.app.config.ticks();
+        let mut tick = pin!(tokio::time::sleep(period));
         let mut quiet_ticks = 0;
         loop {
             date::refresh();
@@ -320,9 +317,9 @@ impl<IO: Io> Conn<IO> {
                 Event::Tick => {
                     quiet_ticks += 1;
                     let limit = if self.rbuf.is_empty() {
-                        IDLE_TICKS
+                        idle_ticks
                     } else {
-                        HEAD_TICKS
+                        head_ticks
                     };
                     if quiet_ticks >= limit || self.state.shutdown.load(Relaxed) {
                         if !self.rbuf.is_empty() {
@@ -330,7 +327,7 @@ impl<IO: Io> Conn<IO> {
                         }
                         return Ok(());
                     }
-                    tick.as_mut().reset(Instant::now() + TICK);
+                    tick.as_mut().reset(Instant::now() + period);
                 }
             }
         }
@@ -543,7 +540,9 @@ impl<IO: Io> Conn<IO> {
         let ctype = res.ctype;
         let headers = res.headers.take();
         let body = std::mem::take(&mut res.body);
-        let mut keep_alive = job.keep_alive && !self.state.shutdown.load(Relaxed);
+        let mut keep_alive = job.keep_alive
+            && !self.state.shutdown.load(Relaxed)
+            && !self.app.config.keep_alive.is_zero();
         let buf = &mut self.wbuf;
 
         write_status(buf, status);

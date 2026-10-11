@@ -7,7 +7,7 @@
 [![CI](https://github.com/maxlestage/Vitesse/actions/workflows/ci.yml/badge.svg)](https://github.com/maxlestage/Vitesse/actions/workflows/ci.yml)
 [![crates.io](https://img.shields.io/crates/v/vitesse.svg)](https://crates.io/crates/vitesse)
 [![docs.rs](https://img.shields.io/docsrs/vitesse)](https://docs.rs/vitesse)
-[![Licencia: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](#licencia)
+[![Licencia: propietaria](https://img.shields.io/badge/license-proprietary-2a2a2e.svg)](#licencia)
 
 Vitesse es un framework web minimalista que lleva la API de Express
 (`app.get`, `req.params`, `res.status(201).json(...)`, `app.use`, `Router`,
@@ -372,10 +372,18 @@ indícalo en tu pull request. Los cambios importantes se anotan en
 
 ## Licencia
 
-Con licencia [Apache 2.0](LICENSE-APACHE) o [MIT](LICENSE-MIT), a tu
-elección.
+Vitesse es software propietario: © 2026 Maxime Nathan Lestage, todos los
+derechos reservados. No es software de código abierto. El código fuente se
+publica en crates.io y GitHub para que pueda leerse, auditarse y compilarse,
+y puedes usarlo libremente como dependencia de tus propios programas, también
+comerciales. Modificarlo o redistribuir su código fuente requiere el permiso
+escrito del autor. Condiciones completas: [LICENSE](LICENSE).
 
-Salvo que indiques expresamente lo contrario, cualquier contribución que
-envíes intencionadamente para su inclusión en este proyecto, tal como se
-define en la licencia Apache-2.0, quedará bajo esta doble licencia, sin
-términos ni condiciones adicionales.
+Las contribuciones (código, documentación, ideas) son bienvenidas y pasan a
+formar parte del proyecto en los mismos términos: al enviar una, cedes sus
+derechos al autor, como indica la licencia.
+
+## Créditos
+
+Diseñado y desarrollado por [Maxime Nathan Lestage](https://github.com/maxlestage),
+dentro de una misma familia de proyectos Rust: [Active](https://maxlestage.github.io/Active/), [Vitesse](https://maxlestage.github.io/Vitesse/), [Securite](https://maxlestage.github.io/Securite/), [Memoire](https://maxlestage.github.io/Memoire/), [Paquets](https://maxlestage.github.io/Paquets/) y [FerroSwift](https://maxlestage.github.io/FerroSwift/).

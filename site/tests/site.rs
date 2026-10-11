@@ -151,6 +151,51 @@ async fn the_home_page_has_every_section_and_island() {
 }
 
 #[tokio::test]
+async fn every_page_ends_with_the_signature_footer() {
+    for (lang, rights, here) in [
+        ("en", "All rights reserved", "You are here"),
+        ("fr", "Tous droits réservés", "Vous êtes ici"),
+        ("es", "Todos los derechos reservados", "Estás aquí"),
+    ] {
+        let html = client().get(&format!("/{lang}/docs/")).await.text();
+        let footer = html.split("<footer").nth(1).expect("a footer");
+        // La signature de l'auteur, la ligne légale et la licence.
+        assert!(footer.contains(r#"class="footer__name""#), "{lang}");
+        assert!(footer.contains("Maxime Nathan Lestage"), "{lang}");
+        assert!(footer.contains(rights), "{lang}");
+        assert!(
+            footer.contains(r#"href="https://github.com/maxlestage/Vitesse/blob/master/LICENSE""#),
+            "{lang}"
+        );
+        assert!(!html.contains("MIT"), "{lang}");
+        // La commande d'installation et la version de la crate.
+        assert!(footer.contains("cargo add vitesse"), "{lang}");
+        assert!(footer.contains(&format!("v{}", vitesse::VERSION)), "{lang}");
+        // Les six projets de l'écosystème, celui-ci marqué comme la page courante.
+        for project in [
+            "Active",
+            "Vitesse",
+            "Securite",
+            "Memoire",
+            "Paquets",
+            "FerroSwift",
+        ] {
+            assert!(
+                footer.contains(&format!(
+                    r#"href="https://maxlestage.github.io/{project}/""#
+                )),
+                "{lang} {project}"
+            );
+        }
+        assert!(footer.contains(r#"aria-current="page""#), "{lang}");
+        assert!(footer.contains(here), "{lang}");
+    }
+    // L'auteur est aussi nommé dans les métadonnées.
+    let html = client().get("/en/").await.text();
+    assert!(html.contains(r#"<meta name="author" content="Maxime Nathan Lestage"/>"#));
+}
+
+#[tokio::test]
 async fn doc_pages_have_their_navigation() {
     let html = client().get("/es/docs/routing/").await.text();
     assert!(html.contains("<h1 class=\"doc-title\">"));

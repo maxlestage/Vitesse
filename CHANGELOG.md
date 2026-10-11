@@ -8,7 +8,19 @@ project adheres to [Semantic Versioning](https://semver.org/).
 
 First public release.
 
+### Changed
+
+- License: Vitesse is proprietary software by Maxime Nathan Lestage, all
+  rights reserved (see `LICENSE`); it is free to use as a dependency,
+  commercially too, but not to modify or redistribute. The MIT/Apache-2.0
+  dual license is withdrawn.
+- Credits: Maxime Nathan Lestage is named as the author in the crate
+  metadata, the README and the website's footer, which now links the six
+  projects of the ecosystem.
+
 ### Added
+
+- `vitesse::VERSION`, the version of the crate.
 
 - Express.js-style API: `App`, `app.get/post/put/patch/delete/…`, path
   parameters and wildcards, `Router` and `app.mount`, middleware with

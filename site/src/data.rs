@@ -3,6 +3,25 @@
 //! `labels`).
 
 pub const GITHUB: &str = "https://github.com/maxlestage/Vitesse";
+pub const CRATES: &str = "https://crates.io/crates/vitesse";
+
+/// La licence, à lire en ligne : propriétaire, tous droits réservés.
+pub const LICENSE: &str = "https://github.com/maxlestage/Vitesse/blob/master/LICENSE";
+
+/// Qui a conçu et développé Vitesse et ses projets frères.
+pub const AUTHOR: &str = "Maxime Nathan Lestage";
+pub const AUTHOR_URL: &str = "https://github.com/maxlestage";
+
+/// Les projets frères de Vitesse, du même auteur : (nom, site). Le pied de page les
+/// présente dans cet ordre ; `i18n::Texts::footer_projects` décrit chacun dans le même ordre.
+pub const ECOSYSTEM: [(&str, &str); 6] = [
+    ("Active", "https://maxlestage.github.io/Active/"),
+    ("Vitesse", "https://maxlestage.github.io/Vitesse/"),
+    ("Securite", "https://maxlestage.github.io/Securite/"),
+    ("Memoire", "https://maxlestage.github.io/Memoire/"),
+    ("Paquets", "https://maxlestage.github.io/Paquets/"),
+    ("FerroSwift", "https://maxlestage.github.io/FerroSwift/"),
+];
 
 /// La commande d'installation du héros.
 pub const INSTALL: &str = "cargo add vitesse";

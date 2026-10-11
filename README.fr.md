@@ -11,7 +11,8 @@
 Vitesse est un framework web minimaliste qui reprend l'API d'Express
 (`app.get`, `req.params`, `res.status(201).json(...)`, `app.use`, `Router`,
 `express.static`…) en Rust natif, avec son propre moteur HTTP/1.1 sur
-[tokio](https://tokio.rs), WebSocket intégré et HTTP/3 sur QUIC en option.
+[tokio](https://tokio.rs), WebSocket intégré, et HTTPS, HTTP/2 et HTTP/3 sur
+QUIC en option.
 
 ```rust
 use vitesse::prelude::*;
@@ -26,10 +27,15 @@ fn main() -> std::io::Result<()> {
 ```
 
 - **Familier** : routes et paramètres, middlewares avec `next`, routeurs,
-  fichiers statiques, cookies, JSON et formulaires, et un client de test en
-  mémoire.
-- **Temps réel et protocoles modernes** : WebSocket avec `app.ws`, et HTTP/3
+  fichiers statiques, cookies, JSON, formulaires et envois de fichiers, et un
+  client de test en mémoire.
+- **Temps réel et protocoles modernes** : WebSocket avec `app.ws`,
+  Server-Sent Events, HTTPS et HTTP/2 (features `tls` et `http2`), et HTTP/3
   sur QUIC en une ligne (feature `http3`).
+- **Batteries incluses** : CORS, compression, identifiants de requête,
+  authentification Basic et Bearer, limites de débit et de concurrence,
+  proxies de confiance, et n'importe quelle couche
+  [tower](https://crates.io/crates/tower) (feature `tower`).
 - **Rapide** : plus rapide qu'actix-web, axum et Drogon dans le benchmark
   ci-dessous.
 - **Solide** : les paniques deviennent des réponses `500`, les limites de
@@ -100,12 +106,16 @@ utilisez plutôt `app.listen(port).await`.
 | Feature | Par défaut | Apporte |
 |---|---|---|
 | `ws` | Activée | WebSocket : `app.ws(...)` et `vitesse::ws` ([guide](docs/fr/websocket.md)) |
+| `tls` | Désactivée | HTTPS : `app.tls(...)` et `vitesse::tls`, avec rustls ([guide](docs/fr/https.md)) |
+| `http2` | Désactivée | HTTP/2 : via ALPN avec `tls`, et h2c en clair ([guide](docs/fr/https.md)) |
 | `http3` | Désactivée | HTTP/3 sur QUIC : `app.http3(...)` et `vitesse::http3` ([guide](docs/fr/http3.md)) |
-| `compress` | Désactivée | `middleware::compress()` : réponses en Brotli ou gzip ([guide](docs/fr/middleware.md#compress)) |
+| `multipart` | Désactivée | Envois de fichiers : `req.multipart()` et `vitesse::multipart` ([guide](docs/fr/requests.md)) |
+| `compress` | Désactivée | `middleware::compress()` et `middleware::decompress()` : Brotli, gzip ([guide](docs/fr/middleware.md#compress)) |
+| `tower` | Désactivée | Les couches tower comme middlewares, l'application comme `Service` tower ([guide](docs/fr/middleware.md)) |
 
 ```toml
 [dependencies]
-vitesse = { git = "https://github.com/maxlestage/Vitesse", features = ["http3"] }
+vitesse = { git = "https://github.com/maxlestage/Vitesse", features = ["tls", "http2"] }
 ```
 
 ## Tour d'horizon
@@ -201,6 +211,39 @@ app.run(443) // HTTP/1.1 sur TCP 443, HTTP/3 sur UDP 443
 Certificats, `Alt-Svc` et déploiement derrière Caddy ou Nginx :
 [HTTP/3 et QUIC](docs/fr/http3.md).
 
+### HTTPS et HTTP/2
+
+```rust
+use vitesse::tls::Tls;
+
+// Avec les features `tls` et `http2` : TLS avec rustls, HTTP/2 pour les navigateurs.
+app.tls(Tls::from_pem_files("fullchain.pem", "privkey.pem")?);
+app.run(443)
+```
+
+Sans TLS, la feature `http2` répond aussi aux clients qui parlent HTTP/2 en
+clair (h2c). Voir [HTTPS et HTTP/2](docs/fr/https.md).
+
+### Server-Sent Events
+
+```rust
+use vitesse::sse::Event;
+
+app.get("/clock", |_| async {
+    let (tx, events) = sse::channel(16);
+    tokio::spawn(async move {
+        for tick in 0.. {
+            // Échoue dès que le navigateur s'est déconnecté.
+            if tx.send(Event::new().data(tick.to_string())).await.is_err() {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        }
+    });
+    events
+});
+```
+
 ## Documentation
 
 - **Site** : https://maxlestage.github.io/Vitesse/fr/docs/
@@ -245,6 +288,9 @@ aussi les déploiements automatiques avec GitHub Actions :
 | `app.listen(3000)` | `app.run(3000)` |
 
 La table complète se trouve dans [Venir d'Express](docs/fr/from-express.md).
+Vous venez d'un autre framework Rust ? [Venir d'axum ou
+d'actix-web](docs/fr/from-axum-actix.md) fait correspondre les
+fonctionnalités des deux, extracteur par extracteur et couche par couche.
 
 ## Pourquoi c'est rapide
 
@@ -272,12 +318,14 @@ Les détails sont dans [Performances](docs/fr/performance.md).
 
 ## Limites actuelles
 
-Vitesse fait volontairement peu de choses, comme Express. Ne sont pas
-(encore) inclus : HTTP/2 et TLS sur TCP (à placer derrière un reverse proxy
-comme Nginx ou Caddy, comme on le fait souvent avec Express : voir
-[Mise en production](docs/fr/production.md) ; HTTP/3, dont le TLS est
-intégré, est pris en charge), WebSocket sur HTTP/3, compression, moteurs de
-templates, et paramètres partiels dans un segment (`/vols/:de-:vers`).
+Ne sont pas (encore) inclus : WebSocket sur HTTP/2 ou HTTP/3, un stockage de
+sessions (utilisez
+[tower-sessions](docs/fr/from-axum-actix.md#sessions-avec-tower-sessions)
+avec la feature `tower`), les routes nommées et la génération d'URL, les
+expressions régulières dans les routes, les paramètres partiels dans un
+segment (`/vols/:de-:vers`) et les moteurs de templates (utilisez n'importe
+quel crate de templates et renvoyez `Html(...)`). La liste complète se trouve
+dans la [FAQ](docs/fr/faq.md).
 
 ## Lancer le projet
 
@@ -287,6 +335,8 @@ cargo run --release --example rest_api   # API CRUD complète
 cargo run --release --example demo       # l'application déployée sur Heroku (lit $PORT)
 cargo run --release --example chat       # salon de discussion WebSocket (websocat ws://localhost:3000/chat/ada)
 cargo run --release --example http3 --features http3   # HTTP/1.1 + HTTP/3 sur le port 4433, certificat auto-signé
+cargo run --release --example https --features tls,http2   # HTTPS + HTTP/2 sur le port 3443, certificat auto-signé
+cargo run --release --example live --features multipart    # Server-Sent Events et envois de fichiers
 cargo test                               # tests unitaires, d'intégration et doctests
 cargo run --release --manifest-path bench/runner/Cargo.toml   # benchmark (Linux, wrk, et Drogon si installé)
 docker build -t vitesse-demo . && docker run --rm -p 8080:8080 vitesse-demo

@@ -241,75 +241,205 @@ pub(crate) fn param_names(segments: &[Segment<'_>]) -> Box<[Box<str>]> {
     names.into_boxed_slice()
 }
 
-/// Builds the path of a pattern from the values of its parameters, in
-/// order (see [`Request::path_for`](crate::Request::path_for)).
-pub(crate) fn build_path(pattern: &str, values: &[&dyn fmt::Display]) -> Result<String, String> {
-    let segments = parse_pattern(pattern)?;
-    let mut values = values.iter().map(|v| v.to_string());
-    let mut out = String::new();
-    let check = |name: &str, constraint: Option<&str>, value: &str| match constraint {
-        Some(c) if !compile(c).is_ok_and(|re| re.is_match(value)) => Err(format!(
-            "'{value}' does not satisfy the constraint of ':{name}({c})'"
-        )),
-        _ => Ok(()),
-    };
-    for segment in &segments {
-        match segment {
-            Segment::Static(s) => {
-                out.push('/');
-                out.push_str(s);
+/// The path of a named route, prepared at startup: its literal parts and
+/// its parameters, with their constraints compiled (see
+/// [`Request::path_for`](crate::Request::path_for)).
+pub(crate) struct UrlTemplate {
+    segments: Vec<UrlSegment>,
+}
+
+enum UrlSegment {
+    Static(Box<str>),
+    Param {
+        name: Box<str>,
+        constraint: Option<Regex>,
+        optional: bool,
+    },
+    Composite(Vec<UrlPart>),
+    Wildcard,
+}
+
+enum UrlPart {
+    Lit(Box<str>),
+    Param {
+        name: Box<str>,
+        constraint: Option<Regex>,
+    },
+}
+
+fn compiled(constraint: Option<&str>) -> Option<Regex> {
+    constraint.map(|c| compile(c).expect("constraints are checked by parse_pattern"))
+}
+
+impl UrlTemplate {
+    pub(crate) fn new(pattern: &str) -> Result<UrlTemplate, String> {
+        let segments = parse_pattern(pattern)?
+            .into_iter()
+            .map(|segment| match segment {
+                Segment::Static(s) => UrlSegment::Static(s.into()),
+                Segment::Param {
+                    name,
+                    constraint,
+                    optional,
+                } => UrlSegment::Param {
+                    name: name.into(),
+                    constraint: compiled(constraint),
+                    optional,
+                },
+                Segment::Pattern(parts) => UrlSegment::Composite(
+                    parts
+                        .into_iter()
+                        .map(|part| match part {
+                            Part::Lit(lit) => UrlPart::Lit(lit.into()),
+                            Part::Param { name, constraint } => UrlPart::Param {
+                                name: name.into(),
+                                constraint: compiled(constraint),
+                            },
+                        })
+                        .collect(),
+                ),
+                Segment::Wildcard(_) => UrlSegment::Wildcard,
+            })
+            .collect();
+        Ok(UrlTemplate { segments })
+    }
+
+    /// The path, with the values of the parameters in order.
+    pub(crate) fn build(&self, values: &[&dyn fmt::Display]) -> Result<String, String> {
+        let mut values = values.iter().map(|v| v.to_string());
+        let mut out = String::new();
+        let check = |name: &str, constraint: &Option<Regex>, value: &str| {
+            if value.is_empty() {
+                return Err(format!("':{name}' cannot be empty"));
             }
-            Segment::Param {
-                name,
-                constraint,
-                optional,
-            } => {
-                let Some(value) = values.next() else {
-                    if *optional {
-                        break;
-                    }
-                    return Err(format!("missing a value for ':{name}'"));
-                };
-                check(name, *constraint, &value)?;
-                out.push('/');
-                encode_into(&mut out, &value, false);
+            match constraint {
+                Some(re) if !re.is_match(value) => Err(format!(
+                    "'{value}' does not satisfy the constraint of ':{name}'"
+                )),
+                _ => Ok(()),
             }
-            Segment::Pattern(parts) => {
-                out.push('/');
-                for part in parts {
-                    match part {
-                        Part::Lit(lit) => out.push_str(lit),
-                        Part::Param { name, constraint } => {
-                            let value = values
-                                .next()
-                                .ok_or_else(|| format!("missing a value for ':{name}'"))?;
-                            if value.is_empty() {
-                                return Err(format!("':{name}' cannot be empty"));
+        };
+        for segment in &self.segments {
+            match segment {
+                UrlSegment::Static(s) => {
+                    out.push('/');
+                    out.push_str(s);
+                }
+                UrlSegment::Param {
+                    name,
+                    constraint,
+                    optional,
+                } => {
+                    let Some(value) = values.next() else {
+                        if *optional {
+                            break;
+                        }
+                        return Err(format!("missing a value for ':{name}'"));
+                    };
+                    check(name, constraint, &value)?;
+                    out.push('/');
+                    encode_into(&mut out, &value, false);
+                }
+                UrlSegment::Composite(parts) => {
+                    out.push('/');
+                    for part in parts {
+                        match part {
+                            UrlPart::Lit(lit) => out.push_str(lit),
+                            UrlPart::Param { name, constraint } => {
+                                let value = values
+                                    .next()
+                                    .ok_or_else(|| format!("missing a value for ':{name}'"))?;
+                                check(name, constraint, &value)?;
+                                encode_into(&mut out, &value, false);
                             }
-                            check(name, *constraint, &value)?;
-                            encode_into(&mut out, &value, false);
+                        }
+                    }
+                }
+                UrlSegment::Wildcard => {
+                    if let Some(value) = values.next() {
+                        let value = value.trim_start_matches('/');
+                        if !value.is_empty() {
+                            out.push('/');
+                            encode_into(&mut out, value, true);
                         }
                     }
                 }
             }
-            Segment::Wildcard(_) => {
-                if let Some(value) = values.next() {
-                    let value = value.trim_start_matches('/');
-                    if !value.is_empty() {
-                        out.push('/');
-                        encode_into(&mut out, value, true);
-                    }
-                }
+        }
+        if values.next().is_some() {
+            return Err("too many values".into());
+        }
+        if out.is_empty() {
+            out.push('/');
+        }
+        Ok(out)
+    }
+}
+
+/// Whether the mount prefix `parent` covers the mount prefix `child`: every
+/// path under `child` is also under `parent`. A segment is covered by the
+/// same text, by a parameter without constraint, or, for a fixed segment,
+/// by a constrained or composite segment that matches it.
+pub(crate) fn covers(parent: &str, child: &str) -> bool {
+    let (Ok(parents), Ok(children)) = (parse_pattern(parent), parse_pattern(child)) else {
+        return false;
+    };
+    let mut children = children.iter();
+    for expected in &parents {
+        let Some(segment) = children.next() else {
+            // `child` est plus court : il n'est couvert que si le reste est optionnel.
+            return matches!(expected, Segment::Wildcard(_)) || is_optional(expected);
+        };
+        let covered = match (expected, segment) {
+            (Segment::Wildcard(_), _) => return true,
+            (
+                Segment::Param {
+                    constraint: None, ..
+                },
+                _,
+            ) => true,
+            (
+                Segment::Param {
+                    name, constraint, ..
+                },
+                Segment::Static(text),
+            ) => Matcher::new(&[Part::Param {
+                name,
+                constraint: *constraint,
+            }])
+            .matches(text, 0, &mut Vec::new(), false),
+            (Segment::Pattern(parts), Segment::Static(text)) => {
+                Matcher::new(parts).matches(text, 0, &mut Vec::new(), false)
             }
+            (a, b) => same_segment(a, b),
+        };
+        if !covered {
+            return false;
         }
     }
-    if values.next().is_some() {
-        return Err("too many values".into());
+    true
+}
+
+/// The same segment, whatever the names of its parameters.
+fn same_segment(a: &Segment<'_>, b: &Segment<'_>) -> bool {
+    match (a, b) {
+        (Segment::Static(a), Segment::Static(b)) => a == b,
+        (
+            Segment::Param {
+                constraint: a,
+                optional: oa,
+                ..
+            },
+            Segment::Param {
+                constraint: b,
+                optional: ob,
+                ..
+            },
+        ) => a == b && oa == ob,
+        (Segment::Pattern(a), Segment::Pattern(b)) => key_of(a) == key_of(b),
+        (Segment::Wildcard(_), Segment::Wildcard(_)) => true,
+        _ => false,
     }
-    if out.is_empty() {
-        out.push('/');
-    }
-    Ok(out)
 }
 
 /// Percent-encodes a parameter value for a path (keeping `/` for a
@@ -346,102 +476,107 @@ struct Node {
     value: Option<usize>,
 }
 
-/// Matches a constrained parameter or a composite segment.
+/// Matches a constrained parameter or a composite segment, with a single
+/// anchored regular expression: regex-lite runs in linear time, whatever
+/// the path (no catastrophic backtracking).
 struct Matcher {
-    parts: Box<[Piece]>,
+    /// The structure of the segment, to merge identical ones (the names of
+    /// the parameters don't matter).
+    key: String,
+    sensitive: Regex,
+    /// The same, with the literal parts compared regardless of ASCII case.
+    insensitive: Regex,
+    /// The capture groups of the parameters, in order.
+    groups: Box<[usize]>,
 }
 
-enum Piece {
-    Lit(Box<str>),
-    Param(Option<Regex>),
+/// The structure of a segment: its literals and constraints.
+fn key_of(parts: &[Part<'_>]) -> String {
+    let mut key = String::new();
+    for part in parts {
+        match part {
+            Part::Lit(lit) => {
+                key.push('L');
+                key.push_str(lit);
+            }
+            Part::Param { constraint, .. } => {
+                key.push('P');
+                key.push_str(constraint.unwrap_or(""));
+            }
+        }
+        key.push('\0');
+    }
+    key
+}
+
+/// `^text(?P<vitesse_p0>(?:constraint))text(?P<vitesse_p1>.+?)$`: a parameter without
+/// constraint takes as few characters as possible (at least one), like
+/// Express: `:name.:ext` splits `archive.tar.gz` into `archive` and `tar.gz`.
+fn segment_regex(parts: &[Part<'_>], case_insensitive: bool) -> Regex {
+    let mut re = String::from("^");
+    let mut n = 0;
+    for part in parts {
+        match part {
+            Part::Lit(lit) if case_insensitive => {
+                re.push_str("(?i:");
+                re.push_str(&regex_lite::escape(lit));
+                re.push(')');
+            }
+            Part::Lit(lit) => re.push_str(&regex_lite::escape(lit)),
+            Part::Param { constraint, .. } => {
+                match constraint {
+                    Some(c) => re.push_str(&format!("(?P<vitesse_p{n}>(?:{c}))")),
+                    None => re.push_str(&format!("(?P<vitesse_p{n}>.+?)")),
+                }
+                n += 1;
+            }
+        }
+    }
+    re.push('$');
+    Regex::new(&re).expect("constraints are checked by parse_pattern")
 }
 
 impl Matcher {
     fn new(parts: &[Part<'_>]) -> Matcher {
-        let parts = parts
-            .iter()
-            .map(|p| match p {
-                Part::Lit(lit) => Piece::Lit(Box::from(*lit)),
-                Part::Param { constraint, .. } => Piece::Param(
-                    constraint
-                        .map(|c| compile(c).expect("constraints are checked by parse_pattern")),
-                ),
-            })
+        let sensitive = segment_regex(parts, false);
+        let groups = sensitive
+            .capture_names()
+            .enumerate()
+            .filter(|(_, name)| name.is_some_and(|n| n.starts_with("vitesse_p")))
+            .map(|(i, _)| i)
             .collect();
-        Matcher { parts }
+        Matcher {
+            key: key_of(parts),
+            insensitive: segment_regex(parts, true),
+            sensitive,
+            groups,
+        }
     }
 
-    /// Same structure (the names of the parameters don't matter).
     fn same(&self, parts: &[Part<'_>]) -> bool {
-        self.parts.len() == parts.len()
-            && self
-                .parts
-                .iter()
-                .zip(parts)
-                .all(|(piece, part)| match (piece, part) {
-                    (Piece::Lit(a), Part::Lit(b)) => **a == **b,
-                    (Piece::Param(re), Part::Param { constraint, .. }) => {
-                        re.as_ref().map(|r| r.as_str().to_owned())
-                            == constraint.map(|c| format!("^(?:{c})$"))
-                    }
-                    _ => false,
-                })
+        self.key == key_of(parts)
     }
 
     fn matches(&self, segment: &str, offset: usize, captures: &mut Captures, ci: bool) -> bool {
-        match_pieces(&self.parts, segment, 0, offset, captures, ci)
-    }
-}
-
-/// Matches `pieces` against `segment[pos..]`. A parameter takes as few
-/// characters as possible (at least one), like Express: `:name.:ext`
-/// splits `archive.tar.gz` into `archive` and `tar.gz`.
-fn match_pieces(
-    pieces: &[Piece],
-    segment: &str,
-    pos: usize,
-    offset: usize,
-    captures: &mut Captures,
-    ci: bool,
-) -> bool {
-    let Some((first, rest)) = pieces.split_first() else {
-        return pos == segment.len();
-    };
-    match first {
-        Piece::Lit(lit) => {
-            let tail = &segment.as_bytes()[pos..];
-            let found = tail.len() >= lit.len()
-                && if ci {
-                    tail[..lit.len()].eq_ignore_ascii_case(lit.as_bytes())
-                } else {
-                    tail[..lit.len()] == *lit.as_bytes()
-                };
-            found && match_pieces(rest, segment, pos + lit.len(), offset, captures, ci)
-        }
-        Piece::Param(constraint) => {
-            let start = if rest.is_empty() {
-                segment.len()
-            } else {
-                pos + 1
-            };
-            for end in (start..=segment.len()).filter(|&e| segment.is_char_boundary(e)) {
-                if end == pos {
-                    break;
+        let re = if ci {
+            &self.insensitive
+        } else {
+            &self.sensitive
+        };
+        let Some(found) = re.captures(segment) else {
+            return false;
+        };
+        let mark = captures.len();
+        for &group in &*self.groups {
+            match found.get(group) {
+                Some(m) if !m.is_empty() => captures.push((offset + m.start(), offset + m.end())),
+                _ => {
+                    captures.truncate(mark);
+                    return false;
                 }
-                if constraint
-                    .as_ref()
-                    .is_some_and(|re| !re.is_match(&segment[pos..end]))
-                {
-                    continue;
-                }
-                captures.push((offset + pos, offset + end));
-                if match_pieces(rest, segment, end, offset, captures, ci) {
-                    return true;
-                }
-                captures.pop();
             }
-            false
         }
+        true
     }
 }
 
@@ -572,14 +707,18 @@ impl Node {
             None => (rest, None, offset + rest.len()),
         };
 
-        let child = if ci {
-            self.statics
+        if ci {
+            // Sans la casse, plusieurs enfants peuvent convenir (`/Users`, `/users`).
+            let matching = self
+                .statics
                 .iter()
-                .find(|(k, _)| k.eq_ignore_ascii_case(seg))
-        } else {
-            self.statics.iter().find(|(k, _)| **k == *seg)
-        };
-        if let Some((_, child)) = child {
+                .filter(|(k, _)| k.eq_ignore_ascii_case(seg));
+            for (_, child) in matching {
+                if let Some(v) = child.find(next, next_offset, captures, ci) {
+                    return Some(v);
+                }
+            }
+        } else if let Some((_, child)) = self.statics.iter().find(|(k, _)| **k == *seg) {
             if let Some(v) = child.find(next, next_offset, captures, ci) {
                 return Some(v);
             }
@@ -828,7 +967,7 @@ mod tests {
 
     #[test]
     fn paths_from_patterns() {
-        let build = |p: &str, v: &[&dyn fmt::Display]| build_path(p, v);
+        let build = |p: &str, v: &[&dyn fmt::Display]| UrlTemplate::new(p).unwrap().build(v);
         assert_eq!(build("/", &[]).unwrap(), "/");
         assert_eq!(build("/users/:id", &[&42]).unwrap(), "/users/42");
         assert_eq!(
@@ -853,6 +992,50 @@ mod tests {
         assert!(build("/users/:id(\\d+)", &[&"ada"]).is_err());
         assert!(build("/users/:id", &[]).is_err());
         assert!(build("/users/:id", &[&1, &2]).is_err());
+        assert!(build("/users/:id", &[&""]).is_err());
+    }
+
+    #[test]
+    fn matching_takes_linear_time() {
+        let t = tree(&[
+            "/posts/:id(\\d+)-:slug",
+            "/a/:b-:c-:d-:e",
+            "/files/:name.:ext",
+        ]);
+        let start = std::time::Instant::now();
+        assert_eq!(lookup(&t, &format!("/posts/{}", "1".repeat(20_000))), None);
+        assert_eq!(lookup(&t, &format!("/files/{}", "a".repeat(20_000))), None);
+        let dashes = format!("/a/{}", "-".repeat(20_000));
+        assert_eq!(lookup(&t, &dashes).unwrap().1.len(), 4);
+        assert!(
+            start.elapsed() < std::time::Duration::from_millis(500),
+            "{:?}",
+            start.elapsed()
+        );
+    }
+
+    #[test]
+    fn case_insensitive_branches() {
+        let mut t = tree(&["/Users/new", "/users/:id"]);
+        t.set_case_insensitive(true);
+        assert_eq!(lookup(&t, "/users/new"), Some(("/Users/new", vec![])));
+        assert_eq!(lookup(&t, "/users/42"), Some(("/users/:id", vec!["42"])));
+    }
+
+    #[test]
+    fn prefixes_covering_prefixes() {
+        assert!(covers("/", "/api"));
+        assert!(covers("/api", "/api/admin"));
+        assert!(covers("/api/:v", "/api/admin"));
+        assert!(covers("/api/:v", "/api/:version/x"));
+        assert!(!covers("/api/v:version", "/api/admin"));
+        assert!(covers("/api/v:version", "/api/v2/admin"));
+        assert!(!covers("/docs/:lang(en|fr)", "/docs/de"));
+        assert!(covers("/docs/:lang(en|fr)", "/docs/fr/x"));
+        assert!(covers("/docs/:lang(en|fr)", "/docs/:l(en|fr)/x"));
+        assert!(!covers("/docs/:lang(en|fr)", "/docs/:l/x"));
+        assert!(!covers("/api/admin", "/api"));
+        assert!(covers("/docs/:page?", "/docs"));
     }
 
     #[test]

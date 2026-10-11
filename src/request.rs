@@ -26,8 +26,8 @@ use crate::util::percent_decode;
 pub(crate) struct Shared {
     /// The routes, for [`Request::route`] before routing.
     pub(crate) routes: Option<&'static Tree<MethodMap>>,
-    /// Named routes: name → pattern ([`Request::path_for`]).
-    pub(crate) names: HashMap<Box<str>, Box<str>>,
+    /// Named routes: name → path template ([`Request::path_for`]).
+    pub(crate) names: HashMap<Box<str>, crate::tree::UrlTemplate>,
     /// The secret that signs cookies ([`App::cookie_secret`](crate::App::cookie_secret)).
     #[cfg(feature = "session")]
     pub(crate) cookie_key: Option<crate::session::Key>,
@@ -890,13 +890,14 @@ impl Request {
     /// or in excess, or if a value doesn't satisfy its constraint (the cause
     /// is logged, not sent to the client).
     pub fn path_for(&self, name: &str, params: &[&dyn fmt::Display]) -> Result<String, Error> {
-        let pattern = self
+        let template = self
             .inner
             .shared
             .names
             .get(name)
             .ok_or_else(|| internal(format!("unknown route name '{name}'")))?;
-        crate::tree::build_path(pattern, params)
+        template
+            .build(params)
             .map_err(|e| internal(format!("cannot build the URL of '{name}': {e}")))
     }
 

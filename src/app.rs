@@ -16,7 +16,7 @@ use crate::response::{IntoResponse, Response};
 use crate::router::{MethodMap, Route, Scope, routing_methods};
 use crate::server::{self, ListenAddr, Server, ServerConfig};
 use crate::static_files::{Conditional, with_conditional};
-use crate::tree::{Tree, param_names, parse_pattern, variants};
+use crate::tree::{Tree, UrlTemplate, covers, param_names, parse_pattern, variants};
 
 /// Default maximum size of a request body read into memory: 1 MiB.
 pub const DEFAULT_BODY_LIMIT: usize = 1024 * 1024;
@@ -396,7 +396,11 @@ impl App {
                 names: self
                     .names
                     .into_iter()
-                    .map(|(name, pattern)| (name.into_boxed_str(), pattern.into_boxed_str()))
+                    .map(|(name, pattern)| {
+                        let template = UrlTemplate::new(&pattern)
+                            .expect("route patterns are checked when they are added");
+                        (name.into_boxed_str(), template)
+                    })
                     .collect(),
                 state: self.state,
                 body_limit: self.body_limit,
@@ -568,26 +572,6 @@ impl Handler for Dispatcher {
     }
 }
 
-/// Le préfixe `prefix` (d'un routeur monté) est sous `parent`, segment par
-/// segment : `/api` couvre `/api` et `/api/x` (pas `/apix`), un segment avec
-/// des paramètres (`:id`, `v:version`) couvre n'importe quel segment, un
-/// paramètre optionnel peut manquer, et un joker `*` couvre tout le reste.
-fn under(prefix: &str, parent: &str) -> bool {
-    let mut segments = prefix.split('/').filter(|s| !s.is_empty());
-    for expected in parent.split('/').filter(|s| !s.is_empty()) {
-        if expected.starts_with('*') {
-            return true;
-        }
-        let Some(segment) = segments.next() else {
-            return expected.starts_with(':') && expected.ends_with('?');
-        };
-        if !(segment == expected || expected.contains(':')) {
-            return false;
-        }
-    }
-    true
-}
-
 /// Pour chaque préfixe, la chaîne de tous les middlewares qui le couvrent :
 /// les préfixes les plus courts (routeurs extérieurs) d'abord, puis dans
 /// l'ordre de montage.
@@ -607,7 +591,7 @@ fn build_scopes(scopes: Vec<Scope>, core: &Arc<Core>) -> Vec<(Box<str>, Chain)> 
                 ordered
                     .iter()
                     .map(|(_, scope)| scope)
-                    .filter(|scope| under(prefix, &scope.prefix))
+                    .filter(|scope| covers(&scope.prefix, prefix))
             };
             let middlewares: Vec<Arc<dyn Middleware>> = covering()
                 .flat_map(|scope| scope.middlewares.iter().cloned())

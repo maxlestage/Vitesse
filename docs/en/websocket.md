@@ -347,6 +347,18 @@ async fn echoes_text_messages() {
 
 More examples in [Testing](testing.md#testing-websockets).
 
+## Secure WebSocket: `wss://`
+
+A page served over HTTPS can only open `wss://` connections, WebSocket over TLS. When Vitesse serves HTTPS itself (the `tls` feature and `app.tls(...)`, see [HTTPS and HTTP/2](https.md)), your `app.ws` routes answer `wss://` with no change to their code:
+
+```js
+const socket = new WebSocket(`wss://${location.host}/echo`);
+```
+
+Behind a reverse proxy that terminates TLS, the browser speaks `wss://` to the proxy, and the proxy forwards plain `ws://` to Vitesse.
+
+WebSocket stays on HTTP/1.1: even when the rest of the site uses HTTP/2 or HTTP/3, browsers open a separate HTTP/1.1 connection for each WebSocket.
+
 ## Behind a reverse proxy
 
 The proxy must let the `Upgrade` through, then keep the connection open:
@@ -371,8 +383,8 @@ Proxies and platforms close connections that stay silent too long. For a connect
 
 ## Limits
 
-- **HTTP/1.1 only.** WebSocket is not available over [HTTP/3](http3.md): clients open their WebSocket connections over a regular TCP connection, even when the rest of the site uses HTTP/3.
-- **Graceful shutdown.** On `Ctrl+C` or `SIGTERM`, open WebSocket connections are not waited for: they are cut as soon as the HTTP requests in progress have finished, and at the latest at the end of the 10-second grace period (see [Server configuration](server.md#graceful-shutdown)). They are cut without a closing handshake, and clients see an abnormal closure (code `1006`). Make your clients reconnect automatically, which they need anyway for network drops.
+- **HTTP/1.1 only.** WebSocket is not available over [HTTP/2](https.md) nor over [HTTP/3](http3.md): clients open their WebSocket connections over a regular HTTP/1.1 connection (TLS included, for `wss://`), even when the rest of the site uses HTTP/2 or HTTP/3.
+- **Graceful shutdown.** On `Ctrl+C` or `SIGTERM`, open WebSocket connections are not waited for: they are cut as soon as the HTTP requests in progress have finished, and at the latest at the end of the grace period (10 seconds by default, `app.shutdown_timeout`; see [Server configuration](server.md#graceful-shutdown)). They are cut without a closing handshake, and clients see an abnormal closure (code `1006`). Make your clients reconnect automatically, which they need anyway for network drops.
 - **Message size.** 16 MiB per message by default; lower it with `Upgrade::max_message_size` for public endpoints.
 - **Threads.** In thread-per-core mode, a connection stays on the thread that accepted it: as in any handler, don't block it (see [Performance](performance.md)).
 

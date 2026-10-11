@@ -1,6 +1,6 @@
 # Middleware
 
-A middleware is a function that runs around your handlers: it receives the request and `next`, the rest of the chain, and can act before the handler, after it, or answer on its own. This page shows how to write them, in which order they run, and documents the middleware that ships with Vitesse.
+A middleware is a function that runs around your handlers: it receives the request and `next`, the rest of the chain, and can act before the handler, after it, or answer on its own. This page shows how to write them, in which order they run, documents the middleware that ships with Vitesse, and shows how to use the tower layers of the axum ecosystem.
 
 ## Your first middleware
 
@@ -73,7 +73,8 @@ app.middleware(require_json);
 Take the request as `mut req` to modify it before passing it on:
 
 - `req.set(value)` attaches data that handlers read with `req.get::<T>()` (the equivalent of `res.locals` or `req.user`; the type must implement `Clone`). See [Shared state](state.md).
-- `req.headers_mut()` gives access to the headers, and `req.set_body(...)` replaces the body.
+- `req.headers_mut()` gives access to the headers, `req.set_body(...)` replaces the body, and `req.set_body_limit(...)` changes how large a body the handler may read (see [Body size limit](requests.md#body-size-limit-and-413)).
+- `req.set_method(...)` changes the method, for a [method override](requests.md#method-override).
 - `req.set_uri(...)` rewrites the URL. Global middleware runs *before* routing, so the new path is the one that gets routed:
 
 ```rust
@@ -159,8 +160,16 @@ The `vitesse::middleware` module (available as `middleware::` with the prelude) 
 | `middleware::cors()` | `cors()` | CORS headers and preflight requests |
 | `middleware::helmet()` | `helmet()` | security headers |
 | `middleware::timeout(duration)` | `connect-timeout` | `503` when a request takes too long |
+| `middleware::body_limit(bytes)` | `express.json({ limit })` | body size limit for a route or a router |
+| `middleware::request_id()` | `express-request-id` | an id for each request, in `X-Request-Id` |
+| `middleware::basic_auth(credentials)` | `express-basic-auth` | HTTP Basic authentication (user name and password) |
+| `middleware::bearer_auth(token)` | `passport-http-bearer` | `Authorization: Bearer` tokens |
+| `middleware::concurrency_limit(max)` | | caps the number of requests handled at once |
+| `middleware::rate_limit(max, period)` | `express-rate-limit` | requests per client and period, `429` beyond |
 | `middleware::serve_static(dir)` | `express.static(dir)` | static files, see [Static files](static-files.md) |
 | `middleware::compress()` | `compression()` | Brotli or gzip responses (feature `compress`) |
+| `middleware::decompress()` | | compressed request bodies (feature `compress`) |
+| `middleware::layer(layer)` | | any tower layer (feature `tower`), see [Tower layers](#tower-layers) |
 
 ### `logger`
 
@@ -240,6 +249,129 @@ app.middleware(middleware::timeout(Duration::from_secs(10)));
 
 The handler's future is dropped at its next `.await`. Code that blocks the thread without ever awaiting (a long computation, `std::thread::sleep`) can't be interrupted.
 
+### `body_limit`
+
+Changes the maximum size of the body that handlers can read, for the routes it covers: one route with `.with`, or a whole router. The rest of the app keeps `app.body_limit` (1 MiB by default):
+
+```rust
+app.post("/upload", upload.with(middleware::body_limit(100 * 1024 * 1024))); // 100 MiB
+```
+
+Beyond the limit, reading the body fails with `413 Payload Too Large`. Everything about it is in [Body size limit and 413](requests.md#body-size-limit-and-413).
+
+### `request_id`
+
+Gives each request an id, to follow it through your logs and from one service to the next:
+
+```rust
+use vitesse::middleware::RequestId;
+
+app.middleware(middleware::request_id());
+app.get("/", |req: Request| async move {
+    let id = req.get::<RequestId>().unwrap();
+    println!("[{id}] home page");
+    "hello"
+});
+```
+
+- An `X-Request-Id` received with the request (set by your proxy, or by the service that calls you) is kept if it looks valid: 1 to 200 visible ASCII characters. Otherwise, Vitesse generates a UUID v4 (`9b2f3c1e-4a7d-4e1b-…`).
+- The id is put in the request's header (forward it when you call other services), in `req.get::<RequestId>()` (`RequestId(pub String)`, which prints with `{}`) and in the response's header, `404`s and errors included.
+- `.header("x-correlation-id")` uses another header. `.trust_incoming(false)` always generates a new id: useful when clients reach the app directly and you don't want their ids in your logs.
+
+Add it before the middlewares that log, so that they can read the id. It identifies requests, it isn't a secret: don't use it as a token.
+
+### `basic_auth` and `bearer_auth`
+
+HTTP authentication, for a back office or an internal API. `basic_auth` asks for a user name and a password:
+
+```rust
+use vitesse::middleware::BasicUser;
+
+let password = std::env::var("ADMIN_PASSWORD").expect("ADMIN_PASSWORD is not set");
+
+let mut admin = Router::new();
+admin.middleware(middleware::basic_auth(("admin".to_string(), password)).realm("Back office"));
+admin.get("/", |req: Request| async move {
+    let user = req.get::<BasicUser>().unwrap();
+    format!("Hello {}", user.0)
+});
+app.mount("/admin", admin);
+```
+
+Without valid credentials, the answer is a `401` with `WWW-Authenticate: Basic realm="Back office", charset="UTF-8"`, and the browser shows its login dialog. Once logged in, the user name is in `req.get::<BasicUser>()`. The credentials can be:
+
+| Credentials | Example |
+|---|---|
+| a pair | `("admin", "secret")`, with `&'static str` or `String` |
+| several pairs | `[("admin", "s3cret"), ("ada", "lovelace")]`, or a `Vec` of pairs |
+| a closure | `\|user: &str, password: &str\| user == "ada" && check(password)` |
+
+`bearer_auth` checks an `Authorization: Bearer <token>` header, for APIs:
+
+```rust
+let token = std::env::var("API_TOKEN").expect("API_TOKEN is not set");
+
+let mut api = Router::new();
+api.middleware(middleware::bearer_auth(token));
+api.get("/stats", |_| async { Json(json!({ "users": 42 })) });
+app.mount("/api", api);
+```
+
+It accepts a token (`&'static str` or `String`), an array or a `Vec` of tokens, or a closure `|token: &str| -> bool`. Without a token, the answer is a `401` with `WWW-Authenticate: Bearer`; with a wrong one, `WWW-Authenticate: Bearer error="invalid_token"`.
+
+- Passwords and tokens are compared in constant time, so that the response time doesn't give them away. `middleware::constant_time_eq(a, b)` does the same in your own code.
+- The closures are synchronous: to look users up in a database, write your own middleware (see [Short-circuiting](#short-circuiting)).
+- On a router, the authentication also covers the `404`s under its prefix: a visitor without credentials doesn't learn which pages exist.
+
+> [!IMPORTANT]
+> Basic authentication sends the password with every request, merely encoded in base64, and a token can be reused by anyone who sees it: only use them over HTTPS ([HTTPS and HTTP/2](https.md), or a proxy that terminates TLS).
+
+### `concurrency_limit`
+
+Caps the number of requests handled at the same time by what it covers, to protect an expensive route or a fragile database:
+
+```rust
+use std::time::Duration;
+
+// At most 4 reports at once; the others wait up to 2 s, then get a 503.
+app.get(
+    "/report",
+    report.with(middleware::concurrency_limit(4).max_wait(Duration::from_secs(2))),
+);
+```
+
+- At most `max` requests are inside at the same time; the next ones wait for their turn.
+- `.max_wait(duration)` caps that wait: beyond it, the answer is `503 Service Unavailable` with `Retry-After: 1`. With `Duration::ZERO`, requests are turned away as soon as the limit is reached, which keeps the server responsive during a spike.
+- Each middleware counts on its own: with `app.middleware(...)`, the limit covers the whole app; with `.with(...)`, that route only.
+
+This limits requests in progress, wherever they come from. `app.max_connections` (see [Server configuration](server.md#timeouts-and-connections)) limits open connections instead, idle ones included.
+
+### `rate_limit`
+
+Limits each client to `max` requests per `period`, like `express-rate-limit`:
+
+```rust
+use std::time::Duration;
+
+app.middleware(middleware::rate_limit(100, Duration::from_secs(60))); // 100 requests per minute
+app.post("/login", login.with(middleware::rate_limit(5, Duration::from_secs(60)))); // slows down password guessing
+```
+
+- A client can send a burst of `max` requests, then one every `period / max` (the GCRA algorithm): with `rate_limit(60, Duration::from_secs(60))`, 60 at once, then one per second.
+- Beyond that, the answer is `429 Too Many Requests` with `Retry-After` (in seconds). Every response that goes through the middleware carries `X-RateLimit-Limit` and `X-RateLimit-Remaining`.
+- By default, a client is an IP address, `req.ip()`. Behind a reverse proxy, set [`app.trust_proxy`](requests.md#behind-a-proxy-trust_proxy), or every visitor shares the proxy's counter.
+- `.key(...)` identifies clients differently, by API key or user id for instance. When it returns `None`, the request isn't limited:
+
+```rust
+let mut api = Router::new();
+api.middleware(
+    middleware::rate_limit(10, Duration::from_secs(1))
+        .key(|req: &Request| req.header("x-api-key").map(str::to_owned)),
+);
+```
+
+The counters live in the memory of the process and are cleaned up automatically. With several instances of the application (several servers or containers), each one counts on its own.
+
 ### `compress`
 
 Compresses responses with Brotli, or with gzip when the browser does not accept Brotli, like Express's `compression()`. It needs the `compress` Cargo feature:
@@ -253,7 +385,20 @@ vitesse = { git = "https://github.com/maxlestage/Vitesse", features = ["compress
 app.middleware(middleware::compress());
 ```
 
-Only bodies worth it are compressed: HTML, CSS, JavaScript, JSON, XML, SVG, WebAssembly and the other text-like types, of 1 KiB or more, with a known size (not streamed) and not encoded already. Images, videos and archives pass through. The response gets `Content-Encoding` and `Vary: Accept-Encoding`, and the compression runs on a blocking thread, so the workers keep answering other requests. Add it before the other middlewares, so that every response goes through it.
+Only bodies worth it are compressed: HTML, CSS, JavaScript, JSON, XML, SVG, WebAssembly and the other text-like types, of 1 KiB or more, with a known size (not streamed, so [Server-Sent Events](responses.md#server-sent-events) pass through too) and not encoded already. Images, videos and archives pass through. The response gets `Content-Encoding` and `Vary: Accept-Encoding`, and the compression runs on a blocking thread, so the workers keep answering other requests. Add it before the other middlewares, so that every response goes through it.
+
+### `decompress`
+
+The other way round: some clients (mobile apps, other services, log shippers) compress the bodies they send. `decompress()` decodes them before your handlers read them with `req.json()`, `req.text()` and the others. It comes with the same `compress` feature:
+
+```rust
+app.middleware(middleware::decompress());
+```
+
+- Bodies sent with `Content-Encoding: gzip` (or `x-gzip`), `br` or `deflate` are decompressed, then `Content-Encoding` is removed: the handler sees the original body. Requests without `Content-Encoding` pass through untouched.
+- Another encoding gets a `415 Unsupported Media Type`, and corrupted data a `400`.
+- The compressed body and the decompressed one are both limited by the [body limit](requests.md#body-size-limit-and-413) (`413` beyond), so a small "zip bomb" can't fill the memory.
+- The body is read in full, then decompressed on a blocking thread, so the workers keep answering other requests.
 
 ## Writing a reusable middleware
 
@@ -302,3 +447,49 @@ app.middleware(RequestCounter { total: AtomicU64::new(0) });
 
 > [!NOTE]
 > A panic in a middleware written as a closure or an `async fn` becomes a `500` that goes back through the outer middleware and `app.on_error`, just like a panic in a handler. A hand-written `impl Middleware` doesn't get this treatment: its panics are caught further up the chain (see [Panics](errors.md#panics)).
+
+## Tower layers
+
+axum, hyper and tonic share a middleware ecosystem: [tower](https://docs.rs/tower) and [tower-http](https://docs.rs/tower-http). With the `tower` feature, `middleware::layer(...)` runs any tower `Layer` as a Vitesse middleware:
+
+```toml
+[dependencies]
+vitesse = { git = "https://github.com/maxlestage/Vitesse", features = ["tower"] }
+tower-http = { version = "0.6", features = ["cors", "set-header", "trace"] }
+```
+
+```rust
+use tower_http::cors::CorsLayer;
+use tower_http::set_header::SetResponseHeaderLayer;
+use tower_http::trace::TraceLayer;
+use vitesse::http::{HeaderName, HeaderValue};
+use vitesse::prelude::*;
+
+let mut app = App::new();
+app.middleware(middleware::layer(TraceLayer::new_for_http()));
+app.middleware(middleware::layer(SetResponseHeaderLayer::overriding(
+    HeaderName::from_static("x-powered-by"),
+    HeaderValue::from_static("Vitesse"),
+)));
+
+let mut api = Router::new();
+api.middleware(middleware::layer(CorsLayer::permissive()));
+api.get("/users", |_| async { Json(vec!["ada", "grace"]) });
+app.mount("/api", api);
+```
+
+A layer goes wherever a middleware goes: `app.middleware(...)`, `router.middleware(...)` and `handler.with(...)`, in the same [order](#execution-order) as the others. `TraceLayer` reports through the [tracing](https://docs.rs/tracing) crate: its lines only appear once a subscriber is installed, `tracing_subscriber::fmt::init()` for instance.
+
+Any layer whose service accepts an `http::Request<vitesse::Body>` and returns an `http::Response` works: most of tower-http (`CorsLayer`, `SetResponseHeaderLayer`, `ValidateRequestHeaderLayer`, `RequestBodyLimitLayer`, `TraceLayer`…), tower's own layers (`ConcurrencyLimitLayer`, `MapRequestLayer`…) and crates such as tower-governor.
+
+How the two worlds meet:
+
+- **The request.** The layer sees an `http::Request` built from the Vitesse request. Whatever it changes (method, URI, headers, extensions, body) is carried over to the request that the rest of the chain receives, routing included if the layer is global.
+- **The response.** It comes back as a Vitesse `Response`, which the middlewares around the layer can still change.
+- **Errors.** An error returned by the tower service (tower's `Timeout` reports one, for example) becomes a `500`, logged without being shown to the client. Errors produced by Vitesse (a `404`, a handler's `Err`) cross the layer and still reach [`app.on_error`](errors.md).
+- **One service for all requests.** The service is built once, at startup, then cloned for each request, as in axum. State that its clones share is shared by all requests: a `ConcurrencyLimitLayer` really limits the whole route.
+
+> [!TIP]
+> Each layer converts the request to `http::Request` and back, which costs a little. For what Vitesse already ships (CORS, timeouts, compression, limits, authentication), the built-in middlewares are the faster choice; layers are there for everything else.
+
+The other way round, `app.into_service()` turns a whole Vitesse application into a tower `Service`: serve it with hyper, nest it in an axum router (`Router::nest_service`), or test it with `tower::ServiceExt` (see [Testing as a tower service](testing.md#testing-as-a-tower-service)).

@@ -352,6 +352,108 @@ async fn handler_sees_what_the_middleware_attached() {
 
 Built-in middleware is tested the same way, for example `middleware::cors()` by sending an `origin` header and checking `access-control-allow-origin`. More on writing middleware in [Middleware](middleware.md).
 
+## Testing behind a proxy
+
+Every `TestClient` request comes from `127.0.0.1`: `req.ip()` returns `127.0.0.1`, and `req.secure()` is `false`. To test what your app does behind a reverse proxy, configure [`app.trust_proxy`](requests.md#behind-a-proxy-trust_proxy) as in production, and send the headers your proxy would add. Coming from `127.0.0.1`, they are believed with `"loopback"`:
+
+```rust
+use vitesse::prelude::*;
+use vitesse::test::TestClient;
+
+#[tokio::test]
+async fn reads_the_visitor_behind_the_proxy() {
+    let mut app = App::new();
+    app.trust_proxy("loopback");
+    app.get("/whoami", |req: Request| async move {
+        format!("{} {}", req.ip().unwrap(), req.protocol())
+    });
+    let client = TestClient::new(app);
+
+    let res = client
+        .get("/whoami")
+        .header("x-forwarded-for", "203.0.113.9")
+        .header("x-forwarded-proto", "https")
+        .await;
+    assert_eq!(res.text(), "203.0.113.9 https");
+
+    // Without the headers, the visitor is the test client itself.
+    assert_eq!(client.get("/whoami").await.text(), "127.0.0.1 http");
+}
+```
+
+The same trick tests [`middleware::rate_limit`](middleware.md#rate_limit) with several clients: without `trust_proxy`, every test request shares the counter of `127.0.0.1`; with it, each `x-forwarded-for` value counts as a different visitor.
+
+## Testing Server-Sent Events
+
+`TestClient` reads the whole body before returning, so an [event stream](responses.md#server-sent-events) is easy to test as long as it ends: `res.text()` then holds every event, exactly as the browser would receive them.
+
+```rust
+use vitesse::prelude::*;
+use vitesse::sse::Event;
+use vitesse::test::TestClient;
+
+#[tokio::test]
+async fn sends_a_countdown() {
+    let mut app = App::new();
+    app.get("/countdown", |_| async {
+        let (tx, stream) = sse::channel(8);
+        tokio::spawn(async move {
+            for n in (1..=3).rev() {
+                let _ = tx.send(Event::new().event("count").data(n.to_string())).await;
+            }
+        }); // the task ends and drops `tx`: the response ends too
+        stream
+    });
+    let client = TestClient::new(app);
+
+    let res = client.get("/countdown").await;
+    assert_eq!(res.header("content-type"), Some("text/event-stream"));
+    assert_eq!(
+        res.text(),
+        "event: count\ndata: 3\n\nevent: count\ndata: 2\n\nevent: count\ndata: 1\n\n"
+    );
+}
+```
+
+A stream that never ends (a clock, a notification feed) would make the test wait forever. Make it finite in tests (with a query parameter, for instance), check the events on their own (`Event::new().id("1").data("hi").to_string()` is `"id: 1\ndata: hi\n\n"`), or read the first events [on a real port](#integration-tests-on-a-real-port), with a timeout.
+
+## Testing file uploads
+
+`TestClient` has no helper for [multipart forms](requests.md#file-uploads-multipart): write the body by hand. Each part starts with `--` and the boundary, followed by its headers, an empty line and its content; the last boundary ends with `--`. Every line ends with `\r\n`:
+
+```rust
+// tests/upload.rs
+use vitesse::json;
+use vitesse::test::TestClient;
+
+#[tokio::test]
+async fn uploads_a_file() {
+    let client = TestClient::new(my_api::app());
+    let body = "--XyZ\r\n\
+        content-disposition: form-data; name=\"title\"\r\n\
+        \r\n\
+        Holidays\r\n\
+        --XyZ\r\n\
+        content-disposition: form-data; name=\"photo\"; filename=\"beach.txt\"\r\n\
+        content-type: text/plain\r\n\
+        \r\n\
+        sand and sea\r\n\
+        --XyZ--\r\n";
+
+    let res = client
+        .post("/upload")
+        .header("content-type", "multipart/form-data; boundary=XyZ")
+        .body(body)
+        .await;
+    assert_eq!(res.status(), 200);
+
+    // Not a multipart body: 415.
+    assert_eq!(client.post("/upload").json(&json!({})).await.status(), 415);
+}
+```
+
+A `\` at the end of a line continues the Rust string on the next line, without the line break or the indentation. For binary files or many parts, write a small function that assembles the parts in a `Vec<u8>` and pass it to `.body(...)`. Also check that a body over the route's limit gets a `413`.
+
 ## Integration tests on a real port
 
 `TestClient` skips the HTTP/1.1 engine. For what only happens on a real connection (`content-length`, keep-alive, pipelining, `chunked` bodies, `Expect: 100-continue`, header size limits, [WebSocket](#testing-websockets) conversations), or to use a real HTTP client, start the server on a real port:
@@ -486,6 +588,41 @@ async fn echo_over_a_real_websocket() {
 ```
 
 `connect_async` fails if the server refuses the handshake: to check a refusal's status, use `TestClient` as above.
+
+## Testing as a tower service
+
+With Vitesse's `tower` feature, `app.into_service()` turns the application into a tower `Service`, the abstraction axum and hyper are built on. You can then test it the way axum users do, with `tower::ServiceExt::oneshot`:
+
+```toml
+[dependencies]
+vitesse = { git = "https://github.com/maxlestage/Vitesse", features = ["tower"] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt"] }
+tower = { version = "0.5", features = ["util"] }
+```
+
+```rust
+use tower::ServiceExt; // for oneshot
+use vitesse::prelude::*;
+
+#[tokio::test]
+async fn works_as_a_tower_service() {
+    let service = my_api::app().into_service();
+
+    let req = vitesse::http::Request::get("/hello/Ada").body(Body::empty()).unwrap();
+    let res = service.oneshot(req).await.unwrap(); // the error type is Infallible
+    assert_eq!(res.status(), 200);
+    let body = res.into_body().to_bytes().await.unwrap();
+    assert_eq!(body, "Hello Ada!");
+}
+```
+
+- Requests are `http::Request`s with any body type (`vitesse::Body`, http-body-util's `Full`…), and responses are `http::Response<vitesse::Body>`.
+- The service is `Copy`: `oneshot` takes it by value, but `service` stays usable for the next requests.
+- Unlike `TestClient`, there is no client address unless you put a `SocketAddr` in the request's extensions (`req.ip()` is `None` otherwise), and WebSocket routes answer `501`.
+
+For everyday tests, `TestClient` is shorter. The service shines when the app runs inside a tower stack: served by hyper, or nested in an axum router with `Router::nest_service`.
 
 ## Organising your tests
 

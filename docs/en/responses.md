@@ -38,6 +38,7 @@ The compiler checks that every code path produces a response: you can't forget t
 | `Error` | the error's status | `application/json`: `{"error": "..."}` |
 | `Redirect` | `301`, `302`, `303` or `307` | none, `Location` header |
 | `Body` | `200` | none (see [Streaming](#streaming)) |
+| `Sse` (from `sse::channel` or `Sse::new`) | `200` | `text/event-stream` (see [Server-Sent Events](#server-sent-events)) |
 | `Response` | whatever you built | |
 | `http::Response<Body>` | unchanged | |
 
@@ -213,7 +214,7 @@ app.get("/invoice", |_| async {
 
 ## Streaming
 
-`Body::from_stream(stream)` sends each item of a stream as soon as it is produced, using `Transfer-Encoding: chunked`. The stream yields `Result<D, E>` values, where `D` converts into bytes (`String`, `&'static str`, `Vec<u8>`, `Bytes`) and `E` is an error type. Streams usually come from crates such as `tokio-stream` or `futures-util`. Here are Server-Sent Events fed by a channel:
+`Body::from_stream(stream)` sends each item of a stream as soon as it is produced, using `Transfer-Encoding: chunked` over HTTP/1.1. The stream yields `Result<D, E>` values, where `D` converts into bytes (`String`, `&'static str`, `Vec<u8>`, `Bytes`) and `E` is an error type. Streams usually come from crates such as `tokio-stream` or `futures-util`. Here is a large CSV export, produced by a task and sent as it goes:
 
 ```toml
 [dependencies]
@@ -222,26 +223,28 @@ tokio-stream = "0.1"
 ```
 
 ```rust
-use std::time::Duration;
 use tokio_stream::wrappers::ReceiverStream;
 use vitesse::prelude::*;
 
-app.get("/events", |_| async {
+app.get("/export.csv", |_| async {
     let (tx, rx) = tokio::sync::mpsc::channel::<Result<String, std::io::Error>>(16);
     tokio::spawn(async move {
-        for i in 1..=5 {
-            if tx.send(Ok(format!("data: tick {i}\n\n"))).await.is_err() {
+        let _ = tx.send(Ok("id,name\n".to_string())).await;
+        for id in 1..=100_000 {
+            // In a real app: rows read from the database, page by page.
+            if tx.send(Ok(format!("{id},user {id}\n"))).await.is_err() {
                 break; // the client is gone
             }
-            tokio::time::sleep(Duration::from_secs(1)).await;
         }
     });
     Response::new()
-        .content_type("text/event-stream")
-        .header("cache-control", "no-cache")
+        .content_type("text/csv; charset=utf-8")
+        .attachment("users.csv")
         .send(Body::from_stream(ReceiverStream::new(rx)))
 });
 ```
+
+To push events to a browser page (notifications, progress, live data), don't write the `text/event-stream` format by hand: use [Server-Sent Events](#server-sent-events), just below.
 
 `Body::wrap(body)` accepts any [`http_body::Body`](https://docs.rs/http-body), and `req.take_body()` hands you the request body as a `Body` that you can send straight back:
 
@@ -251,6 +254,157 @@ app.post("/echo", |req: Request| async move { req.take_body() });
 
 > [!TIP]
 > If you know the total size of a stream in advance, set it with `.header("content-length", size)`: the response is then sent with that length instead of chunked encoding.
+
+## Server-Sent Events
+
+Server-Sent Events (SSE) keep a response open and push events to the browser as they happen: notifications, a progress bar, a live dashboard, the words of a chatbot's answer. When only the server talks, it's simpler than a [WebSocket](websocket.md): it's plain HTTP, and the browser receives it with `EventSource`, which reconnects by itself. The `sse` module (in the prelude, no feature needed) takes care of the format and the headers.
+
+### With a channel
+
+The simplest way is `sse::channel(buffer)`: it returns a sender and the response. The handler returns the response right away, and a task sends the events:
+
+```rust
+use std::time::Duration;
+use vitesse::prelude::*;
+use vitesse::sse::Event;
+
+app.get("/clock", |_| async {
+    let (tx, stream) = sse::channel(16);
+    tokio::spawn(async move {
+        for seconds in 0.. {
+            let event = Event::new().event("tick").data(format!("{seconds} s"));
+            if tx.send(event).await.is_err() {
+                break; // the browser has gone away
+            }
+            tokio::time::sleep(Duration::from_secs(1)).await;
+        }
+    });
+    stream
+});
+```
+
+The response goes out with `content-type: text/event-stream` and `cache-control: no-cache`, and each event leaves as soon as it is sent:
+
+```text
+event: tick
+data: 0 s
+
+event: tick
+data: 1 s
+
+```
+
+- `buffer` is the number of events that can wait while the connection is slow; when it's full, `send` waits.
+- The response ends when every `Sender` is dropped: here, when the task ends. `Sender` is `Clone`, so several tasks can feed the same response.
+- `tx.try_send(event)` sends without waiting (and fails if the buffer is full), and `tx.is_closed()` tells you whether the browser is still there.
+
+### From a stream
+
+`Sse::new(stream)` accepts any `Stream` of `Result<Event, E>`, from tokio-stream, futures-util or your own code. The response ends with the stream:
+
+```rust
+use std::convert::Infallible;
+use vitesse::sse::{Event, Sse};
+
+app.get("/countdown", |_| async {
+    let events = (1..=3).rev().map(|n| Ok::<_, Infallible>(Event::new().data(n.to_string())));
+    Sse::new(futures_util::stream::iter(events))
+});
+```
+
+An `Err` from the stream cuts the connection: the browser sees a network error and reconnects.
+
+### Events
+
+| `Event` method | Line sent | In the browser |
+|---|---|---|
+| `Event::new().data(text)` | `data: …` (one line per line of `text`, joined back by the browser) | `e.data` |
+| `.json_data(&value)?` | `data: …`, `value` serialised to JSON | `JSON.parse(e.data)` |
+| `.event("tick")` | `event: tick` | the listener that receives it: `addEventListener("tick", …)` (`message` without it) |
+| `.id("42")` | `id: 42` | sent back in `Last-Event-ID` when the browser reconnects |
+| `.retry(Duration::from_secs(5))` | `retry: 5000` | how long the browser waits before reconnecting |
+| `.comment("…")` | `: …` | ignored |
+
+`json_data` returns a `Result` because serialisation can fail (a `500` with `?`). `event` and `id` panic if they contain a line break, which would break the format. `event.to_string()` returns the text that will be sent, handy in tests.
+
+### Keep-alive
+
+Proxies and load balancers close connections that stay silent too long, often after a minute. So when no event has been sent for 15 seconds, both `sse::channel` and `Sse::new` send a comment (`:`), which the browser ignores. To change it, or turn it off with `.no_keep_alive()`:
+
+```rust
+use vitesse::sse::KeepAlive;
+
+let (tx, stream) = sse::channel(16);
+// … spawn the task that uses `tx`
+stream.keep_alive(KeepAlive::new().interval(Duration::from_secs(30)).text("ping"))
+```
+
+### When the browser leaves
+
+When the user closes the tab, the connection closes and Vitesse drops the response. From then on, `tx.send(...)` returns an error: stop the task there, as in the clock above. Vitesse notices the departure when it next writes to the connection: an event or, at the latest, the next keep-alive comment.
+
+A task that rarely sends would wait a long time before finding out. Make it wait for `tx.closed()` at the same time, with `tokio::select!`. Here, each page receives the news published on a `broadcast` channel kept in the [state](state.md):
+
+```rust
+use tokio::sync::broadcast;
+
+let (news, _) = broadcast::channel::<String>(100);
+app.state(news);
+
+app.get("/news", |req: Request| async move {
+    let mut inbox = req.state::<broadcast::Sender<String>>().subscribe();
+    let (tx, stream) = sse::channel(16);
+    tokio::spawn(async move {
+        loop {
+            tokio::select! {
+                _ = tx.closed() => break, // the browser has gone away
+                message = inbox.recv() => match message {
+                    Ok(text) => { let _ = tx.send(Event::new().data(text)).await; }
+                    Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                    Err(broadcast::error::RecvError::Closed) => break,
+                },
+            }
+        }
+    });
+    stream
+});
+```
+
+### In the browser
+
+```js
+const source = new EventSource("/clock");
+source.addEventListener("tick", (e) => console.log("tick", e.data));
+source.onmessage = (e) => console.log(e.data); // events without an `event` type
+```
+
+`EventSource` reconnects by itself when the connection drops, and also when the response ends. On reconnection, it sends the `id` of the last event it received in a `Last-Event-ID` header: read it to send what the page missed.
+
+```rust
+app.get("/feed", |req: Request| async move {
+    let last: u64 = req.header("last-event-id").and_then(|id| id.parse().ok()).unwrap_or(0);
+    let (tx, stream) = sse::channel(16);
+    tokio::spawn(async move {
+        for n in last + 1.. {
+            let event = Event::new().id(n.to_string()).data(format!("message {n}"));
+            if tx.send(event).await.is_err() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_secs(1)).await;
+        }
+    });
+    stream
+});
+```
+
+To stop for good, call `source.close()` in JavaScript (after a last event that tells the page it's over, for instance), or answer the reconnection with `204 No Content`.
+
+### Good to know
+
+- SSE works the same over HTTP/1.1, [HTTP/2](https.md) and [HTTP/3](http3.md). Over HTTP/1.1, browsers open at most 6 connections per site, and each `EventSource` keeps one busy: with many tabs open, HTTP/2 or HTTP/3, which share one connection, avoid that limit.
+- `middleware::compress()` leaves event streams alone, and `middleware::timeout(...)` only limits the time taken to return the response, not how long the stream lasts.
+- Nginx buffers responses by default, which holds the events back: add `proxy_buffering off;` to the `location`, or send the header from Vitesse with `stream.into_response().header("x-accel-buffering", "no")`.
+- `examples/live.rs`, in the repository, shows a live clock in a page (`cargo run --example live --features multipart`).
 
 ## `HEAD`, `204` and `304`
 

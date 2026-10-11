@@ -47,6 +47,15 @@ fn app() -> App {
         }
         "jamais"
     });
+    // Une limite propre à la route, plus grande que celle de l'application.
+    app.post(
+        "/upload",
+        (|req: Request| async move {
+            let body = req.bytes().await?;
+            Ok::<_, Error>(format!("{} bytes", body.len()))
+        })
+        .with(middleware::body_limit(100_000)),
+    );
     app.body_limit(1024);
     app.http3(http3());
     app
@@ -157,6 +166,10 @@ async fn serves_the_same_routes_over_http3_and_advertises_it() {
     );
     let (res, _) = c.request(Method::POST, "/echo", &[b'x'; 4096]).await;
     assert_eq!(res.status(), 413);
+    // Le corps arrive en flux : la limite de la route s'applique.
+    let (res, body) = c.request(Method::POST, "/upload", &[b'x'; 50_000]).await;
+    assert_eq!(res.status(), 200);
+    assert_eq!(body, b"50000 bytes");
 
     // 404, HEAD et panique : comme en HTTP/1.1.
     let (res, _) = c.request(Method::GET, "/nope", b"").await;

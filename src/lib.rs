@@ -103,6 +103,7 @@ pub mod http3;
 pub mod middleware;
 #[cfg(feature = "multipart")]
 pub mod multipart;
+pub mod sse;
 pub mod test;
 #[cfg(feature = "tls")]
 pub mod tls;
@@ -133,6 +134,7 @@ pub use tokio;
 /// Everything you need to write an application: `use vitesse::prelude::*;`
 pub mod prelude {
     pub use crate::middleware;
+    pub use crate::sse;
     #[cfg(feature = "ws")]
     pub use crate::ws;
     pub use crate::{

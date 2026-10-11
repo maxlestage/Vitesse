@@ -19,9 +19,10 @@
 //! ```
 //!
 //! Browsers discover HTTP/3 through the `Alt-Svc` header: Vitesse adds
-//! `alt-svc: h3=":PORT"; ma=86400` to its HTTP/1.1 responses. They only
-//! trust it on an HTTPS page: behind a reverse proxy that handles TLS for
-//! TCP (Caddy, Nginx…), set the public port with
+//! `alt-svc: h3=":PORT"; ma=86400` to its HTTP/1.1 and HTTP/2 responses.
+//! They only trust it on an HTTPS page: serve HTTPS with
+//! [`App::tls`](crate::App::tls) (`tls` feature), or, behind a reverse
+//! proxy that handles TLS for TCP (Caddy, Nginx…), set the public port with
 //! [`Http3::alt_svc_port`] and open the UDP port to Vitesse.
 //!
 //! The request body is read in full (up to [`App::body_limit`](crate::App::body_limit),

@@ -1476,3 +1476,119 @@ async fn concurrency_and_rate_limits() {
     assert_eq!(c.get("/per-key").await.status(), 200);
     assert_eq!(c.get("/per-key").await.status(), 200);
 }
+
+#[tokio::test]
+async fn express_style_route_patterns() {
+    let show = |req: Request| async move {
+        let params: Vec<String> = req.params().map(|(k, v)| format!("{k}={v}")).collect();
+        format!("{} {}", req.route().unwrap_or("-"), params.join(","))
+    };
+    let mut app = App::new();
+    app.get("/flights/:from-:to", show)
+        .get("/files/:name.:ext", show)
+        .get(r"/users/:id(\d+)", show)
+        .get("/users/:name", show)
+        .get("/archive/:year?/:month?", show)
+        .get("/api/v:version/status", show);
+    let mut docs = Router::new();
+    docs.get("/:page?", show);
+    app.mount("/docs/:lang(en|fr|es)", docs);
+    let c = TestClient::new(app);
+
+    assert_eq!(
+        c.get("/flights/LAX-SFO").await.text(),
+        "/flights/:from-:to from=LAX,to=SFO"
+    );
+    assert_eq!(
+        c.get("/files/report.final.pdf").await.text(),
+        "/files/:name.:ext name=report,ext=final.pdf"
+    );
+    assert_eq!(c.get("/users/42").await.text(), r"/users/:id(\d+) id=42");
+    assert_eq!(c.get("/users/ada").await.text(), "/users/:name name=ada");
+    assert_eq!(c.get("/archive").await.text(), "/archive/:year?/:month? ");
+    assert_eq!(
+        c.get("/archive/2024/05").await.text(),
+        "/archive/:year?/:month? year=2024,month=05"
+    );
+    assert_eq!(
+        c.get("/api/v2/status").await.text(),
+        "/api/v:version/status version=2"
+    );
+    assert_eq!(c.get("/api/2/status").await.status(), 404);
+    assert_eq!(
+        c.get("/docs/fr").await.text(),
+        "/docs/:lang(en|fr|es)/:page? lang=fr"
+    );
+    assert_eq!(
+        c.get("/docs/es/routing").await.text(),
+        "/docs/:lang(en|fr|es)/:page? lang=es,page=routing"
+    );
+    assert_eq!(c.get("/docs/de/routing").await.status(), 404);
+}
+
+#[tokio::test]
+async fn case_insensitive_routes() {
+    let mut app = App::new();
+    app.case_sensitive(false);
+    app.get("/Users/:id", |req: Request| async move {
+        req.param("id").unwrap_or("").to_owned()
+    });
+    let c = TestClient::new(app);
+    assert_eq!(c.get("/users/Ada").await.text(), "Ada");
+    assert_eq!(c.get("/USERS/Ada").await.text(), "Ada");
+
+    let mut app = App::new();
+    app.get("/Users/:id", |_| async { "ok" });
+    assert_eq!(TestClient::new(app).get("/users/1").await.status(), 404);
+}
+
+#[tokio::test]
+async fn named_routes_and_url_generation() {
+    let mut app = App::new();
+    app.get("/users/:id", |_| async { "user" }).name("user");
+    app.get("/files/*path", |_| async { "file" }).name("file");
+    let mut api = Router::new();
+    api.get("/items/:id(\\d+)", |_| async { "item" })
+        .name("item");
+    app.mount("/api/:version", api);
+    app.get("/links", |req: Request| async move {
+        Ok::<_, Error>(
+            [
+                req.path_for("user", &[&42])?,
+                req.path_for("user", &[&"a b"])?,
+                req.path_for("file", &[&"docs/a b.pdf"])?,
+                req.path_for("item", &[&"v1", &7])?,
+                req.url_for("user", &[&1])?,
+            ]
+            .join(" "),
+        )
+    });
+    app.get("/broken", |req: Request| async move {
+        req.path_for("item", &[&"v1", &"x"])
+    });
+    app.get("/unknown", |req: Request| async move {
+        req.path_for("nope", &[])
+    });
+    let c = TestClient::new(app);
+    assert_eq!(
+        c.get("/links").header("host", "example.com").await.text(),
+        "/users/42 /users/a%20b /files/docs/a%20b.pdf /api/v1/items/7 http://example.com/users/1"
+    );
+    assert_eq!(c.get("/broken").await.status(), 500);
+    assert_eq!(c.get("/unknown").await.status(), 500);
+}
+
+#[test]
+#[should_panic(expected = "duplicate route name")]
+fn duplicate_route_names_panic() {
+    let mut app = App::new();
+    app.get("/a", |_| async { "a" }).name("x");
+    app.get("/b", |_| async { "b" }).name("x");
+}
+
+#[test]
+#[should_panic(expected = "invalid regular expression")]
+fn invalid_constraints_panic() {
+    let mut app = App::new();
+    app.get("/a/:id([)", |_| async { "a" });
+}

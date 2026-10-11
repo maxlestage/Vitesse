@@ -86,8 +86,94 @@ app.get("/users/:id/posts/:post", |req: Request| async move {
 
 - `req.params()` iterates over every `(name, value)` pair, in order.
 - Values are percent-decoded: `/users/Fran%C3%A7ois` gives `François`. A `+` stays a `+`, because it only means a space in query strings. `req.path()` still returns the raw path.
-- A parameter takes a whole segment. It never matches an empty segment or anything containing a `/`.
-- Names can only contain letters, digits and `_`. Partial segments such as `/flights/:from-:to` and regular expressions aren't supported. Capture the whole segment and split it yourself.
+- A parameter never matches an empty value or anything containing a `/`.
+- Names can only contain letters, digits and `_`.
+
+The syntax is Express's (version 4), so a few more forms work: several parameters in one segment, constraints and optional parameters.
+
+### Several parameters in a segment
+
+A segment can mix text and parameters, as long as some text separates them:
+
+```rust
+app.get("/flights/:from-:to", |req: Request| async move {
+    let from = req.param("from").unwrap();
+    let to = req.param("to").unwrap();
+    format!("from {from} to {to}")
+});
+app.get("/files/:name.:ext", show_file);
+app.get("/api/v:version/status", api_status);
+app.get("/img/:id.png", show_png);
+```
+
+| Request | Route | Parameters |
+|---|---|---|
+| `/flights/LAX-SFO` | `/flights/:from-:to` | `from = "LAX"`, `to = "SFO"` |
+| `/files/report.pdf` | `/files/:name.:ext` | `name = "report"`, `ext = "pdf"` |
+| `/files/archive.tar.gz` | `/files/:name.:ext` | `name = "archive"`, `ext = "tar.gz"` |
+| `/api/v2/status` | `/api/v:version/status` | `version = "2"` |
+| `/img/42.png` | `/img/:id.png` | `id = "42"` |
+| `/files/README` or `/api/2/status` | none: `404` | |
+
+- Each parameter takes at least one character, and the first one as few as possible, as in Express: that is why `archive.tar.gz` gives `archive` and `tar.gz`.
+- Two parameters must be separated by text: `/:from:to` is rejected at startup, since nothing says where `from` ends.
+
+### Constraints: `:id(\d+)`
+
+A regular expression in parentheses, right after the name, restricts the values a parameter accepts. A request whose value doesn't match simply doesn't match the route: another route can take it, or it gets a `404`.
+
+```rust
+app.get(r"/users/:id(\d+)", |req: Request| async move {
+    let id: u64 = req.param_as("id")?;
+    Ok::<_, Error>(format!("user #{id}"))
+});
+app.get("/docs/:lang(en|fr|es)/:page", show_doc);
+app.get(r"/posts/:year(\d{4})-:slug", show_post);
+```
+
+| Request | Answer |
+|---|---|
+| `/users/42` | `user #42` |
+| `/users/ada` | `404` (or another route, see [below](#the-most-specific-route-wins)) |
+| `/docs/fr/routing` | `show_doc`, with `lang = "fr"` |
+| `/docs/de/routing` | `404` |
+| `/posts/2024-hello-world` | `show_post`, with `year = "2024"` and `slug = "hello-world"` |
+
+- In Rust, write the path as a raw string, `r"/users/:id(\d+)"`, so the backslashes stay as they are. In a regular string, double them: `"/users/:id(\\d+)"`.
+- The expression must match the whole value: `:lang(en|fr)` accepts `fr`, not `fra`. There is no need for `^` and `$`.
+- It can't contain a `/`, since a parameter never does.
+- It is checked against the value as it appears in the URL, before percent-decoding: `%20` is three characters for it.
+- Vitesse uses [regex-lite](https://crates.io/crates/regex-lite): the usual syntax (classes, `\d`, `\w`, `|`, repetitions, `(?i)` to ignore case) works, but `\d` and `\w` only cover ASCII, and Unicode classes such as `\p{L}` aren't available. The expressions are compiled once, at startup, and only run for the parameters that have a constraint.
+- An invalid expression stops the program at startup: `invalid route: invalid regular expression…`.
+
+A constraint chooses the route, and `req.param_as` still converts the value: here, a `u64` too large to fit still gets a `400`.
+
+> [!NOTE]
+> Express 5 removed regular expressions from paths, and actix-web writes them `{id:\d+}`. Vitesse keeps Express 4's syntax, `:id(\d+)`.
+
+### Optional parameters: `:year?`
+
+A `?` after a parameter makes it optional. One route then answers several paths:
+
+```rust
+app.get("/archive/:year?/:month?", |req: Request| async move {
+    match (req.param("year"), req.param("month")) {
+        (Some(year), Some(month)) => format!("archive of {month}/{year}"),
+        (Some(year), None) => format!("archive of {year}"),
+        _ => "the whole archive".to_owned(),
+    }
+});
+```
+
+| Request | `req.param("year")` | `req.param("month")` |
+|---|---|---|
+| `/archive` | `None` | `None` |
+| `/archive/2024` | `Some("2024")` | `None` |
+| `/archive/2024/05` | `Some("2024")` | `Some("05")` |
+
+- Only the last segments of a path can be optional (`/:lang?/about` is rejected), and only a parameter that takes a whole segment (`/files/:name.:ext?` is rejected too).
+- A constraint can be optional as well: `r"/users/:id(\d+)?"` matches `/users` and `/users/7`, not `/users/ada`.
+- The route counts as one route per possible path: `/archive/:year?` together with a separate `/archive` route for the same method is a [duplicate](#invalid-and-duplicate-routes).
 
 ## Typed parameters
 
@@ -165,28 +251,47 @@ app.get("/files/*path", |req: Request| async move {
 
 ### The most specific route wins
 
-When several routes could match, Vitesse compares them segment by segment: **static > parameter > wildcard**. The order in which you declare them doesn't matter. In Express, the first registered route wins.
+When several routes could match, Vitesse compares them segment by segment, from the most specific kind of segment to the least:
+
+1. a static segment (`/users/new`);
+2. a segment with a constraint or with text around its parameters (`/users/:id(\d+)`, `/img/:id.png`);
+3. a plain parameter (`/users/:name`);
+4. a wildcard (`/users/*rest`).
+
+The order in which you declare the routes doesn't matter, whereas in Express the first registered route wins. So a route with a constraint and a plain parameter can share the same position:
 
 ```rust
 app.get("/users/new", |_| async { "new-user form" });
-app.get("/users/:id", |_| async { "one user" });
+app.get(r"/users/:id(\d+)", |_| async { "one user, by id" });
+app.get("/users/:name", |_| async { "one user, by name" });
 app.get("/users/*rest", |_| async { "anything else under /users" });
 ```
 
 | Request | Route used |
 |---|---|
-| `/users/new` | `/users/new` (static beats parameter) |
-| `/users/42` | `/users/:id` |
+| `/users/new` | `/users/new` (static beats everything) |
+| `/users/42` | `/users/:id(\d+)` (the constraint matches) |
+| `/users/ada` | `/users/:name` (the constraint doesn't match) |
 | `/users/42/settings` | `/users/*rest` |
 | `/users` | `/users/*rest` (empty wildcard) |
 
 If a branch leads nowhere, the router backs up and tries the next option. With `/a/:x/c` and `/a/b/d`, a request to `/a/b/c` matches `/a/:x/c` with `x = "b"`.
 
+Declaration order only matters between two segments of the second kind at the same position, say `/:id(\d+)` and `/:slug([a-z-]+)`: they are tried in the order you declared them.
+
 ### Trailing slashes, case and query string
 
 - A trailing slash is ignored: `/users/` matches `/users`. Express does the same by default.
-- Paths are **case-sensitive**: `/Users` doesn't match `/users`. Express ignores case by default.
+- Paths are **case-sensitive** by default: `/Users` doesn't match `/users`. Express ignores case by default; to do the same, call `app.case_sensitive(false)`.
 - The query string plays no part in matching: `/search?q=rust` matches `/search`.
+
+```rust
+let mut app = App::new();
+app.case_sensitive(false);
+app.get("/users/:id", show_user); // also answers /Users/Ada and /USERS/Ada
+```
+
+With `app.case_sensitive(false)`, the static segments and the text around parameters (`.png` in `/img/:id.png`) match whatever their case, in mount prefixes too. Parameters keep the case of the request (`req.param("id")` is `"Ada"`), and constraints are left alone: add `(?i)` to the expression if it should ignore case too. Only ASCII letters are concerned.
 
 ### Invalid and duplicate routes
 
@@ -194,7 +299,9 @@ Vitesse catches mistakes in route definitions when the app starts, not when a re
 
 - the path doesn't start with `/`;
 - it has an empty segment (`/a//b`);
-- a parameter name is invalid;
+- a parameter name is invalid, or two parameters follow each other with no text between them (`/:a:b`);
+- a constraint is not a valid regular expression, or its parenthesis isn't closed;
+- an optional parameter isn't at the end of the path, or doesn't take a whole segment;
 - a wildcard isn't the last segment;
 - the same method is registered twice on the same path.
 
@@ -204,6 +311,8 @@ Two patterns that differ only in their parameter names are the same route, so `/
 thread 'main' panicked at src/main.rs:12:9:
 duplicate route: GET /users/:name is already defined
 ```
+
+`/users/:id(\d+)` and `/users/:name` don't collide, since only one of them has a constraint.
 
 ## The matched route: `req.route()`
 

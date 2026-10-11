@@ -21,18 +21,23 @@ fn main() -> std::io::Result<()> {
 }
 ```
 
-`use vitesse::prelude::*;` importe `App`, `Router`, `Request`, `Response`, `Next`, `Error`, `Json`, `Html`, `Redirect`, `Cookie`, `Body`, `ServeDir`, `StatusCode`, `Method`, `IntoResponse`, `HandlerExt`, `json!`, le module `res`, le module `middleware` et le module `ws` (WebSocket).
+`use vitesse::prelude::*;` importe `App`, `Router`, `Request`, `Response`, `Next`, `Error`, `Json`, `Html`, `Redirect`, `Cookie`, `Body`, `ServeDir`, `StatusCode`, `Method`, `IntoResponse`, `HandlerExt`, `json!`, le module `res`, le module `middleware`, le module `sse` (Server-Sent Events) et le module `ws` (WebSocket).
 
 ## Features Cargo
 
 | Feature | Par défaut | Apporte |
 |---|---|---|
 | `ws` | Activée | `app.ws`, `router.ws` et le module `vitesse::ws` |
+| `tls` | Désactivée | `app.tls` et le module `vitesse::tls` (HTTPS) |
+| `http2` | Désactivée | HTTP/2 : sur TLS (ALPN) avec `tls`, et en clair (h2c, « prior knowledge ») |
 | `http3` | Désactivée | `app.http3`, `server.http3_addr` et le module `vitesse::http3` |
+| `multipart` | Désactivée | `req.multipart()` et le module `vitesse::multipart` |
+| `compress` | Désactivée | `middleware::compress()` et `middleware::decompress()` |
+| `tower` | Désactivée | `middleware::layer`, `app.into_service()` et le module `vitesse::tower` |
 
 ```toml
 [dependencies]
-vitesse = { git = "https://github.com/maxlestage/Vitesse", features = ["http3"] }        # ajoute HTTP/3
+vitesse = { git = "https://github.com/maxlestage/Vitesse", features = ["tls", "http2"] } # ajoute HTTPS et HTTP/2
 # vitesse = { git = "https://github.com/maxlestage/Vitesse", default-features = false } # sans WebSocket
 ```
 
@@ -50,10 +55,19 @@ Voir [Installation](installation.md#les-features-cargo).
 | `app.fallback(handler)` | Handler appelé quand aucune route ne correspond (par défaut : `404 {"error":"Cannot GET /x"}`) |
 | `app.on_error(f)` | Personnalise toutes les réponses d'erreur ; `f` est une `Fn(Error) -> impl IntoResponse` |
 | `app.state(valeur)` | Enregistre un état global, un par type (`app.locals`) |
-| `app.body_limit(octets)` | Taille maximale d'un corps lu en mémoire (par défaut `DEFAULT_BODY_LIMIT`, 1 Mio) |
+| `app.body_limit(octets)` | Taille maximale d'un corps lu en mémoire (par défaut `DEFAULT_BODY_LIMIT`, 1 Mio) ; par route : `middleware::body_limit` |
+| `app.trust_proxy(valeur)` | Reverse proxys de confiance (`app.set('trust proxy')`) : `false` (par défaut), `true`, un nombre de sauts, ou `"loopback, 10.0.0.0/8"` |
 | `app.workers(n)` | Nombre de threads pour `run` (par défaut : un par processeur) |
 | `app.thread_per_core(bool)` | Mode un thread par cœur pour `run` (par défaut `true`, Linux uniquement) |
+| `app.keep_alive(durée)` | Les connexions keep-alive inactives sont fermées au bout de cette durée (par défaut 60 s) ; `Duration::ZERO` désactive le keep-alive |
+| `app.header_timeout(durée)` | Délai pour envoyer une tête de requête complète, puis `408` (par défaut 30 s) |
+| `app.shutdown_timeout(durée)` | Délai de grâce laissé aux requêtes en cours lors de l'arrêt propre (par défaut 10 s) |
+| `app.max_connections(n)` | Connexions ouvertes par boucle d'acceptation ; les autres attendent (par défaut : illimité) |
+| `app.tls(config)` | Sert HTTPS, et HTTP/2 aux clients qui le proposent (feature `tls`) |
 | `app.http3(config)` | Sert aussi l'application en HTTP/3 (QUIC, UDP), à côté de HTTP/1.1 (feature `http3`) |
+| `app.into_service()` | L'application sous forme de `Service` tower (`vitesse::tower::AppService`, feature `tower`) |
+| `app.run_unix(chemin)`, `app.listen_unix(chemin).await` | Sert sur un socket Unix au lieu d'un port TCP (Unix uniquement) |
+| `app.bind_unix(chemin).await?` | Ouvre le socket Unix et renvoie un `UnixServer` (Unix uniquement) |
 
 Tous ces réglages renvoient `&mut App` : les appels s'enchaînent. Voir [Configuration du serveur](server.md).
 
@@ -102,14 +116,21 @@ Priorité : statique > paramètre > joker. Les paramètres sont décodés (`%C3%
 | `req.method()` | La méthode HTTP (`&Method`) |
 | `req.path()` | Le chemin, sans la query string |
 | `req.uri()` | L'URI complète (`&Uri`) |
-| `req.version()` | La version HTTP |
+| `req.version()` | La version HTTP : `HTTP/1.1`, `HTTP/2.0`, `HTTP/3.0`… |
 | `req.set_uri(uri)` | Remplace l'URI (réécriture d'URL dans un middleware global) |
+| `req.set_method(méthode)` | Change la méthode avant le routage (surcharge de méthode, dans un middleware global) |
+| `req.route()` | Le motif de la route correspondante, préfixe de montage compris (`Some("/users/:id")`) ; `None` si aucune route ne correspond |
 | `req.header(nom)` | Un en-tête en `Option<&str>`, sans tenir compte de la casse (`req.get('host')`) |
 | `req.header_all(nom)` | Toutes les valeurs d'un en-tête répété |
 | `req.headers()`, `req.headers_mut()` | Tous les en-têtes (`HeaderMap`) |
 | `req.content_type()` | Le `Content-Type` |
 | `req.is("json")` | Vérifie le type du corps : type complet, sous-type ou `text/*` |
-| `req.hostname()` | L'hôte demandé, sans le port |
+| `req.accepts(&["html", "json"])` | Le meilleur type pour l'en-tête `Accept` (`req.accepts()`) ; `None` : répondre `406` |
+| `req.accepts_language(&["en", "fr"])` | La meilleure langue pour `Accept-Language` (`req.acceptsLanguages()`) |
+| `req.hostname()` | L'hôte demandé, sans le port (`X-Forwarded-Host` derrière un proxy de confiance) |
+| `req.host()` | L'hôte demandé, avec son port |
+| `req.protocol()` | `"https"` ou `"http"` (`X-Forwarded-Proto` derrière un proxy de confiance) |
+| `req.secure()` | `true` sur TLS, en HTTP/3, ou avec `X-Forwarded-Proto: https` venant d'un proxy de confiance |
 | `req.cookie(nom)` | La valeur d'un cookie (`req.cookies.nom`) |
 | `req.param(nom)` | Un paramètre de route, `Option<&str>` |
 | `req.param_as::<T>(nom)?` | Un paramètre converti en `T` ; `400` en cas d'échec |
@@ -122,6 +143,8 @@ Priorité : statique > paramètre > joker. Les paramètres sont décodés (`%C3%
 | `req.form::<T>().await?` | Formulaire encodé (`express.urlencoded()`) |
 | `req.text().await?` | Corps en texte UTF-8 ; `400` s'il est invalide |
 | `req.bytes().await?` | Corps brut (`Bytes`) |
+| `req.multipart()?` | Un corps `multipart/form-data`, champ par champ (feature `multipart`) ; `415` si ce n'est pas du multipart |
+| `req.body_limit()`, `req.set_body_limit(octets)` | La limite de taille du corps de cette requête ; à modifier dans un middleware |
 | `req.take_body()` | Le corps en flux (`Body`), non limité par `body_limit` |
 | `req.set_body(corps)` | Remplace le corps |
 | `req.state::<T>()` | L'état global (`&'static T`) ; panique, donc `500`, s'il manque |
@@ -129,9 +152,23 @@ Priorité : statique > paramètre > joker. Les paramètres sont décodés (`%C3%
 | `req.set(valeur)` | Attache une donnée à la requête (`res.locals`) ; le type doit être `Clone` |
 | `req.get::<T>()` | Lit une donnée attachée par un middleware |
 | `req.extensions()`, `req.extensions_mut()` | Les `http::Extensions` brutes |
-| `req.ip()`, `req.remote_addr()` | L'IP du client, et l'IP avec le port |
+| `req.ip()` | L'IP du client ; suit `X-Forwarded-For` derrière un proxy de confiance (`app.trust_proxy`) |
+| `req.remote_addr()` | L'adresse et le port de la connexion elle-même (`None` sur un socket Unix) |
 
 Le corps est lu à la demande et mis en cache : les méthodes de lecture peuvent être appelées plusieurs fois. Voir [Requêtes](requests.md).
+
+### Formulaires multipart (feature `multipart`)
+
+| Usage | Description |
+|---|---|
+| `let mut form = req.multipart()?;` | Lit le formulaire au fil de son arrivée ; le corps entier est limité par `req.body_limit()` (`413`) |
+| `while let Some(field) = form.next_field().await? { … }` | Les champs, dans l'ordre ; lisez (ou abandonnez) l'un avant de demander le suivant |
+| `field.name()` | Le nom du champ (`<input name="avatar">`) |
+| `field.file_name()` | Pour un fichier, son nom chez le client : ne l'utilisez jamais tel quel comme chemin |
+| `field.content_type()`, `field.headers()` | Le `Content-Type` du champ, tous ses en-têtes |
+| `field.chunk().await?` | Le morceau suivant du contenu ; `None` à la fin |
+| `field.bytes().await?`, `field.text().await?` | Tout le contenu en mémoire, en octets ou en texte UTF-8 |
+| `field.save(chemin).await?` | Écrit le contenu dans un fichier au fil de son arrivée et renvoie sa taille (`u64`) ; le fichier partiel est supprimé si l'envoi échoue |
 
 ## Réponses
 
@@ -202,7 +239,22 @@ Le corps est lu à la demande et mis en cache : les méthodes de lecture peuvent
 | `Body::wrap(corps)` | Enveloppe n'importe quel `http_body::Body` (proxy) |
 | `body.size()`, `body.to_bytes().await` | Taille si elle est connue ; lit tout en mémoire |
 
-Voir [Réponses](responses.md).
+### Server-Sent Events (`vitesse::sse`)
+
+| Usage | Description |
+|---|---|
+| `let (tx, stream) = sse::channel(16);` | Renvoyez `stream` depuis le handler, et envoyez les événements depuis une tâche lancée avec `tokio::spawn` |
+| `tx.send(event).await` | Envoie un événement ; `Err(Closed)` une fois le navigateur parti |
+| `tx.try_send(event)` | Sans attendre : `Err(TrySendError::Full(event))` si le tampon est plein, `Err(TrySendError::Closed(event))` si le navigateur est parti |
+| `tx.is_closed()`, `tx.closed().await` | Le navigateur est-il parti ? Attendre qu'il parte ; `Sender` est `Clone` |
+| `Sse::new(flux)` | Une réponse à partir de n'importe quel `Stream` de `Result<Event, E>` |
+| `.keep_alive(KeepAlive::new().interval(d).text("ping"))`, `.no_keep_alive()` | Commentaire de keep-alive sur une connexion silencieuse (par défaut : toutes les 15 s) |
+| `Event::new().data("…")` | Un événement ; des données sur plusieurs lignes donnent plusieurs lignes `data:` |
+| `.json_data(&valeur)?` | Données sérialisées en JSON |
+| `.event("tick")`, `.id("42")`, `.retry(durée)`, `.comment("…")` | Type d'événement, identifiant (`Last-Event-ID`), délai de reconnexion, commentaire |
+| `event.to_string()` | L'événement tel qu'il est envoyé sur le réseau |
+
+La réponse porte `content-type: text/event-stream` et `cache-control: no-cache`, et se termine quand tous les `Sender` sont abandonnés. Voir [Réponses](responses.md#server-sent-events).
 
 ## Erreurs
 
@@ -250,6 +302,21 @@ Voir [Erreurs](errors.md).
 | `.max_age(durée)` | `maxAge` | Durée de cache des requêtes préliminaires |
 | `middleware::helmet()` | `helmet()` | En-têtes de sécurité |
 | `middleware::timeout(durée)` | `connect-timeout` | `503` si la durée est dépassée |
+| `middleware::body_limit(octets)` | `express.json({ limit })` | Limite de taille du corps pour une route (`.with()`) ou un routeur |
+| `middleware::request_id()` | `express-request-id` | Identifiant dans `X-Request-Id` (repris de la requête, ou un nouvel UUID), dans `req.get::<RequestId>()` et sur la réponse |
+| `.header("x-correlation-id")`, `.trust_incoming(false)` | | Un autre en-tête ; toujours générer un nouvel identifiant |
+| `middleware::basic_auth(("admin", "secret"))` | `express-basic-auth` | `401` + `WWW-Authenticate` sans identifiants valides ; accepte aussi une closure `\|user, password\| -> bool` ou une liste de paires |
+| `.realm("Admin")` | | Le domaine (*realm*) affiché par le navigateur (par défaut `Restricted`) |
+| `req.get::<middleware::BasicUser>()` | | Le nom de l'utilisateur authentifié |
+| `middleware::bearer_auth(jeton)` | | `Authorization: Bearer …` ; un `&'static str`, une `String`, une liste, ou une closure `\|token\| -> bool` |
+| `middleware::constant_time_eq(a, b)` | | Compare deux secrets en temps constant |
+| `middleware::concurrency_limit(n)` | | Au plus `n` requêtes en cours ; les autres attendent |
+| `.max_wait(durée)` | | `503` + `Retry-After` au-delà de cette attente (`Duration::ZERO` : tout de suite) |
+| `middleware::rate_limit(max, période)` | `express-rate-limit` | `max` requêtes par `période` et par IP, puis `429` + `Retry-After` ; en-têtes `X-RateLimit-Limit` et `X-RateLimit-Remaining` |
+| `.key(\|req: &Request\| -> Option<String>)` | `keyGenerator` | Une autre clé de client (clé d'API, identifiant d'utilisateur) ; `None` : pas de limite |
+| `middleware::compress()` | `compression()` | Réponses en Brotli ou gzip (feature `compress`) |
+| `middleware::decompress()` | | Décompresse les corps de requête `gzip`, `br` et `deflate` (feature `compress`) |
+| `middleware::layer(couche_tower)` | | N'importe quelle `Layer` tower / tower-http (feature `tower`) |
 | `middleware::serve_static(dossier)` | `express.static()` | Équivaut à `ServeDir::new(dossier)` |
 
 Voir [Middlewares](middleware.md).
@@ -263,6 +330,7 @@ Voir [Middlewares](middleware.md).
 | `router.mount(préfixe, autre)` | Routeurs imbriqués |
 | `router.static_dir(…)`, `router.serve_dir(…)` | Fichiers statiques dans un routeur |
 | `router.middleware(mw)` | Middleware du routeur : ses routes et toute autre requête sous son préfixe (`router.use`) |
+| `router.fallback(handler)` | Répond aux chemins sous le préfixe du routeur auxquels aucune route ne correspond, à la place du fallback de l'application |
 | `app.mount("/api", router)` | Le monte ; le préfixe peut contenir des paramètres (`/users/:id/posts`) |
 
 Voir [Routeurs](routers.md).
@@ -311,9 +379,37 @@ Inclus : types MIME, `index.html`, `ETag` et `Last-Modified` (`304`), requêtes 
 | `server.local_addr()` | L'adresse réellement utilisée (port `0`) |
 | `server.http3_addr()` | L'adresse UDP de HTTP/3, s'il est configuré |
 | `server.run().await` | Sert jusqu'à `Ctrl+C` / `SIGTERM`, puis s'arrête proprement |
-| `server.with_graceful_shutdown(signal).await` | Sert jusqu'à la fin de `signal`, au lieu de `Ctrl+C` / `SIGTERM` ; les requêtes en cours ont 10 s pour se terminer |
+| `server.with_graceful_shutdown(signal).await` | Sert jusqu'à la fin de `signal`, au lieu de `Ctrl+C` / `SIGTERM` ; les requêtes en cours ont `shutdown_timeout` (10 s) pour se terminer |
+| `unix_server.path()` | Le fichier du socket (`UnixServer`), par exemple pour modifier ses permissions |
+| `unix_server.run().await`, `unix_server.with_graceful_shutdown(signal).await` | Comme pour `Server` ; le fichier du socket est supprimé à l'arrêt |
 
 Voir [Configuration du serveur](server.md).
+
+## HTTPS et HTTP/2
+
+| Usage | Description |
+|---|---|
+| `app.tls(Tls::from_pem_files("fullchain.pem", "privkey.pem")?)` | HTTPS, TLS 1.2 et 1.3 (`vitesse::tls::Tls`, feature `tls`) |
+| `Tls::from_pem(chaîne, clé)` | Chaîne de certificats et clé privée depuis la mémoire (PEM) |
+| `Tls::from_rustls(config)` | Votre propre `rustls::ServerConfig` (TLS mutuel, plusieurs domaines…) ; ALPN `h2` et `http/1.1` ajoutés s'il n'en liste aucun |
+| `tls.config()` | La configuration rustls (`&Arc<rustls::ServerConfig>`) |
+| Feature `http2` | HTTP/2 sur TLS (navigateurs, ALPN), et h2c avec « prior knowledge » sur un port en clair |
+| `req.version() == Version::HTTP_2` | Une requête reçue en HTTP/2 (`vitesse::http::Version`) |
+
+Mêmes routes, middlewares et handlers dans tous les protocoles ; WebSocket passe par HTTP/1.1 (`wss://`). Voir [HTTPS et HTTP/2](https.md).
+
+## Proxys de confiance
+
+| Usage | Description |
+|---|---|
+| `app.trust_proxy(false)` | Personne (par défaut) : `req.ip()` est l'adresse de la connexion |
+| `app.trust_proxy("loopback")` | Les proxys à ces adresses ou dans ces réseaux : IP, CIDR (`10.0.0.0/8`), `loopback`, `linklocal`, `uniquelocal`, séparés par des virgules |
+| `app.trust_proxy(1)` | Les `n` proxys les plus proches de l'application, quelle que soit leur adresse |
+| `app.trust_proxy(true)` | Tous les proxys : le client est l'adresse la plus à gauche de `X-Forwarded-For` |
+| `vitesse::TrustProxy` | `None`, `All`, `Hops(n)`, `Networks(Vec<Network>)` ; `"…".parse::<TrustProxy>()` pour gérer les erreurs |
+| `trust.trusts(ip, hop)`, `network.contains(ip)` | Vérifie une adresse (`vitesse::Network` : `"10.0.0.0/8".parse()`) |
+
+Effets : `req.ip()` (`X-Forwarded-For`), `req.protocol()` et `req.secure()` (`X-Forwarded-Proto`), `req.host()` et `req.hostname()` (`X-Forwarded-Host`). Voir [Mise en production](production.md#connaître-ladresse-ip-du-client).
 
 ## HTTP/3
 
@@ -327,7 +423,19 @@ Voir [Configuration du serveur](server.md).
 | `.alt_svc_port(443)` | Port public annoncé dans `alt-svc` (derrière un proxy, Docker ou du NAT) |
 | `req.version()` | `HTTP/3.0` pour une requête reçue en HTTP/3 |
 
-Mêmes routes, middlewares et handlers dans les deux protocoles ; les corps de requête sont lus en entier avant le handler. Voir [HTTP/3 et QUIC](http3.md).
+Mêmes routes, middlewares et handlers dans les deux protocoles ; les corps de requête sont lus en entier avant le handler. Avec `app.tls(...)` en plus, les réponses HTTPS portent `alt-svc` et les navigateurs passent directement à HTTP/3. Voir [HTTP/3 et QUIC](http3.md).
+
+## tower (feature `tower`)
+
+| Usage | Description |
+|---|---|
+| `app.middleware(middleware::layer(CorsLayer::permissive()))` | Une `Layer` tower comme middleware : aussi avec `router.middleware` et `handler.with` |
+| `vitesse::tower::layer(l)` | Équivaut à `middleware::layer` |
+| `app.into_service()` | L'application sous forme de `Service<http::Request<B>>` (`AppService`, `Clone` + `Copy`) : hyper, `Router::nest_service` d'axum, `ServiceExt::oneshot` |
+| `vitesse::tower::{Layer, Service}` | Les traits de tower |
+| `vitesse::tower::NextService` | La suite de la chaîne Vitesse, le service le plus interne d'une couche |
+
+La couche peut modifier la méthode, l'URI, les en-têtes, les extensions et le corps ; ses erreurs deviennent des `500`. Le passage en WebSocket n'est pas disponible via `into_service` (`501`). Voir [Middlewares](middleware.md#couches-tower).
 
 ## Tests
 
@@ -342,6 +450,7 @@ Mêmes routes, middlewares et handlers dans les deux protocoles ; les corps de r
 | `res.status()`, `res.header(nom)`, `res.headers()` | Statut et en-têtes |
 | `res.text()`, `res.bytes()`, `res.json::<T>()` | Le corps |
 | `client.get("/route-ws")` | Sur une route WebSocket : seulement la réponse à la poignée de main (`426` pour du HTTP ordinaire) ; testez les conversations sur un vrai port |
+| `app.into_service().oneshot(request).await` | Teste à travers tower (feature `tower` et `ServiceExt` de tower) |
 
 Voir [Tests](testing.md).
 
@@ -353,7 +462,8 @@ Voir [Tests](testing.md).
 | `vitesse::http`, `HeaderMap`, `Method`, `StatusCode`, `header` | Le crate `http` et ses types courants |
 | `vitesse::serde_json`, `json!` | Le crate `serde_json` et sa macro |
 | `vitesse::tokio` | Le crate `tokio`, avec les fonctionnalités qu'utilise Vitesse |
-| `vitesse::http3::rustls` | Le crate `rustls` utilisé par HTTP/3 (feature `http3`) |
+| `vitesse::http3::rustls`, `vitesse::tls::rustls` | Le crate `rustls` utilisé par HTTP/3 et HTTPS (features `http3` et `tls`) |
 | `vitesse::DEFAULT_BODY_LIMIT` | `1024 * 1024` octets |
+| `vitesse::VERSION` | La version du crate (`"0.1.0"`) |
 | `Handler`, `Middleware`, `IntoResponse`, `IntoStatus`, `HandlerExt`, `ListenAddr` | Les traits publics |
-| `BoxFuture<T>`, `BoxError`, `Chained`, `Next`, `Server`, `SameSite`, `Cookie`, `Body` | Les autres types publics |
+| `BoxFuture<T>`, `BoxError`, `Chained`, `Next`, `Server`, `UnixServer`, `SameSite`, `Cookie`, `Body`, `TrustProxy`, `Network` | Les autres types publics |

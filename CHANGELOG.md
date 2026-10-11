@@ -20,6 +20,9 @@ First public release.
 
 ### Added
 
+- `middleware::compress()` (feature `compress`): responses in Brotli, or gzip
+  when the browser does not accept Brotli, for the text-like bodies worth it.
+
 - `vitesse::VERSION`, the version of the crate.
 
 - Express.js-style API: `App`, `app.get/post/put/patch/delete/…`, path

@@ -1,5 +1,5 @@
 //! Ready-to-use middlewares: `logger`, `cors`, `helmet`, `timeout`,
-//! `serve_static`.
+//! `serve_static` and, with the `compress` feature, `compress`.
 
 use std::io::{IsTerminal, Write};
 use std::path::PathBuf;
@@ -266,5 +266,228 @@ impl Middleware for Cors {
             }
             res
         })
+    }
+}
+
+/// Compresses responses with Brotli, or with gzip when the browser does not accept
+/// Brotli (`Accept-Encoding`), like `compression()` in Express. Needs the `compress`
+/// feature.
+///
+/// Only bodies worth it are compressed: HTML, CSS, JavaScript, JSON, XML, SVG,
+/// WebAssembly and the other text-like types, of 1 KiB or more, with a known size and
+/// not encoded already; images, videos and archives pass through. The response gets
+/// `Content-Encoding` and `Vary: Accept-Encoding`, and the compression runs on a
+/// blocking thread, so the workers keep answering other requests. Add it before the
+/// other middlewares, so that every response goes through it.
+///
+/// ```
+/// use vitesse::prelude::*;
+///
+/// let mut app = App::new();
+/// app.middleware(middleware::compress());
+/// ```
+#[cfg(feature = "compress")]
+pub fn compress() -> impl Middleware {
+    |req: Request, next: Next| async move {
+        let encoding = compression::preferred(req.header(header::ACCEPT_ENCODING).unwrap_or(""));
+        let res = next.run(req).await;
+        match encoding {
+            Some(encoding) => compression::apply(res, encoding).await,
+            None => res,
+        }
+    }
+}
+
+#[cfg(feature = "compress")]
+mod compression {
+    use std::io::Write;
+
+    use http::header;
+
+    use crate::body::Body;
+    use crate::response::Response;
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub(super) enum Encoding {
+        Brotli,
+        Gzip,
+    }
+
+    impl Encoding {
+        fn name(self) -> &'static str {
+            match self {
+                Encoding::Brotli => "br",
+                Encoding::Gzip => "gzip",
+            }
+        }
+    }
+
+    /// Below this size the headers would cost more than the bytes saved.
+    const MIN: u64 = 1024;
+    /// Above this size the body is streamed as it is rather than held twice in memory.
+    const MAX: u64 = 16 * 1024 * 1024;
+
+    /// The encoding to use for an `Accept-Encoding` header: Brotli when accepted, else
+    /// gzip, else none. A quality of `0` refuses an encoding; `*` accepts gzip.
+    pub(super) fn preferred(accept: &str) -> Option<Encoding> {
+        let (mut brotli, mut gzip) = (false, false);
+        for part in accept.split(',') {
+            let mut pieces = part.split(';');
+            let name = pieces.next().unwrap_or("").trim();
+            let q = pieces
+                .find_map(|p| p.trim().strip_prefix("q="))
+                .and_then(|q| q.trim().parse::<f32>().ok())
+                .unwrap_or(1.0);
+            if q <= 0.0 {
+                continue;
+            }
+            match name {
+                "br" => brotli = true,
+                "gzip" | "*" => gzip = true,
+                _ => {}
+            }
+        }
+        if brotli {
+            Some(Encoding::Brotli)
+        } else if gzip {
+            Some(Encoding::Gzip)
+        } else {
+            None
+        }
+    }
+
+    /// Whether a content type is worth compressing.
+    pub(super) fn compressible(content_type: &str) -> bool {
+        let ty = content_type
+            .split(';')
+            .next()
+            .unwrap_or("")
+            .trim()
+            .to_ascii_lowercase();
+        ty.starts_with("text/")
+            || ty.ends_with("+json")
+            || ty.ends_with("+xml")
+            || matches!(
+                ty.as_str(),
+                "application/javascript"
+                    | "application/x-javascript"
+                    | "application/json"
+                    | "application/xml"
+                    | "application/wasm"
+                    | "image/svg+xml"
+                    | "font/ttf"
+                    | "font/otf"
+            )
+    }
+
+    fn encode(bytes: &[u8], encoding: Encoding) -> std::io::Result<Vec<u8>> {
+        let out = Vec::with_capacity(bytes.len() / 2);
+        match encoding {
+            Encoding::Brotli => {
+                let mut writer = brotli::CompressorWriter::new(out, 4096, 5, 22);
+                writer.write_all(bytes)?;
+                Ok(writer.into_inner())
+            }
+            Encoding::Gzip => {
+                let mut encoder =
+                    flate2::write::GzEncoder::new(out, flate2::Compression::default());
+                encoder.write_all(bytes)?;
+                encoder.finish()
+            }
+        }
+    }
+
+    /// Compresses the body of `res` when it is worth it (see [`super::compress`]).
+    pub(super) async fn apply(mut res: Response, encoding: Encoding) -> Response {
+        let worth = res.error().is_none()
+            && !matches!(res.status_code().as_u16(), 204 | 304)
+            && res.get_header("content-encoding").is_none()
+            && res.get_header("content-type").is_some_and(compressible)
+            && res.body().size().is_some_and(|n| (MIN..=MAX).contains(&n));
+        if !worth {
+            return res;
+        }
+        let body = std::mem::take(res.body_mut());
+        let Ok(bytes) = body.to_bytes().await else {
+            res.set_status(500);
+            return res;
+        };
+        let original = bytes.clone();
+        match tokio::task::spawn_blocking(move || encode(&bytes, encoding)).await {
+            Ok(Ok(encoded)) => {
+                let headers = res.headers_mut();
+                headers.remove(header::CONTENT_LENGTH);
+                let vary = match headers.get(header::VARY).and_then(|v| v.to_str().ok()) {
+                    Some(v) if v.to_ascii_lowercase().contains("accept-encoding") => v.to_owned(),
+                    Some(v) => format!("{v}, accept-encoding"),
+                    None => "accept-encoding".to_owned(),
+                };
+                res.set_header(header::VARY, vary);
+                res.set_header(header::CONTENT_ENCODING, encoding.name());
+                *res.body_mut() = Body::from(encoded);
+            }
+            _ => *res.body_mut() = Body::from(original),
+        }
+        res
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn the_browser_chooses_the_encoding() {
+            assert_eq!(preferred("gzip, deflate, br"), Some(Encoding::Brotli));
+            assert_eq!(preferred("gzip, deflate"), Some(Encoding::Gzip));
+            assert_eq!(preferred("br;q=0, gzip;q=0.5"), Some(Encoding::Gzip));
+            assert_eq!(preferred("*"), Some(Encoding::Gzip));
+            assert_eq!(preferred("identity"), None);
+            assert_eq!(preferred(""), None);
+            assert_eq!(preferred("gzip;q=0, br;q=0"), None);
+        }
+
+        #[test]
+        fn text_like_types_are_worth_it() {
+            for ty in [
+                "text/html; charset=utf-8",
+                "application/javascript",
+                "application/json",
+                "application/manifest+json",
+                "image/svg+xml",
+                "application/wasm",
+                "application/xml; charset=utf-8",
+            ] {
+                assert!(compressible(ty), "{ty}");
+            }
+            for ty in [
+                "image/png",
+                "video/mp4",
+                "application/zip",
+                "font/woff2",
+                "",
+            ] {
+                assert!(!compressible(ty), "{ty}");
+            }
+        }
+
+        #[test]
+        fn both_encoders_round_trip() {
+            use std::io::Read;
+
+            let text = "<p>hello</p>".repeat(300);
+            let br = encode(text.as_bytes(), Encoding::Brotli).unwrap();
+            let mut decoded = Vec::new();
+            brotli::Decompressor::new(br.as_slice(), 4096)
+                .read_to_end(&mut decoded)
+                .unwrap();
+            assert_eq!(decoded, text.as_bytes());
+            assert!(br.len() < text.len() / 10);
+            let gz = encode(text.as_bytes(), Encoding::Gzip).unwrap();
+            let mut decoded = String::new();
+            flate2::read::GzDecoder::new(gz.as_slice())
+                .read_to_string(&mut decoded)
+                .unwrap();
+            assert_eq!(decoded, text);
+        }
     }
 }

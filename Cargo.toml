@@ -39,6 +39,9 @@ tokio = { version = "1", features = ["rt", "rt-multi-thread", "net", "time", "fs
 
 # WebSocket (`ws`, activé par défaut).
 futures-util = { version = "0.3", default-features = false, features = ["sink", "std"], optional = true }
+
+brotli = { version = "9", optional = true }
+flate2 = { version = "1", optional = true }
 tokio-tungstenite = { version = "0.30", default-features = false, features = ["handshake"], optional = true }
 
 # QUIC / HTTP/3 (`http3`), avec rustls et ring : du Rust, sans OpenSSL.
@@ -53,6 +56,8 @@ default = ["ws"]
 ws = ["dep:tokio-tungstenite", "dep:futures-util"]
 # `app.http3(...)` : HTTP/3 sur QUIC (UDP), à côté de HTTP/1.1.
 http3 = ["dep:quinn", "dep:h3", "dep:h3-quinn", "dep:rustls"]
+# `middleware::compress()` : réponses en Brotli ou gzip.
+compress = ["dep:brotli", "dep:flate2"]
 
 [[example]]
 name = "chat"

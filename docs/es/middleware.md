@@ -160,6 +160,7 @@ El módulo `vitesse::middleware` (accesible como `middleware::` con el preludio)
 | `middleware::helmet()` | `helmet()` | cabeceras de seguridad |
 | `middleware::timeout(duración)` | `connect-timeout` | `503` cuando una petición tarda demasiado |
 | `middleware::serve_static(carpeta)` | `express.static(carpeta)` | archivos estáticos, ver [Archivos estáticos](static-files.md) |
+| `middleware::compress()` | `compression()` | respuestas en Brotli o gzip (feature `compress`) |
 
 ### `logger`
 
@@ -238,6 +239,21 @@ app.middleware(middleware::timeout(Duration::from_secs(10)));
 ```
 
 El `Future` del handler se descarta en su siguiente `.await`. El código que bloquea el hilo sin esperar nunca (un cálculo largo, `std::thread::sleep`) no se puede interrumpir.
+
+### `compress`
+
+Comprime las respuestas con Brotli, o con gzip cuando el navegador no acepta Brotli, como `compression()` de Express. Necesita la feature de Cargo `compress`:
+
+```toml
+[dependencies]
+vitesse = { version = "0.1", features = ["compress"] }
+```
+
+```rust
+app.middleware(middleware::compress());
+```
+
+Solo se comprimen los cuerpos que merecen la pena: HTML, CSS, JavaScript, JSON, XML, SVG, WebAssembly y los demás tipos de texto, de 1 KiB o más, de tamaño conocido (no en streaming) y no codificados ya. Las imágenes, los vídeos y los archivos comprimidos pasan tal cual. La respuesta recibe `Content-Encoding` y `Vary: Accept-Encoding`, y la compresión corre en un hilo bloqueante, así que los workers siguen atendiendo otras peticiones. Añádelo antes que los demás middlewares, para que todas las respuestas pasen por él.
 
 ## Escribir un middleware reutilizable
 

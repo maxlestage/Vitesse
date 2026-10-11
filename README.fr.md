@@ -101,6 +101,7 @@ utilisez plutôt `app.listen(port).await`.
 |---|---|---|
 | `ws` | Activée | WebSocket : `app.ws(...)` et `vitesse::ws` ([guide](docs/fr/websocket.md)) |
 | `http3` | Désactivée | HTTP/3 sur QUIC : `app.http3(...)` et `vitesse::http3` ([guide](docs/fr/http3.md)) |
+| `compress` | Désactivée | `middleware::compress()` : réponses en Brotli ou gzip ([guide](docs/fr/middleware.md#compress)) |
 
 ```toml
 [dependencies]

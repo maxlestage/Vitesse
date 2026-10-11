@@ -164,6 +164,7 @@ The `vitesse::middleware` module (available as `middleware::` with the prelude) 
 | `middleware::request_id()` | `express-request-id` | an id for each request, in `X-Request-Id` |
 | `middleware::basic_auth(credentials)` | `express-basic-auth` | HTTP Basic authentication (user name and password) |
 | `middleware::bearer_auth(token)` | `passport-http-bearer` | `Authorization: Bearer` tokens |
+| `middleware::session(store)` | `express-session` | server-side sessions, read with `req.session()` (feature `session`) |
 | `middleware::concurrency_limit(max)` | | caps the number of requests handled at once |
 | `middleware::rate_limit(max, period)` | `express-rate-limit` | requests per client and period, `429` beyond |
 | `middleware::serve_static(dir)` | `express.static(dir)` | static files, see [Static files](static-files.md) |
@@ -325,6 +326,34 @@ It accepts a token (`&'static str` or `String`), an array or a `Vec` of tokens, 
 
 > [!IMPORTANT]
 > Basic authentication sends the password with every request, merely encoded in base64, and a token can be reused by anyone who sees it: only use them over HTTPS ([HTTPS and HTTP/2](https.md), or a proxy that terminates TLS).
+
+### `session`
+
+Server-side sessions, like `express-session`. It needs the `session` Cargo feature:
+
+```toml
+[dependencies]
+vitesse = { git = "https://github.com/maxlestage/Vitesse", features = ["session"] }
+```
+
+```rust
+use vitesse::session::MemoryStore;
+
+app.middleware(middleware::session(MemoryStore::new()));
+app.get("/visits", |req: Request| async move {
+    let session = req.session();
+    let visits = session.get::<u32>("visits").unwrap_or(0) + 1;
+    session.insert("visits", visits)?;
+    Ok::<_, Error>(format!("visit #{visits}"))
+});
+```
+
+- On the way in, it loads the visitor's session from the store, using the id in the `vitesse.sid` cookie. On the way out, it saves the session and sends the cookie, only if something changed: visitors who never write to their session get no cookie.
+- Handlers, and the middlewares that run after it, reach the session with `req.session()`, which answers `500` where the middleware isn't installed. Add it with `app.middleware`, before an authentication middleware that reads the session.
+- The cookie is `HttpOnly`, `SameSite=Lax`, `Secure` over HTTPS, and signed when the app has a secret (`app.cookie_secret(...)`). `.cookie_name(...)`, `.max_age(...)` (1 day by default), `.rolling(true)`, `.secure(...)`, `.same_site(...)`, `.domain(...)` and `.path(...)` change it.
+- `MemoryStore` keeps sessions in the memory of the process; implement the `SessionStore` trait to keep them in Redis or a database.
+
+Logging in and out, the options, stores and CSRF are covered in [Signed cookies and sessions](sessions.md).
 
 ### `concurrency_limit`
 

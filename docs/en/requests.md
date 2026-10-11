@@ -1,6 +1,6 @@
 # Reading requests
 
-Every handler receives a `Request`. From it you can read the method, the path, route parameters, the query string, headers, cookies, the body, uploaded files and the client's address, and find out which format the client prefers. This page covers each of them, with the Express equivalent where there is one.
+Every handler receives a `Request`. From it you can read the method, the path, route parameters, the query string, headers, cookies and the session, the body, uploaded files and the client's address, find out which format the client prefers, and build the URLs of your routes. This page covers each of them, with the Express equivalent where there is one.
 
 ## The `Request` object
 
@@ -98,6 +98,26 @@ app.get("/users/:id/posts/:post", |req: Request| async move {
 ### The matched route
 
 `req.route()` returns the pattern of the route that answers the request, mount prefix included: `Some("/users/:id/posts/:post")` for `/users/42/posts/7`. It's Express's `req.route.path`, and it's what you want in logs and metrics, where the raw path would give one line per user. See [Routing](routing.md#the-matched-route-reqroute).
+
+### Building URLs: `path_for` and `url_for`
+
+Give a route a name with `.name(...)`, and any handler can build its URL instead of writing it by hand (actix-web's `url_for`; Express has no equivalent):
+
+```rust
+app.get("/users/:id", show_user).name("user");
+
+app.post("/users", |req: Request| async move {
+    let id = 42; // the id of the user you just created
+    let location = req.url_for("user", &[&id])?; // "https://example.com/users/42"
+    Ok::<_, Error>(res::status(201).header("location", location).json(json!({ "id": id })))
+});
+```
+
+- `req.path_for(name, &[...])` returns the path, `"/users/42"`: the values fill the route's parameters in order, and are percent-encoded (`"a b"` gives `a%20b`). Pass `&[]` for a route without parameters, and `&[&"LAX", &"SFO"]` for several.
+- `req.url_for(name, &[...])` adds the protocol and the host of the current request (`req.protocol()` and `req.host()`, so it follows [`trust_proxy`](#behind-a-proxy-trust_proxy)). For links that leave the site, in an email for instance, prefer `path_for` after a base URL from your configuration (see [Host and protocol](#host-and-protocol)).
+- Both return an `Error` for an unknown name, a missing or extra value, or a value that doesn't satisfy the parameter's constraint (and `url_for` for a request without a host). These are programming mistakes, not client errors: the client gets a plain `500 {"error":"Internal Server Error"}`, and the cause is printed on standard error.
+
+Naming routes, optional parameters and constraints are covered in [Routing](routing.md#named-routes-and-url-generation).
 
 ## Query string
 
@@ -244,7 +264,21 @@ app.get("/", |req: Request| async move {
 });
 ```
 
-The value comes back as the browser sent it (surrounding quotes removed). It is neither URL-decoded nor signature-checked. To set or delete cookies, see [Sending responses](responses.md).
+The value comes back as the browser sent it (surrounding quotes removed), without URL decoding. To set or delete cookies, see [Sending responses](responses.md#cookies).
+
+### Signed cookies and the session
+
+With the `session` feature, two more things come from cookies. `req.signed_cookie(name)` reads a cookie signed with the app's secret (`app.cookie_secret(...)`), like Express's `req.signedCookies.name`: you get the value, or `None` if the cookie is missing or the visitor changed it. And with the `session` middleware, `req.session()` returns the visitor's session, like `req.session` with express-session:
+
+```rust
+app.get("/", |req: Request| async move {
+    let theme = req.signed_cookie("theme").unwrap_or_else(|| "light".into());
+    let user: Option<String> = req.session().get("user");
+    format!("theme: {theme}, user: {user:?}")
+});
+```
+
+Signing, sessions, logging in and out and session stores are covered in [Signed cookies and sessions](sessions.md).
 
 ## Body
 
@@ -386,7 +420,7 @@ async fn larger_bodies_for_admins(mut req: Request, next: Next) -> Response {
 
 - The limit only kicks in when you read the body. A handler that never reads it never produces a `413`.
 - It also covers [`req.multipart()`](#file-uploads-multipart) (the whole form) and [`middleware::decompress()`](middleware.md#decompress) (the compressed and the decompressed size), but not `take_body()`.
-- Over [HTTP/3](http3.md), bodies are read before routing, within `app.body_limit`: if HTTP/3 clients upload large files, raise the global limit too.
+- It works the same over HTTP/1.1, [HTTP/2](https.md) and [HTTP/3](http3.md).
 - A body cut short by tower-http's `RequestBodyLimitLayer` (see [Tower layers](middleware.md#tower-layers)) also gives a `413`.
 
 ### Streaming with `take_body`
@@ -644,6 +678,8 @@ app.get("/me", |req: Request| async move {
 | `secure()` | `req.secure` | `bool` |
 | `set_uri(uri)` | assign `req.url` | |
 | `route()` | `req.route.path` | `Option<&'static str>` |
+| `path_for(name, &[...])` | | `Result<String, Error>` (`500`): the path of a named route |
+| `url_for(name, &[...])` | | `Result<String, Error>` (`500`): the same, with protocol and host |
 | `param(name)` | `req.params.name` | `Option<&str>` |
 | `param_as::<T>(name)` | | `Result<T, Error>` (`400`) |
 | `params()` | `req.params` | iterator of `(&str, &str)` |
@@ -659,6 +695,9 @@ app.get("/me", |req: Request| async move {
 | `accepts(&[...])` | `req.accepts([...])` | `Option<&str>` (`None`: answer `406`) |
 | `accepts_language(&[...])` | `req.acceptsLanguages(...)` | `Option<&str>` |
 | `cookie(name)` | `req.cookies.name` | `Option<&str>` |
+| `signed_cookie(name)` (feature `session`) | `req.signedCookies.name` | `Option<String>` (`None` if missing or changed) |
+| `sign_cookie(cookie)` (feature `session`) | `res.cookie(name, value, { signed: true })` | `Cookie`, to send with `.cookie(...)` |
+| `session()` (feature `session`) | `req.session` | `&Session` (`500` without the `session` middleware) |
 | `json::<T>().await` | `req.body` + `express.json()` | `Result<T, Error>` |
 | `form::<T>().await` | `req.body` + `express.urlencoded()` | `Result<T, Error>` |
 | `text().await` | `req.body` + `express.text()` | `Result<String, Error>` |
@@ -672,3 +711,4 @@ app.get("/me", |req: Request| async move {
 | `state::<T>()` / `try_state::<T>()` | `req.app.locals` | `&T` / `Option<&T>` |
 | `get::<T>()` / `set(value)` | `res.locals` | `Option<&T>` / `Option<T>` (the previous value) |
 | `extensions()` / `extensions_mut()` | | `&Extensions` / `&mut Extensions` |
+| `render(template, context)` (feature `templates`) | `res.render(view, locals)` | `Result<Html<String>, Error>`, see [HTML templates](templates.md) |

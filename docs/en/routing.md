@@ -115,10 +115,10 @@ app.get("/img/:id.png", show_png);
 | `/img/42.png` | `/img/:id.png` | `id = "42"` |
 | `/files/README` or `/api/2/status` | none: `404` | |
 
-- Each parameter takes at least one character, and the first one as few as possible, as in Express: that is why `archive.tar.gz` gives `archive` and `tar.gz`.
+- Each parameter takes at least one character, and all but the last take as few as possible, as in Express: that is why `archive.tar.gz` gives `archive` and `tar.gz`.
 - Two parameters must be separated by text: `/:from:to` is rejected at startup, since nothing says where `from` ends.
 
-### Constraints: `:id(\d+)`
+### Constraints with regular expressions
 
 A regular expression in parentheses, right after the name, restricts the values a parameter accepts. A request whose value doesn't match simply doesn't match the route: another route can take it, or it gets a `404`.
 
@@ -151,7 +151,7 @@ A constraint chooses the route, and `req.param_as` still converts the value: her
 > [!NOTE]
 > Express 5 removed regular expressions from paths, and actix-web writes them `{id:\d+}`. Vitesse keeps Express 4's syntax, `:id(\d+)`.
 
-### Optional parameters: `:year?`
+### Optional parameters
 
 A `?` after a parameter makes it optional. One route then answers several paths:
 
@@ -193,6 +193,8 @@ GET /users/42   → 200 user #42
 GET /users/abc  → 400 {"error":"invalid parameter 'id': 'abc'"}
 GET /users/-1   → 400 (a u64 can't be negative)
 ```
+
+To answer `404` instead of `400` for `/users/abc`, or to let another route take it, add a [constraint](#constraints-with-regular-expressions) to the route: `r"/users/:id(\d+)"`.
 
 For your own types, implement `FromStr`:
 
@@ -389,7 +391,7 @@ app.post("/users", create_user);
 Names are checked at two moments:
 
 - **At startup**, `name` panics if no route comes right before it (a `mount`, for instance), or if the name is already taken: names are unique across the whole application.
-- **When you call it**, `path_for` and `url_for` return a `500` error if the name is unknown, if a value is missing or extra, if a value doesn't satisfy its constraint, or (`url_for` only) if the request has no host. The message says which: `{"error":"cannot build the URL of 'user': missing a value for ':id'"}`.
+- **When you call it**, `path_for` and `url_for` return a `500` error if the name is unknown, if a value is missing or extra, if a value doesn't satisfy its constraint, or (`url_for` only) if the request has no host. The client only sees `{"error":"Internal Server Error"}`; the cause (`cannot build the URL of 'user': missing a value for ':id'`) is printed on standard error, like other server errors.
 
 Routes declared in a [router](routers.md#named-routes-in-routers) can be named too. The name belongs to the whole application, and the path includes the mount prefix: its parameters come first in the list of values.
 

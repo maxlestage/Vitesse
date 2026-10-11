@@ -21,7 +21,7 @@ The benchmark also measures servers written in other languages, since comparing 
 
 ### Why not actix-web or axum?
 
-Both are excellent and mature frameworks, and Vitesse now covers most of what they offer: HTTPS and HTTP/2 (plus HTTP/3), WebSocket, Server-Sent Events, multipart uploads, per-route body limits, authentication, rate and concurrency limits, request ids, compression, trusted proxies, configurable timeouts, Unix sockets, and the [tower](https://crates.io/crates/tower) middleware ecosystem through the `tower` feature. [Coming from axum or actix-web](from-axum-actix.md) gives the equivalents, feature by feature.
+Both are excellent and mature frameworks, and Vitesse now covers most of what they offer: HTTPS and HTTP/2 (plus HTTP/3), WebSocket (over HTTP/2 too), Server-Sent Events, route constraints and named routes with URL generation, multipart uploads, per-route body limits, signed cookies and sessions, HTML templates, authentication, rate and concurrency limits, request ids, compression, trusted proxies, configurable timeouts, Unix sockets, and the [tower](https://crates.io/crates/tower) middleware ecosystem through the `tower` feature. [Coming from axum or actix-web](from-axum-actix.md) gives the equivalents, feature by feature.
 
 Vitesse is a good fit if:
 
@@ -65,7 +65,7 @@ Yes, both:
 - **WebSocket** is built in (the `ws` feature, enabled by default): `app.ws("/chat", |req, socket| async move { … })`, in the style of `express-ws`. See [WebSocket](websocket.md).
 - **HTTP/3** over QUIC is available with the opt-in `http3` feature: `app.http3(Http3::from_pem_files(...)?)` serves the same application over UDP, next to HTTP/1.1. See [HTTP/3 and QUIC](http3.md).
 
-WebSocket works over HTTP/1.1 (`ws://`, or `wss://` with the `tls` feature), not over HTTP/2 or HTTP/3. For one-way server-to-client push, Server-Sent Events are often simpler: see the next question.
+WebSocket works over HTTP/1.1 (`ws://`, or `wss://` with the `tls` feature) and, with the `http2` feature, [over HTTP/2](websocket.md#websocket-over-http2), which browsers use on their own on an HTTPS site. It doesn't work over HTTP/3: browsers then open their WebSockets over HTTP/2 or HTTP/1.1. For one-way server-to-client push, Server-Sent Events are often simpler: see the next question.
 
 ### Does Vitesse support Server-Sent Events?
 
@@ -108,7 +108,18 @@ Behind a reverse proxy, you can also let the proxy compress responses instead. S
 
 ### Template engines?
 
-Not built in, just like Express without a view engine. Use any template crate ([askama](https://crates.io/crates/askama), [minijinja](https://crates.io/crates/minijinja), [tera](https://crates.io/crates/tera)…) and return the result with `Html(rendered)`. Load or compile your templates once at startup and share them through the [state](state.md).
+Yes, with the `templates` feature, which brings in [minijinja](https://crates.io/crates/minijinja) (the Jinja2 syntax: `{{ name }}`, `{% for %}`, `{% extends %}`…). It plays the role of Express's `app.set('views', …)` and `res.render(…)`:
+
+```rust
+app.views("templates"); // templates/users.html, templates/layout.html…
+app.get("/users", |req: Request| async move {
+    req.render("users.html", json!({ "users": ["Ada", "Grace"] }))
+});
+```
+
+Values are HTML-escaped in `.html` templates, and a missing template or a rendering error becomes a `500` whose cause is logged. See [HTML templates](templates.md).
+
+Other template crates ([askama](https://crates.io/crates/askama), [tera](https://crates.io/crates/tera)…) work too: render with them, and return the result with `Html(rendered)`.
 
 ### How do I use a database?
 
@@ -141,23 +152,24 @@ See [File uploads](requests.md#file-uploads-multipart).
 
 For authentication, two middlewares are built in: `middleware::basic_auth(("admin", "secret"))` (the browser asks for a user name and a password) and `middleware::bearer_auth(token)` (`Authorization: Bearer …`, for APIs). Both take a closure too, to check the credentials against your own users, and compare them in constant time. They send credentials with every request: only use them over HTTPS. See [`basic_auth` and `bearer_auth`](middleware.md#basic_auth-and-bearer_auth).
 
-For sessions, Vitesse has no store of its own: use [tower-sessions](https://crates.io/crates/tower-sessions) through the `tower` feature, as with axum:
+Sessions and signed cookies are built in, with the `session` feature, like Express's `express-session` and `cookie-parser`:
 
 ```rust
-use tower_sessions::{MemoryStore, Session, SessionManagerLayer};
+use vitesse::session::MemoryStore;
 
-app.middleware(middleware::layer(SessionManagerLayer::new(MemoryStore::default())));
+app.cookie_secret(std::env::var("COOKIE_SECRET").expect("COOKIE_SECRET is not set"));
+app.middleware(middleware::session(MemoryStore::new()));
 app.get("/visits", |req: Request| async move {
-    let session = req.get::<Session>().unwrap().clone();
-    let visits: u32 = session.get("visits").await?.unwrap_or(0) + 1;
-    session.insert("visits", visits).await?;
+    let session = req.session();
+    let visits = session.get::<u32>("visits").unwrap_or(0) + 1;
+    session.insert("visits", visits)?;
     Ok::<_, Error>(format!("visit #{visits}"))
 });
 ```
 
-Its cookie is `Secure` by default, so it needs HTTPS (or `.with_secure(false)` during development), and `MemoryStore` forgets everything on restart: use a persistent store in production. See [Sessions with tower-sessions](from-axum-actix.md#sessions-with-tower-sessions).
+The browser only gets a random id, in an `HttpOnly` cookie (signed, here, by the app's secret); the data stays on the server. `MemoryStore` forgets everything on restart and isn't shared between instances: in production, plug in a store of your own (Redis, PostgreSQL…) by implementing the `SessionStore` trait. Without sessions, `req.sign_cookie(...)` and `req.signed_cookie(name)` give cookies the client can read but not change. See [Signed cookies and sessions](sessions.md).
 
-You can also build your own: read cookies with `req.cookie(name)`, set them with `Cookie` (`http_only`, `secure`, `same_site`…), check a token in a middleware and attach the user to the request with `req.set(user)`. See [Middleware](middleware.md).
+[tower-sessions](https://crates.io/crates/tower-sessions), the usual choice with axum, works too, through the `tower` feature and its ready-made stores: see [Sessions with tower-sessions](from-axum-actix.md#sessions-with-tower-sessions).
 
 ### Why does CORS refuse my cookies?
 
@@ -199,6 +211,24 @@ app.middleware(middleware::layer(CorsLayer::permissive()));
 
 The other way round, `app.into_service()` turns your application into a tower `Service`: serve it with hyper, nest it in an axum router (`Router::nest_service`), or test it with `tower::ServiceExt::oneshot`. See [Tower layers](middleware.md#tower-layers).
 
+### Can routes have regular expressions or optional parameters?
+
+Yes, with Express 4's syntax: `r"/users/:id(\d+)"` only matches digits, `/archive/:year?/:month?` also matches `/archive`, and `/flights/:from-:to` takes two parameters from one segment. A route with a constraint wins over a plain parameter at the same position, so `/users/:id(\d+)` and `/users/:name` can coexist. `app.case_sensitive(false)` makes routes ignore case, as Express does by default. See [Path parameters](routing.md#path-parameters).
+
+### Can I generate URLs from route names?
+
+Yes, like actix-web's `url_for`: name the route with `.name(...)`, then build its path with `req.path_for` or its absolute URL with `req.url_for`. Values are percent-encoded, and constraints are checked:
+
+```rust
+app.get("/users/:id", show_user).name("user");
+app.post("/users", |req: Request| async move {
+    let link = req.path_for("user", &[&42])?; // "/users/42"
+    Ok::<_, Error>(Redirect::see_other(link))
+});
+```
+
+See [Named routes and URL generation](routing.md#named-routes-and-url-generation).
+
 ### Can I add routes while the server is running?
 
 No. The application is frozen when the server starts (this is part of what makes it fast: no locks, no reference counting). Decide your routes at startup, and use [state](state.md) for data that changes.
@@ -227,23 +257,23 @@ Vitesse is proprietary software: © Maxime Nathan Lestage, all rights reserved. 
 
 ## Current limitations
 
-Like Express, Vitesse deliberately does little. Not included (yet):
+Not included, each for a reason:
 
 - **Extractors**, by design: a handler takes one `Request` and asks it for what it needs;
-- **WebSocket over HTTP/2 and HTTP/3**: [WebSocket](websocket.md) works over HTTP/1.1, with or without TLS;
-- **HTTP/2 server push** and the **`Upgrade: h2c`** mechanism: HTTP/2 works over TLS and in clear text with prior knowledge (see [HTTPS and HTTP/2](https.md));
-- **0-RTT and streaming request bodies over HTTP/3**: HTTP/3 request bodies are read in full before the handler runs;
-- **Template engines**: use a template crate and return `Html(...)`;
-- **A built-in session store and signed cookies**: use [tower-sessions](from-axum-actix.md#sessions-with-tower-sessions) through the `tower` feature;
-- **Partial parameters within a segment** (`/flights/:from-:to`), as well as optional parameters (`/:id?`) and regular expressions in routes;
-- **URL generation from named routes** (actix-web's `url_for`);
-- **Runtimes other than tokio**.
+- **WebSocket over HTTP/3** (RFC 9220): the h3 crate doesn't implement it, and browsers don't rely on it. They open their WebSockets over HTTP/2 or HTTP/1.1, which [Vitesse serves](websocket.md#websocket-over-http2);
+- **HTTP/2 server push**: Chrome removed it in 2022 and Firefox in 2024, and axum and actix-web don't offer it either;
+- the **`Upgrade: h2c`** mechanism: RFC 9113 removed it from HTTP/2. HTTP/2 works over TLS, and in clear text with prior knowledge (see [HTTPS and HTTP/2](https.md#http2-in-clear-text-h2c));
+- **0-RTT (early data) over HTTP/3**: a request sent that early can be replayed by an attacker, so Vitesse waits for the end of the handshake (see [HTTP/3](http3.md#what-changes-and-what-isnt-supported-yet));
+- **Runtimes other than tokio** (async-std, smol);
+- **A stable 1.x API**: Vitesse is at version 0.1, and its API may still change before 1.0.
 
 A few other things to know:
 
 - the engine's size limits are fixed (60 KiB for the request head, 64 headers), but its delays are settings: `keep_alive` (60 s), `header_timeout` (30 s) and `shutdown_timeout` (10 s), as well as `max_connections` (see [Server configuration](server.md#timeouts-and-connections));
-- `body_limit` applies to the whole application, and `middleware::body_limit` changes it per route or per router;
-- routes are case-sensitive (`/Users` ≠ `/users`);
+- `body_limit` applies to the whole application, and `middleware::body_limit` changes it per route or per router, over every protocol;
+- routes are case-sensitive by default (`/Users` ≠ `/users`): call `app.case_sensitive(false)` to ignore case, as Express does;
 - routes cannot be added once the server has started;
+- templates loaded with `app.views(...)` are read once, then kept in memory: restart the server to see a change;
+- sessions in a `MemoryStore` live in the memory of each process: they are lost on restart and not shared between instances;
 - `X-Forwarded-For`, `X-Forwarded-Proto` and `X-Forwarded-Host` are only read once you declare your proxies with `app.trust_proxy(...)`;
 - `middleware::rate_limit` counts in the memory of each process: with several instances, each one counts on its own.

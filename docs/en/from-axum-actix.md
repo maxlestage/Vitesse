@@ -71,6 +71,10 @@ See [Server configuration](server.md) and [HTTPS and HTTP/2](https.md).
 |---|---|---|
 | `.route("/u/{id}", get(h).post(h2))` | `.route("/u/{id}", web::get().to(h))`, `#[get("/u/{id}")]` | `app.get("/u/:id", h).post("/u/:id", h2)` |
 | `/{*rest}` | `/{tail:.*}` | `/*rest` |
+| — | `/{id:\d+}` | `/:id(\d+)` |
+| `/{flight}`, split by hand | `/{from}-{to}` | `/:from-:to` |
+| two routes | two resources | `/archive/:year?` (optional parameter) |
+| — | `.name("user")`, then `req.url_for("user", ["42"])` | `.name("user")`, then `req.path_for("user", &[&42])` or `req.url_for(…)` |
 | `.nest("/api", router)` | `web::scope("/api")` | `app.mount("/api", router)` |
 | `.merge(other)` | `.configure(f)` | `app.mount("/", router)` |
 | `.fallback(h)` | `.default_service(h)` | `app.fallback(h)` |
@@ -78,7 +82,7 @@ See [Server configuration](server.md) and [HTTPS and HTTP/2](https.md).
 | `MatchedPath` | `req.match_pattern()` | `req.route()` |
 | automatic `405` | automatic `405` | automatic `405`, `HEAD` and `OPTIONS` |
 
-Route parameters are written `:id` (as in Express), not `{id}`. See [Routing](routing.md) and [Routers](routers.md).
+Route parameters are written `:id` (as in Express), not `{id}`, and a constraint follows the name in parentheses: `r"/users/:id(\d+)"`. Whatever the order of declaration (actix-web tries its routes in order), a static segment wins over a constrained one, which wins over a plain parameter: `/users/:id(\d+)` and `/users/:name` can coexist. `path_for` returns the path (`/users/42`) and `url_for` the absolute URL; both percent-encode the values and return a `500` error if the name or a value is wrong. See [Routing](routing.md#named-routes-and-url-generation) and [Routers](routers.md).
 
 ## Reading requests
 
@@ -118,9 +122,33 @@ Since the methods take `&self`, you can read a parameter, then the JSON body, th
 | `Sse::new(stream)` | a `text/event-stream` stream | `Sse::new(stream)`, or `sse::channel(n)` |
 | `ServeFile`, `ServeDir` (tower-http) | `NamedFile`, `Files` (actix-files) | `res::file(path).await`, `ServeDir`, `app.static_dir(…)` |
 | `AppendHeaders`, `[(name, value)]` | `.insert_header(…)` | `.header(name, value)` |
-| `WebSocketUpgrade` | `actix-ws` | `app.ws(path, …)`, `ws::Upgrade` |
+| `WebSocketUpgrade` | `actix-ws` | `app.ws(path, …)`, `ws::Upgrade`, over HTTP/1.1 and HTTP/2 |
+| askama, minijinja or tera, by hand | askama or tera, by hand | `app.views("templates")`, then `req.render("page.html", json!({…}))` (`templates` feature) |
 
-See [Sending responses](responses.md) and [WebSocket](websocket.md).
+See [Sending responses](responses.md), [HTML templates](templates.md) and [WebSocket](websocket.md).
+
+## Cookies and sessions
+
+| axum | actix-web | Vitesse (`session` feature) |
+|---|---|---|
+| `SignedCookieJar` (axum-extra) and a `Key` | `CookieJar::signed` (`secure-cookies` feature) | `app.cookie_secret(…)`, then `req.sign_cookie(cookie)` and `req.signed_cookie("name")` |
+| tower-sessions | actix-session | `middleware::session(store)`, then `req.session()` |
+| tower-sessions' stores | `CookieSessionStore`, `RedisSessionStore` | `session::MemoryStore`, or your own `SessionStore` |
+
+```rust
+use vitesse::session::MemoryStore;
+
+app.cookie_secret(std::env::var("COOKIE_SECRET").expect("COOKIE_SECRET is not set"));
+app.middleware(middleware::session(MemoryStore::new()));
+app.get("/visits", |req: Request| async move {
+    let session = req.session();
+    let visits = session.get::<u32>("visits").unwrap_or(0) + 1;
+    session.insert("visits", visits)?;
+    Ok::<_, Error>(format!("visit #{visits}"))
+});
+```
+
+The session is saved, and its cookie sent, only when a handler changes it. `session.regenerate()` after a login and `session.destroy()` at logout work like actix-session's `renew` and `purge`. See [Signed cookies and sessions](sessions.md); tower-sessions also works, [through the `tower` feature](#sessions-with-tower-sessions).
 
 ## Errors
 
@@ -185,7 +213,7 @@ api.middleware(middleware::layer(CorsLayer::permissive()));
 
 ### Sessions with tower-sessions
 
-Vitesse has no session store of its own, but [tower-sessions](https://crates.io/crates/tower-sessions), the usual choice with axum, works through `middleware::layer`: the layer puts a `Session` in the request's extensions and sets the cookie on the response.
+Vitesse has [sessions of its own](#cookies-and-sessions), but [tower-sessions](https://crates.io/crates/tower-sessions), the usual choice with axum, works too, through `middleware::layer`: handy to keep its ready-made stores, or code shared with an axum application. The layer puts a `Session` in the request's extensions and sets the cookie on the response.
 
 ```rust
 use tower_sessions::{MemoryStore, Session, SessionManagerLayer};
@@ -221,10 +249,10 @@ The test client builds requests with `.header()`, `.json()`, `.form()` and `.bod
 
 ## What Vitesse does not do (yet)
 
-- **Named routes and URL generation** (actix-web's `url_for`).
-- **Regular expressions and guards in routes** (actix-web's `{id:\d+}` and `guard::Host`): check the parameter in the handler (`req.param_as::<u32>("id")?` already answers `400`) or route on the host in a middleware.
-- **Sessions and signed cookies built in**: use [tower-sessions](#sessions-with-tower-sessions) through the `tower` feature, as you would with axum.
-- **WebSocket over HTTP/2 or HTTP/3**, and HTTP/2 server push: WebSocket runs over HTTP/1.1, which every browser uses for it.
+- **Guards** (actix-web's `guard::Host`, `guard::Header`): route on the host or a header in a middleware instead.
+- **WebSocket over HTTP/3**: browsers don't rely on it, and open their WebSockets over HTTP/2 or HTTP/1.1, which [Vitesse serves](websocket.md#websocket-over-http2).
+- **HTTP/2 server push**, which browsers have removed, and the **`Upgrade: h2c`** mechanism, which RFC 9113 removed from HTTP/2: h2c with prior knowledge works.
+- **0-RTT over HTTP/3**, on purpose: those early requests can be replayed.
 - **Other async runtimes** than tokio, as with axum.
 - **A stable 1.x API**: Vitesse is at version 0.1.
 

@@ -84,7 +84,7 @@ A few details:
 - The prefix is matched segment by segment: a router mounted at `/api` covers `/api` and `/api/...`, but not `/apix`.
 - Global middleware (`app.middleware`) still runs first, for every request. With nested routers, the outer router's middleware then runs first, followed by the inner router's.
 - If a router middleware rewrites the path of such a request with `req.set_uri(...)`, routing runs again on the new path.
-- A prefix can contain parameters: a router mounted at `/users/:user_id/posts` covers `/users/42/posts/...` whatever the value of `:user_id`.
+- A prefix can contain parameters: a router mounted at `/users/:user_id/posts` covers `/users/42/posts/...` whatever the value of `:user_id`. Constraints in the prefix are checked for these requests too: a router mounted at `/docs/:lang(en|fr|es)` doesn't cover `/docs/de/...`, whose `404` comes from the application, without the router's middleware or fallback.
 
 ## Router fallback
 
@@ -145,6 +145,27 @@ posts.get("/", |req: Request| async move {
 app.mount("/users/:user_id/posts", posts); // GET /users/42/posts
 ```
 
+Everything the [route syntax](routing.md#path-parameters) offers works in a prefix too: several parameters in a segment (`/api/v:version`), [constraints](routing.md#constraints-with-regular-expressions) and [optional parameters](routing.md#optional-parameters). Here, one router serves the documentation in three languages, with a home page per language:
+
+```rust
+let mut docs = Router::new();
+docs.get("/:page?", |req: Request| async move {
+    let lang = req.param("lang").unwrap_or("en");
+    let page = req.param("page").unwrap_or("index");
+    format!("page {page} in {lang}")
+});
+
+app.mount("/docs/:lang(en|fr|es)", docs);
+```
+
+| Request | Answer |
+|---|---|
+| `GET /docs/fr` | `page index in fr` |
+| `GET /docs/es/routing` | `page routing in es` |
+| `GET /docs/de/routing` | `404`: `de` doesn't satisfy the constraint |
+
+`req.route()` gives the full pattern, prefix included: `/docs/:lang(en|fr|es)/:page?`. Optional parameters must stay at the end of the full path, prefix and route included: with a prefix such as `/:lang?`, any route other than the router's `/` makes `mount` panic. Put the optional parameter in the router's routes instead, as above.
+
 ## WebSocket routes
 
 `router.ws(path, handler)` declares a [WebSocket](websocket.md) route, exactly like `app.ws`. The router's prefix applies, and its middleware runs on the handshake request, before the connection is accepted: a middleware that answers `401` refuses the connection.
@@ -159,6 +180,27 @@ live.ws("/feed", |_req, mut socket| async move {
 app.mount("/live", live); // ws://example.com/live/feed
 ```
 
+## Named routes in routers
+
+A route declared in a router can get a [name](routing.md#named-routes-and-url-generation) with `.name(...)`, exactly as on `App`. The name belongs to the whole application, and the path it builds includes the mount prefix:
+
+```rust
+let mut api = Router::new();
+api.get(r"/items/:id(\d+)", show_item).name("item");
+api.post("/items", |req: Request| async move {
+    // The prefix's parameters come first: ":version", then ":id".
+    let link = req.path_for("item", &[&"v1", &7])?; // "/api/v1/items/7"
+    Ok::<_, Error>((201, Json(json!({ "link": link }))))
+});
+
+app.mount("/api/:version", api);
+```
+
+- Any handler can use the name, inside the router or elsewhere in the app: `req.path_for("item", …)` works from `app.get("/", …)` too.
+- The values follow the order of the parameters in the full path: those of the prefix first, then those of the route.
+- Names must be unique across the application: two routers that both name a route `"show"` make the second `mount` panic at startup. Prefix them (`"users.show"`, `"posts.show"`).
+- `name` follows a route: calling it right after `mount` panics, since `mount` adds routes but isn't one.
+
 ## How mounting works
 
 `mount` copies the router's routes into the application's routing tree, once, at startup. A few consequences:
@@ -166,7 +208,8 @@ app.mount("/live", live); // ws://example.com/live/feed
 - **Zero cost per request**: a mounted route is exactly as fast as a route declared directly on `App`.
 - **The router is consumed** by `mount`. To mount the same routes twice (`/api/v1` and `/api/latest`, say), build the router in a function and call it twice.
 - **Conflicts are caught at startup**: if the same method and path are defined twice, even across routers, the program panics as soon as it starts, with a message such as `duplicate route: GET /api/x is already defined`.
-- **Route priority** is global: a static segment wins over a parameter, which wins over a wildcard (`/users/new` before `/users/:id`), whatever router they come from.
+- **Route priority** is global: a static segment wins over a constrained or composite one, which wins over a plain parameter, which wins over a wildcard (`/users/new`, then `/users/:id(\d+)`, then `/users/:name`), whatever router they come from. See [How routes are matched](routing.md#how-routes-are-matched).
+- **Route names** are global too: see [Named routes in routers](#named-routes-in-routers).
 - The error handler (`app.on_error`) and the state (`app.state`) belong to the application, not to routers. A router can have its own [fallback](#router-fallback), though, which answers before `app.fallback`.
 
 ## Organising a project

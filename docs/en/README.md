@@ -10,15 +10,17 @@ Everything you need to build fast web apps with Vitesse, the Express.js-style fr
 
 ## Essentials
 
-- [Routing](routing.md): routes, HTTP methods, path parameters, wildcards and the matched route.
+- [Routing](routing.md): routes, HTTP methods, path parameters, constraints and optional parameters, wildcards, the matched route and named routes.
 - [Reading requests](requests.md): parameters, query strings, headers, cookies, content negotiation, bodies (JSON, forms) and file uploads.
 - [Sending responses](responses.md): text, JSON, HTML, status codes, headers, cookies, redirects, files, streaming and Server-Sent Events.
+- [HTML templates](templates.md): render HTML pages with minijinja (`templates` feature): layouts and inheritance, loops, filters and automatic escaping.
 - [Middleware](middleware.md): global and per-route middleware, `next`, the built-in middleware (logging, CORS, authentication, rate limiting, compression…) and tower layers.
 - [Routers](routers.md): group routes with `Router`, mount them under a prefix, with their own middleware and fallback.
 - [Shared state](state.md): share configuration, counters or connection pools between requests.
+- [Signed cookies and sessions](sessions.md): tamper-proof cookies and per-visitor data kept on the server (`session` feature), with your own store.
 - [Error handling](errors.md): `vitesse::Error`, the `?` operator, custom error responses and panics.
 - [Static files](static-files.md): serve a folder of files with caching, ranges and built-in safety checks.
-- [WebSocket](websocket.md): real-time, two-way connections with `app.ws`, from an echo server to a chat room.
+- [WebSocket](websocket.md): real-time, two-way connections with `app.ws`, over HTTP/1.1 and HTTP/2, from an echo server to a chat room.
 
 ## Going further
 

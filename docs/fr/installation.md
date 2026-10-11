@@ -54,7 +54,7 @@ cargo add vitesse
 > [!NOTE]
 > Vitesse est sur le point d'être publié sur [crates.io](https://crates.io). En attendant (ou si vous voulez les toutes dernières modifications), installez-le depuis GitHub :
 >
-> `cargo add vitesse --git https://github.com/maxlestage/Vitesse`
+> `cargo add vitesse --git https://maxlestage.github.io/Vitesse/`
 
 `cargo add` inscrit la dépendance dans `Cargo.toml`. Vous pouvez aussi l'ajouter à la main :
 
@@ -62,7 +62,7 @@ cargo add vitesse
 [dependencies]
 vitesse = "0.1"
 # ou, directement depuis GitHub :
-# vitesse = { git = "https://github.com/maxlestage/Vitesse" }
+# vitesse = { git = "https://maxlestage.github.io/Vitesse/" }
 ```
 
 Vitesse embarque `tokio`, `serde_json`, `http` et `bytes`, et les réexporte. Pour une application simple, c'est donc la seule dépendance nécessaire.

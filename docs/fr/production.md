@@ -375,7 +375,7 @@ Voyez [Configuration du serveur](server.md) et [Performances](performance.md) po
 - **Messages d'erreur** : le détail des erreurs `5xx` n'est jamais envoyé aux clients, mais les messages des erreurs que vous créez (`Error::bad_request("…")`) le sont : n'y mettez rien de sensible.
 - **Fichiers statiques** : `ServeDir` refuse `../` et les fichiers cachés (`.env`, `.git`) par défaut ; servez malgré tout un dossier dédié, jamais la racine du projet.
 - **Les secrets** vivent dans des variables d'environnement ou un gestionnaire de secrets, jamais dans le dépôt ni dans l'image.
-- **Dépendances** : mettez-les à jour régulièrement (`cargo update`) et vérifiez les alertes de sécurité avec [cargo-audit](https://github.com/rustsec/rustsec/tree/main/cargo-audit).
+- **Dépendances** : mettez-les à jour régulièrement (`cargo update`) et vérifiez les alertes de sécurité avec cargo-audit.
 
 ### CORS et cookies
 

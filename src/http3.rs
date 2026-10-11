@@ -1,6 +1,6 @@
 //! HTTP/3 over QUIC: the same application, served over UDP next to
-//! HTTP/1.1, with [quinn](https://github.com/quinn-rs/quinn) and
-//! [h3](https://github.com/hyperium/h3) (TLS 1.3 by rustls, all in Rust).
+//! HTTP/1.1, with [quinn](https://crates.io/crates/quinn) and
+//! [h3](https://crates.io/crates/h3) (TLS 1.3 by rustls, all in Rust).
 //!
 //! ```no_run
 //! use vitesse::prelude::*;

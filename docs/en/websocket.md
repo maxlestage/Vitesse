@@ -4,7 +4,7 @@ A WebSocket keeps a connection open in both directions, so the server can push m
 
 ## Setup
 
-WebSocket support is the `ws` Cargo feature, **enabled by default**: `vitesse = "0.1"` is all you need. It is built on [tokio-tungstenite](https://github.com/snapview/tokio-tungstenite), the Rust implementation tested against the Autobahn test suite. The handshake (RFC 6455) and the handover of the TCP connection after the `101 Switching Protocols` response are done by Vitesse's own HTTP/1.1 engine.
+WebSocket support is the `ws` Cargo feature, **enabled by default**: `vitesse = "0.1"` is all you need. It is built on tokio-tungstenite, the Rust implementation tested against the Autobahn test suite. The handshake (RFC 6455) and the handover of the TCP connection after the `101 Switching Protocols` response are done by Vitesse's own HTTP/1.1 engine.
 
 If you don't need WebSocket, turn off the default features to compile a little less:
 
@@ -38,7 +38,7 @@ fn main() -> std::io::Result<()> {
 }
 ```
 
-The handler receives the request and the open socket, and the connection lives as long as the handler runs. `ws` is in the prelude, hence `ws::Message`. To try it, use [websocat](https://github.com/vi/websocat), a WebSocket client for the terminal written in Rust (`cargo install websocat`):
+The handler receives the request and the open socket, and the connection lives as long as the handler runs. `ws` is in the prelude, hence `ws::Message`. To try it, use [websocat](https://crates.io/crates/websocat), a WebSocket client for the terminal written in Rust (`cargo install websocat`):
 
 ```sh
 websocat ws://localhost:3000/echo
@@ -246,7 +246,7 @@ app.ws("/countdown", |_req, socket| async move {
 
 ## A chat room
 
-The repository's [`examples/chat.rs`](https://github.com/maxlestage/Vitesse/blob/master/examples/chat.rs) is a complete chat room: every message sent by one client is broadcast to all the others. Here is its WebSocket route:
+The repository's `examples/chat.rs` is a complete chat room: every message sent by one client is broadcast to all the others. Here is its WebSocket route:
 
 ```rust
 use tokio::sync::broadcast;
@@ -378,7 +378,7 @@ Proxies and platforms close connections that stay silent too long. For a connect
 
 ## Coming from Express
 
-With [express-ws](https://github.com/HenningM/express-ws):
+With express-ws:
 
 ```js
 const expressWs = require('express-ws');

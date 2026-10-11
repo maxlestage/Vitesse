@@ -434,6 +434,6 @@ Las peticiones se atienden en paralelo en varios hilos, así que no hay variable
 - **Los errores son JSON por defecto** (`{"error": "..."}`), y los detalles internos nunca llegan al cliente, ni siquiera en desarrollo. Usa `app.on_error` para otro formato.
 - **`req.set(valor)` exige `Clone`.** Añade `#[derive(Clone)]` a los tipos que adjuntas a una petición.
 - **El cuerpo se lee bajo demanda, y una sola vez desde la red.** El resultado se guarda en caché: llamar a `req.text()` y después a `req.bytes()` funciona.
-- **Recargar con cada cambio.** `cargo run` recompila lo que ha cambiado; para un bucle al estilo de `nodemon`, usa una herramienta como [cargo-watch](https://github.com/watchexec/cargo-watch) (`cargo watch -x run`). Compila con `cargo build --release` para producción.
+- **Recargar con cada cambio.** `cargo run` recompila lo que ha cambiado; para un bucle al estilo de `nodemon`, usa una herramienta como [cargo-watch](https://crates.io/crates/cargo-watch) (`cargo watch -x run`). Compila con `cargo build --release` para producción.
 
 Para ir más allá, la [chuleta](cheatsheet.md) recoge toda la API en una sola página.

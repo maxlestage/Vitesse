@@ -9,7 +9,6 @@ use pulldown_cmark::{
 };
 
 use crate::catalog;
-use crate::data::GITHUB;
 use crate::highlight::{self, Kind, escape};
 use crate::i18n::Lang;
 use crate::labels::labels;
@@ -101,11 +100,8 @@ pub fn rewrite_link(dest: &str, lang: Lang) -> (String, bool) {
             }
         }
     }
-    // Un autre fichier du dépôt : on l'ouvre sur GitHub.
-    (
-        format!("{GITHUB}/blob/master/docs/{}/{dest}", lang.code()),
-        true,
-    )
+    // Un autre fichier du dépôt : il n'est pas en ligne, le texte reste sans lien.
+    (String::new(), false)
 }
 
 fn spans(tokens: Vec<(Kind, String)>) -> String {
@@ -208,6 +204,8 @@ pub fn render(markdown: &str, lang: Lang) -> Rendered {
         | Options::ENABLE_GFM;
     let mut events = Parser::new_ext(markdown, options);
     let mut out: Vec<Event> = Vec::new();
+    // Les liens sans destination (un fichier du dépôt) : le texte seul.
+    let mut unlinked = 0usize;
     let mut slugger = Slugger::default();
     let mut toc = Vec::new();
     let mut title = String::new();
@@ -272,6 +270,10 @@ pub fn render(markdown: &str, lang: Lang) -> Rendered {
                 dest_url, title: t, ..
             }) => {
                 let (href, external) = rewrite_link(&dest_url, lang);
+                if href.is_empty() {
+                    unlinked += 1;
+                    continue;
+                }
                 let mut tag = format!("<a href=\"{}\"", escape(&href));
                 if !t.is_empty() {
                     tag.push_str(&format!(" title=\"{}\"", escape(&t)));
@@ -282,6 +284,7 @@ pub fn render(markdown: &str, lang: Lang) -> Rendered {
                 tag.push('>');
                 out.push(Event::InlineHtml(CowStr::from(tag)));
             }
+            Event::End(TagEnd::Link) if unlinked > 0 => unlinked -= 1,
             Event::End(TagEnd::Link) => out.push(Event::InlineHtml(CowStr::from("</a>"))),
             Event::Start(Tag::BlockQuote(Some(kind))) => {
                 let (class, i) = match kind {
@@ -390,11 +393,10 @@ mod tests {
         assert_eq!(rewrite_link("#plus-loin", l).0, "#plus-loin");
         assert_eq!(rewrite_link("../en/routing.md", l).0, "/en/docs/routing/");
         assert_eq!(rewrite_link("README.md", l).0, "/fr/docs/");
-        let (href, external) = rewrite_link("../../examples/demo.rs", l);
-        assert!(external);
+        // Un fichier du dépôt n'est pas en ligne : pas de lien.
         assert_eq!(
-            href,
-            "https://github.com/maxlestage/Vitesse/blob/master/docs/fr/../../examples/demo.rs"
+            rewrite_link("../../examples/demo.rs", l),
+            (String::new(), false)
         );
         assert_eq!(
             rewrite_link("https://docs.rs/vitesse", l),

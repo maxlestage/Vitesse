@@ -64,7 +64,12 @@ async fn exports_every_page_behind_the_base_path() {
     let root = read("index.html");
     assert!(root.contains(r#"data-island="root""#));
     assert!(root.contains(r#"href="/Vitesse/fr/""#));
-    assert!(read("404.html").contains("Page not found"));
+    // La racine et la page 404 vont d'elles-mêmes dans la langue du visiteur ; chaque langue a
+    // sa page « introuvable ».
+    assert!(read("index.html").contains("navigator.languages"));
+    assert!(read("404.html").contains("navigator.languages"));
+    assert!(read("en/404/index.html").contains("Page not found"));
+    assert!(read("fr/404/index.html").contains(r#"<html lang="fr""#));
     let worker = read("sw.js");
     assert!(worker.contains(r#""/Vitesse/en/""#));
     assert!(worker.contains(r#"const OFFLINE = "/Vitesse/offline/";"#));

@@ -69,9 +69,8 @@
 //! ## Guide
 //!
 //! This page is the API reference. The full guide is available on the
-//! [Vitesse website](https://maxlestage.github.io/Vitesse/en/docs/) and in the
-//! [`docs/` folder of the repository](https://github.com/maxlestage/Vitesse/tree/master/docs/en),
-//! in English, French and Spanish.
+//! [Vitesse website](https://maxlestage.github.io/Vitesse/en/docs/), in English, French and
+//! Spanish.
 
 #![doc(
     html_logo_url = "https://maxlestage.github.io/Vitesse/assets/favicon.svg",

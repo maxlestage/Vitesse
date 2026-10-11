@@ -42,5 +42,5 @@ Everything you need to build fast web apps with Vitesse, the Express.js-style fr
 ## More resources
 
 - API reference generated from the source code: https://docs.rs/vitesse
-- Source code, issues and examples: https://github.com/maxlestage/Vitesse
-- Also available in [French](https://github.com/maxlestage/Vitesse/blob/master/docs/fr/README.md) and [Spanish](https://github.com/maxlestage/Vitesse/blob/master/docs/es/README.md).
+- Source code, issues and examples: https://maxlestage.github.io/Vitesse/
+- Also available in [French](https://maxlestage.github.io/Vitesse/fr/docs/README/) and [Spanish](https://maxlestage.github.io/Vitesse/es/docs/README/).

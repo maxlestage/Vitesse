@@ -434,6 +434,6 @@ Requests are handled in parallel on several threads, so there are no mutable glo
 - **Errors are JSON by default** (`{"error": "..."}`), and internal details never reach the client, not even in development. Use `app.on_error` for another format.
 - **`req.set(value)` requires `Clone`.** Add `#[derive(Clone)]` to the types you attach to a request.
 - **The body is read on demand, and only once from the network.** The result is cached: calling `req.text()` and then `req.bytes()` works.
-- **Reloading on change.** `cargo run` recompiles what changed; for a `nodemon`-style loop, use a tool such as [cargo-watch](https://github.com/watchexec/cargo-watch) (`cargo watch -x run`). Use `cargo build --release` for production.
+- **Reloading on change.** `cargo run` recompiles what changed; for a `nodemon`-style loop, use a tool such as [cargo-watch](https://crates.io/crates/cargo-watch) (`cargo watch -x run`). Use `cargo build --release` for production.
 
 To go further, the [cheat sheet](cheatsheet.md) lists the whole API on one page.

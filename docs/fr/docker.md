@@ -11,7 +11,7 @@ docker build -t mon-app .
 docker run --rm -p 8080:8080 mon-app
 ```
 
-Ouvrez ensuite http://localhost:8080. L'image lance l'application de démonstration ([`examples/demo.rs`](https://github.com/maxlestage/Vitesse/blob/master/examples/demo.rs)) :
+Ouvrez ensuite http://localhost:8080. L'image lance l'application de démonstration (`examples/demo.rs`) :
 
 ```sh
 curl localhost:8080/health
@@ -28,12 +28,12 @@ Arrêtez-la avec `Ctrl+C`. Vitesse gère lui-même `SIGINT` et `SIGTERM` : il s'
 
 ## Ce que fait le Dockerfile
 
-Le [`Dockerfile`](https://github.com/maxlestage/Vitesse/blob/master/Dockerfile) comporte deux étapes :
+Le `Dockerfile` comporte deux étapes :
 
 1. **Construction** (`rust:1-slim-bookworm`) : copie `Cargo.toml`, `Cargo.lock`, `src/` et `examples/`, puis compile un exemple avec `cargo build --release --example $EXAMPLE`.
 2. **Exécution** (`debian:bookworm-slim`) : crée un utilisateur non privilégié `vitesse`, copie **uniquement le binaire** dans `/usr/local/bin/server`, définit `ENV PORT=8080` et `EXPOSE 8080`, et le lance avec `CMD ["server"]`.
 
-Le fichier [`.dockerignore`](https://github.com/maxlestage/Vitesse/blob/master/.dockerignore) écarte du contexte de construction `target/`, `site/`, `docs/`, `bench/`, `.git/` et d'autres dossiers inutiles : les constructions sont plus rapides et ne dépendent jamais de ce qui traîne sur votre disque.
+Le fichier `.dockerignore` écarte du contexte de construction `target/`, `site/`, `docs/`, `bench/`, `.git/` et d'autres dossiers inutiles : les constructions sont plus rapides et ne dépendent jamais de ce qui traîne sur votre disque.
 
 ### Pourquoi deux étapes ?
 

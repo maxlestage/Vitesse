@@ -11,7 +11,7 @@ docker build -t mi-app .
 docker run --rm -p 8080:8080 mi-app
 ```
 
-Después abre http://localhost:8080. La imagen ejecuta la aplicación de demostración ([`examples/demo.rs`](https://github.com/maxlestage/Vitesse/blob/master/examples/demo.rs)):
+Después abre http://localhost:8080. La imagen ejecuta la aplicación de demostración (`examples/demo.rs`):
 
 ```sh
 curl localhost:8080/health
@@ -28,12 +28,12 @@ Detenla con `Ctrl+C`. Vitesse gestiona por sí mismo `SIGINT` y `SIGTERM`, así 
 
 ## Qué hace el Dockerfile
 
-El [`Dockerfile`](https://github.com/maxlestage/Vitesse/blob/master/Dockerfile) tiene dos etapas:
+El `Dockerfile` tiene dos etapas:
 
 1. **Construcción** (`rust:1-slim-bookworm`): copia `Cargo.toml`, `Cargo.lock`, `src/` y `examples/`, y compila un ejemplo con `cargo build --release --example $EXAMPLE`.
 2. **Ejecución** (`debian:bookworm-slim`): crea un usuario sin privilegios `vitesse`, copia **solo el binario** en `/usr/local/bin/server`, define `ENV PORT=8080` y `EXPOSE 8080`, y lo arranca con `CMD ["server"]`.
 
-El archivo [`.dockerignore`](https://github.com/maxlestage/Vitesse/blob/master/.dockerignore) deja fuera del contexto de construcción `target/`, `site/`, `docs/`, `bench/`, `.git/` y otras carpetas innecesarias: las construcciones son más rápidas y nunca dependen de lo que tengas en el disco.
+El archivo `.dockerignore` deja fuera del contexto de construcción `target/`, `site/`, `docs/`, `bench/`, `.git/` y otras carpetas innecesarias: las construcciones son más rápidas y nunca dependen de lo que tengas en el disco.
 
 ### ¿Por qué dos etapas?
 

@@ -42,5 +42,5 @@ Tout ce qu'il faut pour créer des applications web rapides avec Vitesse, le fra
 ## Autres ressources
 
 - Référence de l'API générée à partir du code source : https://docs.rs/vitesse
-- Code source, issues et exemples : https://github.com/maxlestage/Vitesse
-- Aussi disponible en [anglais](https://github.com/maxlestage/Vitesse/blob/master/docs/en/README.md) et en [espagnol](https://github.com/maxlestage/Vitesse/blob/master/docs/es/README.md).
+- Code source, issues et exemples : https://maxlestage.github.io/Vitesse/
+- Aussi disponible en [anglais](https://maxlestage.github.io/Vitesse/en/docs/README/) et en [espagnol](https://maxlestage.github.io/Vitesse/es/docs/README/).

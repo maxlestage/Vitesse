@@ -30,8 +30,6 @@ Heroku construit l'image Docker sur ses propres serveurs, puis la démarre en in
 
 ### Déployer l'application de démonstration
 
-[![Deploy to Heroku](https://www.herokucdn.com/deploy/button.svg)](https://www.heroku.com/deploy?template=https://github.com/maxlestage/Vitesse)
-
 1. Touchez le bouton ci-dessus (il figure aussi dans le README du projet). Connectez-vous à Heroku si on vous le demande.
 2. Heroku affiche un formulaire de création d'application :
    - **App name** : par exemple `ma-demo-vitesse`. Les noms sont uniques sur tout Heroku et ne contiennent que des minuscules, des chiffres et des tirets. Vous pouvez aussi laisser le champ vide : Heroku en choisira un.
@@ -54,7 +52,7 @@ Essayez ensuite ces chemins, en les ajoutant après l'adresse de votre applicati
 
 Pour modifier le code, il vous faut votre propre copie du dépôt sur GitHub :
 
-1. Ouvrez https://github.com/maxlestage/Vitesse, touchez **Fork**, puis **Create fork**.
+1. Ouvrez https://maxlestage.github.io/Vitesse/, touchez **Fork**, puis **Create fork**.
 2. Ouvrez le lien de déploiement avec votre nom d'utilisateur GitHub à la place de `maxlestage`, en le tapant dans la barre d'adresse :
 
    ```text
@@ -69,7 +67,7 @@ Pour modifier le code, il vous faut votre propre copie du dépôt sur GitHub :
 
 ## 2. Déploiement continu avec GitHub Actions
 
-Objectif : chaque commit sur la branche `master` de votre fork reconstruit et redéploie l'application, sans rien faire de plus. Le dépôt contient un workflow nommé **Deploy to Heroku** ([`.github/workflows/heroku.yml`](https://github.com/maxlestage/Vitesse/blob/master/.github/workflows/heroku.yml)) qui dialogue directement avec l'API Platform de Heroku : ni CLI Heroku, ni ordinateur.
+Objectif : chaque commit sur la branche `master` de votre fork reconstruit et redéploie l'application, sans rien faire de plus. Le dépôt contient un workflow nommé **Deploy to Heroku** (`.github/workflows/heroku.yml`) qui dialogue directement avec l'API Platform de Heroku : ni CLI Heroku, ni ordinateur.
 
 À chaque exécution, il :
 

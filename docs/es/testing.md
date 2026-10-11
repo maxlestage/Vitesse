@@ -1,6 +1,6 @@
 # Pruebas
 
-Vitesse incluye un cliente de pruebas en memoria, `vitesse::test::TestClient`, que envía las peticiones directamente a tu aplicación sin abrir ningún puerto. Cumple el papel de [supertest](https://github.com/ladjs/supertest) en el mundo Express: las pruebas son rápidas, se ejecutan en paralelo y no necesitan ningún servidor en marcha.
+Vitesse incluye un cliente de pruebas en memoria, `vitesse::test::TestClient`, que envía las peticiones directamente a tu aplicación sin abrir ningún puerto. Cumple el papel de supertest en el mundo Express: las pruebas son rápidas, se ejecutan en paralelo y no necesitan ningún servidor en marcha.
 
 ## Preparación
 

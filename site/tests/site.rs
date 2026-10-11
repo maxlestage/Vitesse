@@ -163,11 +163,10 @@ async fn every_page_ends_with_the_signature_footer() {
         assert!(footer.contains(r#"class="footer__name""#), "{lang}");
         assert!(footer.contains("Maxime Nathan Lestage"), "{lang}");
         assert!(footer.contains(rights), "{lang}");
-        assert!(
-            footer.contains(r#"href="https://github.com/maxlestage/Vitesse/blob/master/LICENSE""#),
-            "{lang}"
-        );
+        assert!(footer.contains(r#"href="/assets/LICENSE.txt""#), "{lang}");
         assert!(!html.contains("MIT"), "{lang}");
+        // Aucun lien vers GitHub : le projet n'est pas open source.
+        assert!(!html.contains("github.com"), "{lang}");
         // La commande d'installation et la version de la crate.
         assert!(footer.contains("cargo add vitesse"), "{lang}");
         assert!(footer.contains(&format!("v{}", vitesse::VERSION)), "{lang}");
@@ -193,6 +192,10 @@ async fn every_page_ends_with_the_signature_footer() {
     // L'auteur est aussi nommé dans les métadonnées.
     let html = client().get("/en/").await.text();
     assert!(html.contains(r#"<meta name="author" content="Maxime Nathan Lestage"/>"#));
+    // La licence est servie par le site, identique à celle du dépôt.
+    let res = client().get("/assets/LICENSE.txt").await;
+    assert_eq!(res.status(), 200);
+    assert_eq!(res.text(), include_str!("../../LICENSE"));
 }
 
 #[tokio::test]
@@ -201,10 +204,10 @@ async fn doc_pages_have_their_navigation() {
     assert!(html.contains("<h1 class=\"doc-title\">"));
     assert!(html.contains(r#"class="doc-toc""#));
     assert!(html.contains(r#"data-island="search" data-props="es""#));
-    // Précédent, suivant, et le lien « modifier » vers GitHub.
+    // Précédent et suivant ; aucun lien vers GitHub.
     assert!(html.contains(r#"href="/es/docs/first-app/" rel="prev""#));
     assert!(html.contains(r#"href="/es/docs/requests/" rel="next""#));
-    assert!(html.contains("/edit/master/docs/es/routing.md"));
+    assert!(!html.contains("github.com"));
     assert!(html.contains(r#""@type":"BreadcrumbList""#));
     assert!(html.contains(r#"<a class="is-active" href="/es/docs/routing/" aria-current="page">"#));
     let hub = client().get("/en/docs/").await.text();

@@ -82,7 +82,7 @@ In short:
 - **Against Drogon (C++)**: 1.4 to 3.8 times faster.
 - **Against Express**: about 50 times faster.
 
-All of these ran on a 4 vCPU VM, with the server pinned to 2 cores, [wrk](https://github.com/wg/wrk) on the other 2, 128 keep-alive connections and 10 s per scenario. The Express server used for these numbers has since been removed from the repository to keep it 100% Rust (it is still in the git history), and the benchmark now compares Drogon, axum, actix-web and Vitesse. The [Performance](performance.md) page covers the methodology, how to reproduce the numbers (with the Rust runner in `bench/runner`) and why Vitesse is fast. The raw results are also in the [README](https://github.com/maxlestage/Vitesse#benchmark).
+All of these ran on a 4 vCPU VM, with the server pinned to 2 cores, wrk on the other 2, 128 keep-alive connections and 10 s per scenario. The Express server used for these numbers has since been removed from the repository to keep it 100% Rust (it is still in the git history), and the benchmark now compares Drogon, axum, actix-web and Vitesse. The [Performance](performance.md) page covers the methodology, how to reproduce the numbers (with the Rust runner in `bench/runner`) and why Vitesse is fast. The raw results are also in the README.
 
 ## Current limitations
 
@@ -105,4 +105,4 @@ Like Express, Vitesse deliberately does little. These are not included (yet):
 > [!TIP]
 > If you already know Express well, do [Your first app](first-app.md) and then keep [Coming from Express](from-express.md) open while you write your own routes.
 
-The full API reference is generated from the source code. Run `cargo doc --open` in a project that depends on Vitesse, or browse the code on [GitHub](https://github.com/maxlestage/Vitesse).
+The full API reference is generated from the source code. Run `cargo doc --open` in a project that depends on Vitesse, or browse the code on [GitHub](https://maxlestage.github.io/Vitesse/).

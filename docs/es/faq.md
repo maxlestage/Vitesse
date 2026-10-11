@@ -12,7 +12,7 @@ Hasta la versión 1.0, la API todavía puede cambiar entre versiones menores. De
 
 ### ¿El proyecto es realmente 100 % Rust?
 
-Sí: el framework, los ejemplos, la herramienta de benchmark (`bench/runner`) y el sitio web (servido por el propio Vitesse, con páginas e islas WebAssembly escritas con [active](https://maxlestage.github.io/Active/)) están en Rust, y el repositorio no contiene JavaScript ni TypeScript. Dos matices, para ser precisos:
+Sí: el framework, los ejemplos, la herramienta de benchmark (`bench/runner`) y el sitio web (servido por el propio Vitesse, con páginas e islas WebAssembly escritas con [Active](https://maxlestage.github.io/Active/)) están en Rust, y el repositorio no contiene JavaScript ni TypeScript. Dos matices, para ser precisos:
 
 - los navegadores no pueden arrancar WebAssembly sin unas pocas líneas de JavaScript, y solo ejecutan un service worker (lo que hace que el sitio funcione sin conexión) en forma de script: la compilación del sitio (wasm-bindgen) genera un pequeño archivo de carga, y el servidor del sitio genera su service worker; ninguno de los dos se escribe a mano ni se guarda en el repositorio;
 - la documentación muestra fragmentos de Express (JavaScript), pero solo como comparaciones de antes y después para quienes vienen de Express.

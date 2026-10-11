@@ -292,7 +292,7 @@ docker build -t vitesse-demo . && docker run --rm -p 8080:8080 vitesse-demo
 The [`site/`](site) folder contains the project's website, in English,
 French and Spanish, with the documentation of [`docs/`](docs). It is served
 by Vitesse itself: the server is a Vitesse app whose pages are written with
-[active](https://maxlestage.github.io/Active/) (server-rendered, with
+[Active](https://maxlestage.github.io/Active/) (server-rendered, with
 complete SEO tags), and the interactive parts are active islands compiled to
 WebAssembly. It is a Progressive Web App: it can be installed on a phone's
 home screen and keeps working offline. The `Site` workflow exports it to

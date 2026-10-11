@@ -301,9 +301,9 @@ docker build -t vitesse-demo . && docker run --rm -p 8080:8080 vitesse-demo
 La carpeta [`site/`](site) contiene el sitio web del proyecto, en español,
 inglés y francés, con la documentación de [`docs/`](docs). Lo sirve el
 propio Vitesse: el servidor es una aplicación Vitesse cuyas páginas están
-escritas con [active](https://maxlestage.github.io/Active/) (renderizadas en
+escritas con [Active](https://maxlestage.github.io/Active/) (renderizadas en
 el servidor, con todas las etiquetas SEO), y las partes interactivas son
-islas de active compiladas a WebAssembly. Es una Progressive Web App: se
+islas de Active compiladas a WebAssembly. Es una Progressive Web App: se
 instala en la pantalla de inicio de un móvil y sigue funcionando sin
 conexión. El workflow `Site` lo exporta a archivos estáticos y lo publica en
 GitHub Pages cada vez que cambia en `master`.

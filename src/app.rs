@@ -94,6 +94,7 @@ impl App {
         let route = Route {
             handler,
             names: param_names(&segments),
+            pattern: path.into(),
         };
         let methods = self.tree.entry(&segments, MethodMap::default);
         if methods.insert(method.clone(), route).is_err() {
@@ -242,10 +243,8 @@ impl App {
     /// so requests never have to touch a reference count.
     pub(crate) fn build(self) -> &'static AppService {
         let fallback = self.fallback.unwrap_or_else(|| Arc::new(not_found));
-        let core = Arc::new(Core {
-            tree: self.tree,
-            fallback,
-        });
+        let tree: &'static Tree<MethodMap> = Box::leak(Box::new(self.tree));
+        let core = Arc::new(Core { tree, fallback });
         let dispatcher: Arc<dyn Handler> = Arc::new(Dispatcher {
             scopes: build_scopes(self.scopes, &core),
             core,
@@ -260,6 +259,7 @@ impl App {
                 endpoint: dispatcher,
             },
             shared: Shared {
+                routes: Some(tree),
                 state: self.state,
                 body_limit: self.body_limit,
                 trust_proxy: self.trust_proxy,
@@ -352,12 +352,10 @@ impl Handler for Dispatcher {
     #[inline]
     fn call(&'static self, mut req: Request) -> BoxFuture<Response> {
         if let Some(route) = req
-            .find_route(&self.core.tree)
+            .find_route(self.core.tree)
             .and_then(|methods| methods.find(req.method()))
         {
-            if !route.names.is_empty() {
-                req.set_params(&route.names);
-            }
+            req.set_route(route);
             return route.handler.call(req);
         }
         // Aucune route ne répond : les middlewares des routeurs montés sur ce
@@ -390,25 +388,38 @@ fn under(path: &str, prefix: &str) -> bool {
 /// Pour chaque préfixe, la chaîne de tous les middlewares qui le couvrent :
 /// les préfixes les plus courts (routeurs extérieurs) d'abord, puis dans
 /// l'ordre de montage.
+/// Le fallback est celui du routeur le plus profond qui couvre le préfixe.
 fn build_scopes(scopes: Vec<Scope>, core: &Arc<Core>) -> Box<[(Box<str>, Chain)]> {
     let depth = |p: &str| p.split('/').filter(|s| !s.is_empty()).count();
     let mut ordered: Vec<(usize, Scope)> = scopes.into_iter().enumerate().collect();
-    ordered.sort_by_key(|(i, (prefix, _))| (depth(prefix), *i));
-    let mut prefixes: Vec<&str> = ordered.iter().map(|(_, (p, _))| p.as_str()).collect();
+    ordered.sort_by_key(|(i, scope)| (depth(&scope.prefix), *i));
+    let mut prefixes: Vec<&str> = ordered.iter().map(|(_, s)| s.prefix.as_str()).collect();
     // Le préfixe le plus précis d'abord : le plus de segments.
     prefixes.sort_by_key(|p| std::cmp::Reverse((depth(p), p.len())));
     prefixes.dedup();
     prefixes
         .into_iter()
         .map(|prefix| {
-            let middlewares: Vec<Arc<dyn Middleware>> = ordered
-                .iter()
-                .filter(|(_, (p, _))| under(prefix, p))
-                .flat_map(|(_, (_, m))| m.iter().cloned())
+            let covering = || {
+                ordered
+                    .iter()
+                    .map(|(_, scope)| scope)
+                    .filter(|scope| under(prefix, &scope.prefix))
+            };
+            let middlewares: Vec<Arc<dyn Middleware>> = covering()
+                .flat_map(|scope| scope.middlewares.iter().cloned())
                 .collect();
+            let endpoint: Arc<dyn Handler> =
+                match covering().rev().find_map(|scope| scope.fallback.clone()) {
+                    Some(fallback) => Arc::new(ScopedFallback {
+                        core: core.clone(),
+                        fallback,
+                    }),
+                    None => core.clone(),
+                };
             let chain = Chain {
                 middlewares: middlewares.into(),
-                endpoint: core.clone(),
+                endpoint,
             };
             (prefix.into(), chain)
         })
@@ -419,20 +430,41 @@ fn build_scopes(scopes: Vec<Scope>, core: &Arc<Core>) -> Box<[(Box<str>, Chain)]
 /// automatic `OPTIONS`, or else the fallback (`404`). A router middleware may
 /// have rewritten the path, hence the new lookup.
 struct Core {
-    tree: Tree<MethodMap>,
+    tree: &'static Tree<MethodMap>,
     fallback: Arc<dyn Handler>,
 }
 
 impl Handler for Core {
-    fn call(&'static self, mut req: Request) -> BoxFuture<Response> {
-        let Some(methods) = req.find_route(&self.tree) else {
-            return self.fallback.call(req);
+    fn call(&'static self, req: Request) -> BoxFuture<Response> {
+        self.route(req, &*self.fallback)
+    }
+}
+
+/// Routing under a router that has its own fallback.
+struct ScopedFallback {
+    core: Arc<Core>,
+    fallback: Arc<dyn Handler>,
+}
+
+impl Handler for ScopedFallback {
+    fn call(&'static self, req: Request) -> BoxFuture<Response> {
+        let core: &'static Core = &self.core;
+        core.route(req, &*self.fallback)
+    }
+}
+
+impl Core {
+    fn route(
+        &'static self,
+        mut req: Request,
+        fallback: &'static dyn Handler,
+    ) -> BoxFuture<Response> {
+        let Some(methods) = req.find_route(self.tree) else {
+            return fallback.call(req);
         };
         match methods.find(req.method()) {
             Some(route) => {
-                if !route.names.is_empty() {
-                    req.set_params(&route.names);
-                }
+                req.set_route(route);
                 route.handler.call(req)
             }
             None => {

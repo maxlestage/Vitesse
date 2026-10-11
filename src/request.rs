@@ -18,11 +18,14 @@ use serde::de::DeserializeOwned;
 
 use crate::body::{Body, BoxError};
 use crate::error::Error;
+use crate::router::{MethodMap, Route};
 use crate::tree::{Captures, Tree};
 use crate::util::percent_decode;
 
 /// Data shared by the whole application (state, configuration).
 pub(crate) struct Shared {
+    /// The routes, for [`Request::route`] before routing.
+    pub(crate) routes: Option<&'static Tree<MethodMap>>,
     pub(crate) state: StateMap,
     pub(crate) body_limit: usize,
     pub(crate) trust_proxy: crate::proxy::TrustProxy,
@@ -202,6 +205,8 @@ struct Inner {
     /// Positions found by the router (reused buffer).
     captures: Captures,
     params: Params,
+    /// The pattern of the route found by the router.
+    route: Option<&'static str>,
     remote: Option<SocketAddr>,
     /// Received over TLS (HTTPS, HTTP/3).
     secure: bool,
@@ -231,6 +236,7 @@ impl Inner {
             body: Mutex::new(ReqBody::Empty),
             captures: Vec::new(),
             params: Params::default(),
+            route: None,
             remote: None,
             secure: false,
             conditional: false,
@@ -265,6 +271,7 @@ impl Inner {
         self.captures.clear();
         self.params.names = &[];
         self.params.values.clear();
+        self.route = None;
         self.remote = None;
         self.secure = false;
         self.conditional = false;
@@ -428,9 +435,17 @@ impl Request {
         tree.find(path, &mut inner.captures)
     }
 
-    /// Records the parameters of the route found by the router.
+    /// Records the route found by the router, and its parameters.
     #[inline]
-    pub(crate) fn set_params(&mut self, names: &'static [Box<str>]) {
+    pub(crate) fn set_route(&mut self, route: &'static Route) {
+        self.inner.route = Some(&route.pattern);
+        if !route.names.is_empty() {
+            self.set_params(&route.names);
+        }
+    }
+
+    #[inline]
+    fn set_params(&mut self, names: &'static [Box<str>]) {
         let inner = &mut **self.inner;
         let path = path_of(&inner.head, inner.target, inner.path_end);
         inner.params.names = names;
@@ -704,6 +719,42 @@ impl Request {
             .ok_or_else(|| Error::bad_request(format!("missing parameter '{name}'")))?;
         raw.parse()
             .map_err(|_| Error::bad_request(format!("invalid parameter '{name}': '{raw}'")))
+    }
+
+    /// The pattern of the route that answers this request, mount prefix
+    /// included: `"/api/users/:id"` for `/api/users/42` (axum's
+    /// `MatchedPath`, actix-web's `match_pattern`). Handy to label metrics
+    /// and logs without one series per user id.
+    ///
+    /// Global middlewares run before routing: there, the route is looked up
+    /// on demand (call it before `next.run(req)`, which takes the request).
+    /// `None` if no route matches.
+    ///
+    /// ```
+    /// use vitesse::prelude::*;
+    ///
+    /// let mut app = App::new();
+    /// app.middleware(|req: Request, next: Next| async move {
+    ///     let route = req.route().unwrap_or("<none>");
+    ///     let res = next.run(req).await;
+    ///     println!("{route} -> {}", res.status_code());
+    ///     res
+    /// });
+    /// app.get("/users/:id", |req: Request| async move {
+    ///     req.route().unwrap_or_default().to_owned() // "/users/:id"
+    /// });
+    /// ```
+    pub fn route(&self) -> Option<&'static str> {
+        if let Some(route) = self.inner.route {
+            return Some(route);
+        }
+        let mut captures = Vec::new();
+        self.inner
+            .shared
+            .routes?
+            .find(self.path(), &mut captures)?
+            .find(self.method())
+            .map(|route| &*route.pattern)
     }
 
     /// All route parameters, as `(name, value)` pairs.

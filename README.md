@@ -99,6 +99,7 @@ gracefully on `Ctrl+C` / `SIGTERM`. If you already run a tokio runtime, use
 |---|---|---|
 | `ws` | Enabled | WebSocket: `app.ws(...)` and `vitesse::ws` ([guide](docs/en/websocket.md)) |
 | `http3` | Disabled | HTTP/3 over QUIC: `app.http3(...)` and `vitesse::http3` ([guide](docs/en/http3.md)) |
+| `compress` | Disabled | `middleware::compress()`: responses in Brotli or gzip ([guide](docs/en/middleware.md#compress)) |
 
 ```toml
 [dependencies]

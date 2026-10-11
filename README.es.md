@@ -104,6 +104,7 @@ ordenada con `Ctrl+C` / `SIGTERM`. Si ya tienes un runtime de tokio, usa
 |---|---|---|
 | `ws` | Activada | WebSocket: `app.ws(...)` y `vitesse::ws` ([guía](docs/es/websocket.md)) |
 | `http3` | Desactivada | HTTP/3 sobre QUIC: `app.http3(...)` y `vitesse::http3` ([guía](docs/es/http3.md)) |
+| `compress` | Desactivada | `middleware::compress()`: respuestas en Brotli o gzip ([guía](docs/es/middleware.md#compress)) |
 
 ```toml
 [dependencies]

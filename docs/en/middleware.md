@@ -160,6 +160,7 @@ The `vitesse::middleware` module (available as `middleware::` with the prelude) 
 | `middleware::helmet()` | `helmet()` | security headers |
 | `middleware::timeout(duration)` | `connect-timeout` | `503` when a request takes too long |
 | `middleware::serve_static(dir)` | `express.static(dir)` | static files, see [Static files](static-files.md) |
+| `middleware::compress()` | `compression()` | Brotli or gzip responses (feature `compress`) |
 
 ### `logger`
 
@@ -238,6 +239,21 @@ app.middleware(middleware::timeout(Duration::from_secs(10)));
 ```
 
 The handler's future is dropped at its next `.await`. Code that blocks the thread without ever awaiting (a long computation, `std::thread::sleep`) can't be interrupted.
+
+### `compress`
+
+Compresses responses with Brotli, or with gzip when the browser does not accept Brotli, like Express's `compression()`. It needs the `compress` Cargo feature:
+
+```toml
+[dependencies]
+vitesse = { version = "0.1", features = ["compress"] }
+```
+
+```rust
+app.middleware(middleware::compress());
+```
+
+Only bodies worth it are compressed: HTML, CSS, JavaScript, JSON, XML, SVG, WebAssembly and the other text-like types, of 1 KiB or more, with a known size (not streamed) and not encoded already. Images, videos and archives pass through. The response gets `Content-Encoding` and `Vary: Accept-Encoding`, and the compression runs on a blocking thread, so the workers keep answering other requests. Add it before the other middlewares, so that every response goes through it.
 
 ## Writing a reusable middleware
 

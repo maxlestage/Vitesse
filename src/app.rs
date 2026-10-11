@@ -2,6 +2,7 @@
 
 use std::io;
 use std::sync::Arc;
+use std::time::Duration;
 
 use http::header::{self, HeaderValue};
 use http::{Method, StatusCode};
@@ -12,7 +13,7 @@ use crate::proxy::TrustProxy;
 use crate::request::{Request, Shared, StateMap};
 use crate::response::{IntoResponse, Response};
 use crate::router::{MethodMap, Route, Scope, routing_methods};
-use crate::server::{self, ListenAddr, Server};
+use crate::server::{self, ListenAddr, Server, ServerConfig};
 use crate::static_files::{Conditional, with_conditional};
 use crate::tree::{Tree, param_names, parse_pattern};
 
@@ -48,6 +49,7 @@ pub struct App {
     trust_proxy: TrustProxy,
     workers: Option<usize>,
     thread_per_core: bool,
+    config: ServerConfig,
     #[cfg(feature = "http3")]
     http3: Option<crate::http3::Http3>,
     #[cfg(feature = "tls")]
@@ -74,6 +76,7 @@ impl App {
             trust_proxy: TrustProxy::None,
             workers: None,
             thread_per_core: true,
+            config: ServerConfig::default(),
             #[cfg(feature = "http3")]
             http3: None,
             #[cfg(feature = "tls")]
@@ -209,6 +212,38 @@ impl App {
         self
     }
 
+    /// How long an idle keep-alive connection stays open (60 s by default,
+    /// actix-web's `keep_alive`). `Duration::ZERO` disables keep-alive: the
+    /// connection is closed after each response (`Connection: close`).
+    pub fn keep_alive(&mut self, timeout: Duration) -> &mut Self {
+        self.config.keep_alive = timeout;
+        self
+    }
+
+    /// Time given to a client to send a complete request head (30 s by
+    /// default, actix-web's `client_request_timeout`): beyond it, `408
+    /// Request Timeout` and the connection is closed. Protects against
+    /// clients that open connections and send nothing (slowloris).
+    pub fn header_timeout(&mut self, timeout: Duration) -> &mut Self {
+        self.config.header_timeout = timeout.max(Duration::from_millis(20));
+        self
+    }
+
+    /// Time given to in-flight requests to finish during a graceful
+    /// shutdown (10 s by default, actix-web's `shutdown_timeout`).
+    pub fn shutdown_timeout(&mut self, timeout: Duration) -> &mut Self {
+        self.config.shutdown_timeout = timeout;
+        self
+    }
+
+    /// Maximum number of open connections, per server thread (actix-web's
+    /// `max_connections`): beyond it, new connections wait in the system's
+    /// queue until one closes. Unlimited by default.
+    pub fn max_connections(&mut self, max: usize) -> &mut Self {
+        self.config.max_connections = max.max(1);
+        self
+    }
+
     /// Also serves the application over HTTP/3 (QUIC, UDP), next to
     /// HTTP/1.1, with [`App::run`], [`App::listen`] and [`App::bind`]:
     /// see [`http3`](crate::http3).
@@ -258,6 +293,7 @@ impl App {
                 middlewares: middlewares.into(),
                 endpoint: dispatcher,
             },
+            config: self.config,
             shared: Shared {
                 routes: Some(tree),
                 state: self.state,
@@ -316,6 +352,7 @@ impl App {
 /// The frozen application, ready to serve.
 pub(crate) struct AppService {
     chain: Chain,
+    pub(crate) config: ServerConfig,
     pub(crate) shared: Shared,
     #[cfg(feature = "http3")]
     pub(crate) http3: Option<crate::http3::Http3>,

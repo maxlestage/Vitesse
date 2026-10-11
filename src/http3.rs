@@ -46,7 +46,7 @@ pub use rustls;
 use crate::app::AppService;
 use crate::pem::invalid;
 use crate::request::{ReqBody, Request};
-use crate::server::{ResponseFuture, SHUTDOWN_GRACE};
+use crate::server::ResponseFuture;
 use crate::util::http_date;
 
 /// How long `Alt-Svc` remains valid in the browser: one day.
@@ -174,12 +174,13 @@ pub(crate) async fn serve(
     // Plus de nouvelles connexions ; les connexions ouvertes ont reçu un
     // GOAWAY et se terminent avec leurs requêtes en cours.
     endpoint.set_server_config(None);
-    let _ = tokio::time::timeout(SHUTDOWN_GRACE, async {
+    let grace = app.config.shutdown_timeout;
+    let _ = tokio::time::timeout(grace, async {
         while connections.join_next().await.is_some() {}
     })
     .await;
     endpoint.close(0u32.into(), b"server shutting down");
-    let _ = tokio::time::timeout(SHUTDOWN_GRACE, endpoint.wait_idle()).await;
+    let _ = tokio::time::timeout(grace, endpoint.wait_idle()).await;
 }
 
 /// Waits until the server is stopping (the guard of `watch` is released

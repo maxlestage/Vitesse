@@ -2232,7 +2232,7 @@ body.has-cursor .cursor {
   color: var(--hot-1);
 }
 
-/* L'écosystème : les six projets de l'auteur, une grille à filets, le projet courant marqué. */
+/* L'écosystème : les sept projets de l'auteur, une grille à filets, le projet courant marqué. */
 .footer__eco {
   position: relative;
   max-width: var(--max);
@@ -2274,6 +2274,15 @@ body.has-cursor .cursor {
 
 .footer__eco-grid li {
   min-width: 0;
+}
+
+/* Le dernier projet remplit sa ligne, sans case vide de la couleur des filets. */
+.footer__eco-grid li:last-child:nth-child(3n + 1) {
+  grid-column: 1 / -1;
+}
+
+.footer__eco-grid li:last-child:nth-child(3n + 2) {
+  grid-column: span 2;
 }
 
 .eco {
@@ -3755,6 +3764,15 @@ body.has-cursor .cursor {
 
   .footer__eco-grid {
     grid-template-columns: repeat(2, 1fr);
+  }
+
+  .footer__eco-grid li:last-child:nth-child(3n + 1),
+  .footer__eco-grid li:last-child:nth-child(3n + 2) {
+    grid-column: auto;
+  }
+
+  .footer__eco-grid li:last-child:nth-child(odd) {
+    grid-column: 1 / -1;
   }
 
   /* Le parcours devient une simple liste verticale. */

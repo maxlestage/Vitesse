@@ -544,6 +544,7 @@ body.has-cursor .cursor {
   position: fixed;
   inset: 0;
   z-index: 65;
+  overflow-y: auto;
   display: flex;
   align-items: flex-end;
   padding: 120px var(--gutter) 48px;

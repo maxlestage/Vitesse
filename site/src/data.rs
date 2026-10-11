@@ -26,10 +26,6 @@ pub const ECOSYSTEM: [(&str, &str); 6] = [
 /// La commande d'installation du héros.
 pub const INSTALL: &str = "cargo add vitesse";
 
-/// Le bouton « Deploy to Heroku » (Heroku Button).
-pub const HEROKU_DEPLOY: &str =
-    "https://www.heroku.com/deploy?template=https://github.com/maxlestage/Vitesse";
-
 /// Un scénario du benchmark : requêtes par seconde et temps CPU par requête
 /// de chaque serveur, dans l'ordre de [`SERVERS`].
 pub struct Scenario {

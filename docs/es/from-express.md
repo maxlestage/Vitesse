@@ -22,6 +22,10 @@ Si conoces Express, ya conoces casi todo Vitesse: las mismas rutas, el mismo `re
 | `process.env.PORT` | `std::env::var("PORT")` |
 | `app.locals.db = db` | `app.state(db)`, que se lee con `req.state::<Db>()` |
 | `app.use((req, res) => res.status(404)…)` | `app.fallback(handler)` |
+| `app.set('trust proxy', 'loopback')` | `app.trust_proxy("loopback")` (también `true`, un número de saltos o rangos de IP: consulta [Detrás de un proxy](requests.md#detrás-de-un-proxy-trust_proxy)) |
+| `https.createServer({ key, cert }, app).listen(443)` | `app.tls(Tls::from_pem_files("fullchain.pem", "privkey.pem")?)` y después `app.run(443)`, feature `tls` (consulta [HTTPS y HTTP/2](https.md)) |
+| `server.keepAliveTimeout = 5000` | `app.keep_alive(Duration::from_secs(5))` |
+| `server.headersTimeout = 10000` | `app.header_timeout(Duration::from_secs(10))` |
 
 ### Enrutamiento
 
@@ -35,6 +39,8 @@ Si conoces Express, ya conoces casi todo Vitesse: las mismas rutas, el mismo `re
 | `express.Router()` | `Router::new()` |
 | `app.use('/api', router)` | `app.mount("/api", router)` |
 | `router.use(mw)` | `router.middleware(mw)`, que también se ejecuta para los `404` bajo el prefijo del router |
+| Un último `router.use((req, res) => res.status(404)…)` | `router.fallback(handler)` (consulta [El fallback de un router](routers.md#el-fallback-de-un-router)) |
+| `method-override` | `req.set_method(...)` en un middleware global (consulta [Sobrescribir el método](requests.md#sobrescribir-el-método)) |
 | `app.ws('/echo', (ws, req) => …)` (express-ws) | `app.ws("/echo", \|req, socket\| async move { … })`: la petición va primero, y un bucle sustituye a `ws.on('message')` (consulta [WebSocket](websocket.md)) |
 
 ### Petición
@@ -46,11 +52,18 @@ Si conoces Express, ya conoces casi todo Vitesse: las mismas rutas, el mismo `re
 | `express.json()` + `req.body` | `req.json::<T>().await?` |
 | `express.urlencoded()` + `req.body` | `req.form::<T>().await?` |
 | `express.text()` / `express.raw()` | `req.text().await?` / `req.bytes().await?` |
+| `express.json({ limit: '10mb' })` | `handler.with(middleware::body_limit(10 * 1024 * 1024))` para una ruta, `app.body_limit(...)` para toda la aplicación |
+| `multer` + `req.file` / `req.files` | `req.multipart()?` y después `form.next_field().await?`, feature `multipart` (consulta [Subida de archivos](requests.md#subida-de-archivos-multipart)) |
 | `req.get('host')` | `req.header("host")` |
 | `req.cookies.session` (cookie-parser) | `req.cookie("session")`, integrado |
-| `req.ip` / `req.hostname` | `req.ip()` / `req.hostname()` |
+| `req.ip` | `req.ip()`, que sigue a `app.trust_proxy` como en Express |
+| `req.host` / `req.hostname` | `req.host()` / `req.hostname()` |
+| `req.protocol` / `req.secure` | `req.protocol()` / `req.secure()` |
 | `req.method` / `req.path` / `req.originalUrl` | `req.method()` / `req.path()` / `req.uri()` |
+| `req.route.path` | `req.route()` |
 | `req.is('json')` | `req.is("json")` |
+| `req.accepts(['html', 'json'])` | `req.accepts(&["html", "json"])`, un `Option` (`None`: responde `406`) |
+| `req.acceptsLanguages('en', 'fr')` | `req.accepts_language(&["en", "fr"])` |
 | `res.locals.user = user` | `req.set(user)`, que se lee con `req.get::<User>()` |
 
 ### Respuesta
@@ -70,6 +83,8 @@ Si conoces Express, ya conoces casi todo Vitesse: las mismas rutas, el mismo `re
 | `res.attachment('informe.csv')` | `.attachment("informe.csv")` |
 | `res.sendFile(path)` | `res::file(path).await` |
 | `res.download(path, 'informe.pdf')` | `res::download(path, "informe.pdf").await` |
+| `res.write('data: …\n\n')` en una respuesta `text/event-stream` (SSE) | `let (tx, stream) = sse::channel(16);`, devuelve `stream` y después `tx.send(Event::new().data("…")).await` desde una tarea (consulta [Server-Sent Events](responses.md#server-sent-events)) |
+| `req.on('close', …)` durante SSE | `tx.send(…)` devuelve un error, o `tx.closed().await` |
 
 ### Middlewares y errores
 
@@ -85,6 +100,10 @@ Si conoces Express, ya conoces casi todo Vitesse: las mismas rutas, el mismo `re
 | `cors()` | `middleware::cors()` |
 | `helmet()` | `middleware::helmet()` |
 | `connect-timeout` | `middleware::timeout(duración)` |
+| `compression()` | `middleware::compress()`, feature `compress` |
+| `express-rate-limit` | `middleware::rate_limit(100, Duration::from_secs(15 * 60))` |
+| `express-basic-auth` | `middleware::basic_auth(("admin", "secret"))` |
+| `express-request-id` | `middleware::request_id()` |
 | `express.static('public')` | `app.middleware(ServeDir::new("public"))` |
 | `app.use('/static', express.static('public'))` | `app.static_dir("/static", "public")` |
 
@@ -432,6 +451,7 @@ Las peticiones se atienden en paralelo en varios hilos, así que no hay variable
 - **Las query strings son planas.** `?user[name]=ada` no se convierte en un objeto anidado. Para una clave repetida como `?tag=a&tag=b`, recorre `req.query_pairs()`.
 - **No hay parámetros opcionales ni expresiones regulares,** ni parámetros parciales dentro de un segmento (`/:id?`, `/:id(\d+)`, `/vuelos/:desde-:hasta`): declara rutas separadas o analiza tú mismo el segmento.
 - **Los errores son JSON por defecto** (`{"error": "..."}`), y los detalles internos nunca llegan al cliente, ni siquiera en desarrollo. Usa `app.on_error` para otro formato.
+- **Detrás de un proxy, decláralo.** Como en Express sin `trust proxy`, `req.ip()` y `req.protocol()` describen el proxy hasta que llamas a `app.trust_proxy(...)`.
 - **`req.set(valor)` exige `Clone`.** Añade `#[derive(Clone)]` a los tipos que adjuntas a una petición.
 - **El cuerpo se lee bajo demanda, y una sola vez desde la red.** El resultado se guarda en caché: llamar a `req.text()` y después a `req.bytes()` funciona.
 - **Recargar con cada cambio.** `cargo run` recompila lo que ha cambiado; para un bucle al estilo de `nodemon`, usa una herramienta como [cargo-watch](https://crates.io/crates/cargo-watch) (`cargo watch -x run`). Compila con `cargo build --release` para producción.

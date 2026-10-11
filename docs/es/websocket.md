@@ -347,6 +347,18 @@ async fn echoes_text_messages() {
 
 Más ejemplos en [Pruebas](testing.md#probar-websockets).
 
+## WebSocket seguro: `wss://`
+
+Una página servida por HTTPS solo puede abrir conexiones `wss://`, WebSocket sobre TLS. Cuando Vitesse sirve HTTPS por sí mismo (la feature `tls` y `app.tls(...)`, consulta [HTTPS y HTTP/2](https.md)), tus rutas `app.ws` responden a `wss://` sin ningún cambio en su código:
+
+```js
+const socket = new WebSocket(`wss://${location.host}/echo`);
+```
+
+Detrás de un proxy inverso que termina el TLS, el navegador habla `wss://` con el proxy, y el proxy reenvía `ws://` sin cifrar a Vitesse.
+
+WebSocket sigue en HTTP/1.1: aunque el resto del sitio use HTTP/2 o HTTP/3, los navegadores abren una conexión HTTP/1.1 aparte para cada WebSocket.
+
 ## Detrás de un proxy inverso
 
 El proxy debe dejar pasar el `Upgrade` y después mantener la conexión abierta:
@@ -371,8 +383,8 @@ Los proxies y las plataformas cierran las conexiones que pasan demasiado tiempo 
 
 ## Límites
 
-- **Solo HTTP/1.1.** WebSocket no está disponible sobre [HTTP/3](http3.md): los clientes abren sus conexiones WebSocket sobre una conexión TCP normal, aunque el resto del sitio use HTTP/3.
-- **Apagado ordenado.** Con `Ctrl+C` o `SIGTERM`, el servidor no espera a las conexiones WebSocket abiertas: se cortan en cuanto terminan las peticiones HTTP en curso, y como muy tarde al final del periodo de gracia de 10 segundos (ver [Configuración del servidor](server.md#apagado-ordenado)). Se cortan sin cierre ordenado, y los clientes ven un cierre anómalo (código `1006`). Haz que tus clientes se reconecten automáticamente, algo que necesitan de todos modos para los cortes de red.
+- **Solo HTTP/1.1.** WebSocket no está disponible sobre [HTTP/2](https.md) ni sobre [HTTP/3](http3.md): los clientes abren sus conexiones WebSocket sobre una conexión HTTP/1.1 normal (TLS incluido, para `wss://`), aunque el resto del sitio use HTTP/2 o HTTP/3.
+- **Apagado ordenado.** Con `Ctrl+C` o `SIGTERM`, el servidor no espera a las conexiones WebSocket abiertas: se cortan en cuanto terminan las peticiones HTTP en curso, y como muy tarde al final del periodo de gracia (10 segundos por defecto, `app.shutdown_timeout`; ver [Configuración del servidor](server.md#apagado-ordenado)). Se cortan sin cierre ordenado, y los clientes ven un cierre anómalo (código `1006`). Haz que tus clientes se reconecten automáticamente, algo que necesitan de todos modos para los cortes de red.
 - **Tamaño de los mensajes.** 16 MiB por mensaje por defecto; redúcelo con `Upgrade::max_message_size` en los endpoints públicos.
 - **Hilos.** En el modo de un hilo por núcleo, una conexión se queda en el hilo que la aceptó: como en cualquier handler, no lo bloquees (ver [Rendimiento](performance.md)).
 

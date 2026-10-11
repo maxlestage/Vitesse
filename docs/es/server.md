@@ -1,6 +1,6 @@
 # Configuración del servidor
 
-Esta página cubre todo lo relacionado con el propio servidor: las tres formas de arrancarlo, las direcciones de escucha, los hilos, el tamaño de los cuerpos, los límites integrados en el motor HTTP, el apagado ordenado y los protocolos que habla. Los valores por defecto están pensados para producción, así que la mayoría de las aplicaciones solo necesitan `app.run(port)`.
+Esta página cubre todo lo relacionado con el propio servidor: las tres formas de arrancarlo, las direcciones de escucha y los sockets Unix, los hilos, el tamaño de los cuerpos, los tiempos de espera y los límites de conexiones, los límites integrados en el motor HTTP, el apagado ordenado y los protocolos que habla. Los valores por defecto están pensados para producción, así que la mayoría de las aplicaciones solo necesitan `app.run(port)`.
 
 ## Tres formas de arrancar el servidor
 
@@ -123,6 +123,36 @@ fn main() -> std::io::Result<()> {
 
 Consulta [Heroku](heroku-mobile.md) y [Docker](docker.md) para despliegues completos.
 
+## Sockets de dominio Unix
+
+Detrás de un proxy inverso en la misma máquina, Vitesse puede escuchar en un socket de dominio Unix, un archivo como `/run/mi-app/app.sock`, en lugar de en un puerto TCP. Sin puerto que elegir ni que cerrar en el cortafuegos: los permisos del archivo deciden quién puede conectarse. Tres métodos se corresponden con los de TCP:
+
+| Método | Como | Notas |
+|---|---|---|
+| `app.run_unix(path)` | `app.run` | Crea su propio runtime de tokio: el multihilo, con `workers` hilos (sin modo de un hilo por núcleo) |
+| `app.listen_unix(path).await` | `app.listen` | En tu runtime |
+| `app.bind_unix(path).await?` | `app.bind` | Devuelve un `UnixServer`: `path()`, `run().await`, `with_graceful_shutdown(signal).await` |
+
+```rust
+use vitesse::prelude::*;
+
+fn main() -> std::io::Result<()> {
+    let mut app = App::new();
+    app.trust_proxy(1); // un proxy delante (Nginx): él indica la dirección del cliente
+    app.get("/", |req: Request| async move { format!("¡Hola {:?}!", req.ip()) });
+
+    app.run_unix("/run/mi-app/app.sock") // hasta Ctrl+C / SIGTERM
+}
+```
+
+- **El archivo del socket**: si una ejecución anterior dejó el archivo, se reemplaza; si un servidor todavía responde en él, recibes en cambio un error `AddrInUse`, y un archivo normal en esa ruta nunca se borra. El archivo se elimina cuando el servidor se detiene. La carpeta debe existir y la aplicación debe poder escribir en ella.
+- **Permisos**: el archivo se crea con la umask del proceso. Para que el usuario del proxy pueda conectarse, cámbialos con `bind_unix`, antes de servir: `std::fs::set_permissions(server.path(), Permissions::from_mode(0o660))` (consulta [Puesta en producción](production.md#a-través-de-un-socket-unix) para una configuración completa).
+- **Sin dirección del cliente**: un socket Unix no tiene IP, así que `req.ip()` y `req.remote_addr()` son `None`. Con `app.trust_proxy(...)` (normalmente un número de saltos: `1` para un solo proxy), el otro extremo cuenta como un proxy de confianza: `req.ip()` lee `X-Forwarded-For`, y `req.protocol()` y `req.hostname()` leen `X-Forwarded-Proto` y `X-Forwarded-Host`.
+- **HTTP/3** no se abre con un socket Unix (QUIC necesita un puerto UDP): usa `app.run` para ello.
+- **Solo Unix**: estos métodos no existen en Windows. No necesitan ninguna feature de Cargo.
+
+En el lado del proxy, Nginx se conecta con `proxy_pass http://unix:/run/mi-app/app.sock;` y Caddy con `reverse_proxy unix//run/mi-app/app.sock`.
+
 ## Hilos: `workers` y `thread_per_core`
 
 Por defecto, `app.run` arranca un hilo por cada CPU disponible para el proceso. Cómo se reparten el trabajo depende del modo:
@@ -163,11 +193,55 @@ app.body_limit(10 * 1024 * 1024); // 10 MiB
 
 El valor por defecto es `vitesse::DEFAULT_BODY_LIMIT`, 1 MiB. El límite se aplica cada vez que un handler lee el cuerpo con `req.bytes()`, `req.text()`, `req.json()` o `req.form()`: si lo supera, la petición falla con `413 Payload Too Large`. Si el `Content-Length` anunciado ya es demasiado grande, se devuelve el 413 sin leer nada.
 
-El cuerpo solo se lee si el handler lo pide, así que las rutas que nunca lo leen no se ven afectadas. `req.take_body()`, que te da el flujo en bruto (subidas de archivos, proxies), no tiene límite: contar los bytes queda en tus manos. El ajuste es global para toda la aplicación. Consulta [Peticiones](requests.md) para leer cuerpos.
+El cuerpo solo se lee si el handler lo pide, así que las rutas que nunca lo leen no se ven afectadas. `req.take_body()`, que te da el flujo en bruto (proxies), no tiene límite: contar los bytes queda en tus manos. Los [formularios multipart](requests.md#subida-de-archivos-multipart) (`req.multipart()`) también tienen límite, aunque se lean como flujo.
+
+`app.body_limit` fija el valor por defecto de toda la aplicación. Para aceptar cuerpos más grandes solo en algunas rutas (subidas de archivos), o más pequeños, cambia el límite por ruta o por router con el middleware `body_limit`:
+
+```rust
+async fn upload(req: Request) -> vitesse::Result<String> {
+    let bytes = req.bytes().await?;
+    Ok(format!("{} bytes", bytes.len()))
+}
+
+let mut app = App::new(); // 1 MiB en todas partes...
+app.post("/upload", upload.with(middleware::body_limit(50 * 1024 * 1024))); // ...50 MiB aquí
+```
+
+`req.body_limit()` devuelve el límite que se aplica a una petición, y `req.set_body_limit(bytes)` lo cambia desde tu propio middleware. En [HTTP/3](http3.md), los cuerpos de las peticiones se leen antes del enrutamiento, dentro de `app.body_limit`: sube ese límite si los clientes HTTP/3 suben archivos grandes. Consulta [Límite de tamaño del cuerpo y 413](requests.md#límite-de-tamaño-del-cuerpo-y-413) para los detalles.
+
+## Tiempos de espera y conexiones
+
+Cuatro ajustes controlan las propias conexiones, como el `HttpServer` de actix-web:
+
+```rust
+use std::time::Duration;
+
+let mut app = App::new();
+app.keep_alive(Duration::from_secs(75))        // conexiones keep-alive inactivas (60 s por defecto)
+    .header_timeout(Duration::from_secs(10))   // tiempo para enviar la cabecera de la petición (30 s por defecto)
+    .shutdown_timeout(Duration::from_secs(25)) // periodo de gracia al apagar (10 s por defecto)
+    .max_connections(10_000);                  // conexiones abiertas por bucle de aceptación (por defecto: sin límite)
+```
+
+| Ajuste | Por defecto | Efecto |
+|---|---|---|
+| `keep_alive(duration)` | 60 s | Una conexión keep-alive sin peticiones se cierra pasado este tiempo (HTTP/2 incluido). `Duration::ZERO` desactiva el keep-alive: todas las respuestas llevan `connection: close` |
+| `header_timeout(duration)` | 30 s | Un cliente que en ese plazo no ha enviado una cabecera de petición completa recibe `408 Request Timeout`, y la conexión se cierra: protección contra los clientes que abren conexiones y no envían nada (slowloris) |
+| `shutdown_timeout(duration)` | 10 s | El tiempo que se da a las peticiones en curso durante el [apagado ordenado](#apagado-ordenado), HTTP/3 incluido |
+| `max_connections(n)` | Sin límite | Conexiones abiertas por bucle de aceptación; las conexiones de más esperan en la cola del sistema hasta que se cierre una |
+
+Los plazos los comprueba un temporizador por conexión: se respetan con un margen de la mitad del menor de `keep_alive` y `header_timeout`.
+
+Cuándo cambiarlos:
+
+- **`keep_alive`**: detrás de un proxy o de un balanceador de carga, mantenlo por encima del tiempo de inactividad del propio proxy, para que sea siempre el proxy quien cierre primero y nunca reutilice una conexión que Vitesse está cerrando (un balanceador de carga de AWS espera 60 s por defecto: usa 65 s o más).
+- **`header_timeout`**: bájalo (10 s) cuando la aplicación está expuesta directamente a internet, sin proxy.
+- **`shutdown_timeout`**: súbelo si algunas peticiones (informes, subidas de archivos) tardan más de 10 s, y mantenlo por debajo del tiempo que tu plataforma espera antes de matar el proceso.
+- **`max_connections`**: para limitar la memoria y los descriptores de archivo que usan las conexiones. Con `app.run` en modo de un hilo por núcleo hay un bucle de aceptación por hilo, así que el total es `n` × el número de hilos; en los demás modos, `n` es el total. Cuenta conexiones, no peticiones: una conexión HTTP/2 puede llevar muchas peticiones a la vez. Para limitar las peticiones que se están atendiendo, usa [`middleware::concurrency_limit`](middleware.md#concurrency_limit).
 
 ## Límites integrados en el motor
 
-El motor HTTP/1.1 protege el servidor de peticiones mal formadas o abusivas. Estos valores son fijos:
+El motor HTTP/1.1 protege el servidor de peticiones mal formadas o abusivas. Los límites de tamaño son fijos; los plazos se pueden cambiar (consulta [Tiempos de espera y conexiones](#tiempos-de-espera-y-conexiones)):
 
 | Situación | Comportamiento |
 |---|---|
@@ -176,9 +250,10 @@ El motor HTTP/1.1 protege el servidor de peticiones mal formadas o abusivas. Est
 | Petición mal formada | `400 Bad Request`, conexión cerrada |
 | `Content-Length` y `Transfer-Encoding` a la vez, o dos `Content-Length` distintos | `400` (protección contra *request smuggling*) |
 | `Transfer-Encoding` cuya última codificación no es `chunked` | `501 Not Implemented` |
-| Cuerpo mayor que `body_limit`, al leerlo | `413 Payload Too Large` |
-| Conexión keep-alive sin peticiones durante unos 60 s | Conexión cerrada |
-| Cabecera de la petición aún incompleta tras unos 30 s | `408 Request Timeout`, conexión cerrada |
+| Cuerpo mayor que el límite (`body_limit`), al leerlo | `413 Payload Too Large` |
+| Conexión keep-alive sin peticiones durante unos 60 s (`keep_alive`) | Conexión cerrada |
+| Cabecera de la petición aún incompleta tras unos 30 s (`header_timeout`) | `408 Request Timeout`, conexión cerrada |
+| Handshake TLS sin completar en 10 s ([HTTPS](https.md)) | Conexión cerrada |
 | `Expect: 100-continue` | Se envía `100 Continue` automáticamente antes de leer el cuerpo |
 | Cuerpo de petición `chunked` | Se decodifica de forma transparente |
 | Cuerpo de hasta 64 KiB | Se lee antes de llamar al handler; los cuerpos más grandes llegan al handler como flujo, a medida que se reciben |
@@ -187,7 +262,7 @@ El motor HTTP/1.1 protege el servidor de peticiones mal formadas o abusivas. Est
 | HTTP/1.0 | Conexión cerrada tras la respuesta, salvo que el cliente pida keep-alive |
 | Pánico en un handler o en un middleware | `500`, y el servidor sigue funcionando |
 
-En las respuestas, el motor calcula `content-length`, añade la cabecera `date`, envía los cuerpos de tamaño desconocido (flujos) en `chunked`, no envía cuerpo en las respuestas `204`, `304` ni en las peticiones `HEAD`, y cierra la conexión tras la respuesta si tu handler pone una cabecera `connection: close`.
+En las respuestas, el motor calcula `content-length`, añade la cabecera `date`, envía los cuerpos de tamaño desconocido (flujos) en `chunked`, no envía cuerpo en las respuestas `204`, `304` ni en las peticiones `HEAD`, y cierra la conexión tras la respuesta si tu handler pone una cabecera `connection: close`. HTTP/2 tiene sus propios límites: consulta [HTTPS y HTTP/2](https.md#límites-y-qué-no-se-admite).
 
 > [!IMPORTANT]
 > No hay límite de tiempo para el propio handler: un handler que espera para siempre mantiene su petición abierta para siempre. Añade el middleware `timeout`, que responde `503 Service Unavailable` pasado el tiempo indicado.
@@ -196,22 +271,47 @@ En las respuestas, el motor calcula `content-length`, añade la cabecera `date`,
 app.middleware(middleware::timeout(Duration::from_secs(30))); // std::time::Duration
 ```
 
+Para proteger el servidor de los picos de carga y de los clientes abusivos, consulta también [`middleware::concurrency_limit`](middleware.md#concurrency_limit) y [`middleware::rate_limit`](middleware.md#rate_limit).
+
 ## Apagado ordenado
 
-Con `app.run`, `app.listen` y `Server::run`, `Ctrl+C` (SIGINT) y, en Unix, `SIGTERM` inician un apagado ordenado:
+Con `app.run`, `app.listen` y `Server::run` (y sus versiones para sockets Unix), `Ctrl+C` (SIGINT) y, en Unix, `SIGTERM` inician un apagado ordenado:
 
 1. el servidor deja de aceptar conexiones nuevas;
-2. las peticiones en curso tienen hasta **10 segundos** para terminar, y sus respuestas llevan `connection: close`;
-3. las conexiones restantes (keep-alive inactivas, peticiones que siguen en curso tras 10 s) se cierran y `run` (o `listen`) devuelve `Ok(())`.
+2. las peticiones en curso tienen hasta **10 segundos** (`shutdown_timeout`) para terminar, y sus respuestas llevan `connection: close`; las conexiones HTTP/2 reciben un `GOAWAY`;
+3. las conexiones restantes (keep-alive inactivas, peticiones que siguen en curso al acabar el periodo de gracia) se cierran y `run` (o `listen`) devuelve `Ok(())`.
 
-Con [HTTP/3](http3.md), el lado UDP se detiene a la vez: las conexiones abiertas reciben un `GOAWAY`, y sus peticiones en curso disponen de los mismos 10 segundos. Las conexiones [WebSocket](websocket.md) no se esperan: se cierran como muy tarde al final del periodo de gracia, así que los clientes deben reconectarse.
+Con [HTTP/3](http3.md), el lado UDP se detiene a la vez: las conexiones abiertas reciben un `GOAWAY`, y sus peticiones en curso disponen del mismo periodo de gracia. Las conexiones [WebSocket](websocket.md) no se esperan: se cierran como muy tarde al final del periodo de gracia, así que los clientes deben reconectarse.
 
-Es justo lo que esperan Docker, Kubernetes o Heroku: envían `SIGTERM` y esperan un rato antes de forzar la parada del proceso. Con `bind`, `with_graceful_shutdown(signal)` sigue los mismos pasos en cuanto termina tu futuro `signal`, así que tú decides qué provoca el apagado. `Ctrl+C` y `SIGTERM` dejan entonces de vigilarse: inclúyelos en tu futuro si todavía los necesitas. El periodo de gracia de 10 segundos no se puede configurar.
+Es justo lo que esperan Docker, Kubernetes o Heroku: envían `SIGTERM` y esperan un rato antes de forzar la parada del proceso. Con `bind`, `with_graceful_shutdown(signal)` sigue los mismos pasos en cuanto termina tu futuro `signal`, así que tú decides qué provoca el apagado. `Ctrl+C` y `SIGTERM` dejan entonces de vigilarse: inclúyelos en tu futuro si todavía los necesitas.
 
-## Protocolos: HTTP/1.1, WebSocket y HTTP/3
+El periodo de gracia es de 10 segundos por defecto. Cámbialo con `shutdown_timeout`, dejándolo un poco por debajo del tiempo que tu plataforma espera antes de matar el proceso (30 segundos en Kubernetes y Heroku, 10 segundos en Docker):
 
-Vitesse habla HTTP/1.1 (y HTTP/1.0) sobre TCP sin cifrar, y convierte conexiones en [WebSocket](websocket.md) (feature `ws`, activada por defecto). Con la feature `http3`, `app.http3(...)` también sirve la aplicación en [HTTP/3](http3.md), en un puerto UDP junto al TCP; `server.http3_addr()` devuelve su dirección.
+```rust
+app.shutdown_timeout(Duration::from_secs(25)); // std::time::Duration
+```
 
-Vitesse no hace TLS sobre TCP ni HTTP/2. Para HTTPS y HTTP/2, ponlo detrás de un proxy inverso (Nginx, Caddy o el balanceador de carga de tu plataforma) que termine el TLS y reenvíe las peticiones a Vitesse en HTTP/1.1, como se suele hacer con Express. El proxy también puede encargarse de la compresión.
+## Protocolos y HTTPS
 
-Detrás de un proxy, `req.ip()` devuelve la dirección del proxy para las peticiones que reenvía: la del cliente está en la cabecera `X-Forwarded-For`. Todo esto se explica en [Producción](production.md).
+| Protocolo | Feature de Cargo | Cómo |
+|---|---|---|
+| HTTP/1.1 (y HTTP/1.0) | Integrado | Siempre, sobre TCP o un [socket Unix](#sockets-de-dominio-unix) |
+| [WebSocket](websocket.md) | `ws` (activada por defecto) | `app.ws(...)`, sobre HTTP/1.1: `ws://`, o `wss://` con TLS |
+| [HTTPS](https.md) (TLS 1.2 y 1.3) | `tls` | `app.tls(Tls::from_pem_files("fullchain.pem", "privkey.pem")?)`: todas las conexiones TCP hablan TLS |
+| [HTTP/2](https.md) sobre TLS | `tls` y `http2` | Se negocia durante el handshake TLS (ALPN): es lo que usan los navegadores |
+| [HTTP/2 sin cifrar](https.md#http2-sin-cifrar-h2c) (h2c) | `http2` | Para los clientes que empiezan directamente en HTTP/2 («prior knowledge»), en el mismo puerto que HTTP/1.1 |
+| [HTTP/3](http3.md) sobre QUIC | `http3` | `app.http3(...)`, en un puerto UDP junto al TCP; `server.http3_addr()` devuelve su dirección |
+
+Las mismas rutas, middlewares y handlers responden a todos los protocolos, y `req.version()` los distingue. Con `tls` y `http3` juntas, un solo binario sirve HTTPS, HTTP/2 y HTTP/3 a los navegadores, sin proxy delante: consulta [HTTPS y HTTP/2](https.md).
+
+### Detrás de un proxy inverso
+
+También puedes dejar el TLS a un proxy inverso (Nginx, Caddy o el balanceador de carga de tu plataforma) que reenvíe las peticiones a Vitesse en HTTP/1.1, como se suele hacer con Express: [HTTPS y HTTP/2](https.md#tls-directamente-o-un-proxy-inverso) compara las dos opciones.
+
+Detrás de un proxy, `req.ip()` devuelve la dirección del proxy para las peticiones que reenvía, y `req.protocol()` dice `"http"`: la dirección y el protocolo del cliente están en las cabeceras `X-Forwarded-For` y `X-Forwarded-Proto`. Declara el proxy con `app.trust_proxy(...)` y Vitesse las lee por ti:
+
+```rust
+app.trust_proxy("loopback"); // un proxy en la misma máquina
+```
+
+Todo esto se explica en [Puesta en producción](production.md#obtener-la-ip-del-cliente).

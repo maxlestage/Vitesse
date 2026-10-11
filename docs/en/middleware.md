@@ -388,7 +388,7 @@ app.post("/login", login.with(middleware::rate_limit(5, Duration::from_secs(60))
 
 - A client can send a burst of `max` requests, then one every `period / max` (the GCRA algorithm): with `rate_limit(60, Duration::from_secs(60))`, 60 at once, then one per second.
 - Beyond that, the answer is `429 Too Many Requests` with `Retry-After` (in seconds). Every response that goes through the middleware carries `X-RateLimit-Limit` and `X-RateLimit-Remaining`.
-- By default, a client is an IP address, `req.ip()`. Behind a reverse proxy, set [`app.trust_proxy`](requests.md#behind-a-proxy-trust_proxy), or every visitor shares the proxy's counter.
+- By default, a client is an IP address, `req.ip()`. Behind a reverse proxy, set [`app.trust_proxy`](requests.md#behind-a-proxy-trust_proxy), or every visitor shares the proxy's counter. Requests without any address (on a Unix socket without `trust_proxy`) share one counter too, rather than escape the limit.
 - `.key(...)` identifies clients differently, by API key or user id for instance. When it returns `None`, the request isn't limited:
 
 ```rust

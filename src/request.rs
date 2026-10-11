@@ -28,6 +28,9 @@ pub(crate) struct Shared {
     pub(crate) routes: Option<&'static Tree<MethodMap>>,
     /// Named routes: name → pattern ([`Request::path_for`]).
     pub(crate) names: HashMap<Box<str>, Box<str>>,
+    /// The secret that signs cookies ([`App::cookie_secret`](crate::App::cookie_secret)).
+    #[cfg(feature = "session")]
+    pub(crate) cookie_key: Option<crate::session::Key>,
     pub(crate) state: StateMap,
     pub(crate) body_limit: usize,
     pub(crate) trust_proxy: crate::proxy::TrustProxy,
@@ -734,6 +737,50 @@ impl Request {
             }
         }
         None
+    }
+
+    /// The secret that signs cookies, if the application has one.
+    #[cfg(feature = "session")]
+    pub(crate) fn cookie_key(&self) -> Option<&'static crate::session::Key> {
+        self.inner.shared.cookie_key.as_ref()
+    }
+
+    /// The value of a signed cookie (`req.signedCookies.name`), or `None`
+    /// if it is missing or its signature is wrong (changed by the client).
+    /// Needs [`App::cookie_secret`](crate::App::cookie_secret) and the
+    /// `session` feature.
+    #[cfg(feature = "session")]
+    pub fn signed_cookie(&self, name: &str) -> Option<String> {
+        let key = self.cookie_key()?;
+        key.verify(name, self.cookie(name)?).map(str::to_owned)
+    }
+
+    /// Signs a cookie with the application's secret, before sending it with
+    /// [`Response::cookie`](crate::Response::cookie) (`res.cookie(name,
+    /// value, { signed: true })`): read it back with [`Request::signed_cookie`].
+    /// The value stays readable by the client, who can't change it.
+    ///
+    /// # Panics
+    /// If the application has no [`cookie_secret`](crate::App::cookie_secret).
+    #[cfg(feature = "session")]
+    pub fn sign_cookie(&self, cookie: crate::Cookie) -> crate::Cookie {
+        let key = self
+            .cookie_key()
+            .expect("signing a cookie needs a secret: call `app.cookie_secret(...)` at startup");
+        let value = key.sign(cookie.name(), cookie.value());
+        cookie.with_value(value)
+    }
+
+    /// The session of this request (`req.session`), opened by the
+    /// [`session`](crate::middleware::session) middleware (`session`
+    /// feature).
+    ///
+    /// # Panics
+    /// If the middleware is not installed (the panic becomes a `500`).
+    #[cfg(feature = "session")]
+    pub fn session(&self) -> &crate::session::Session {
+        self.get::<crate::session::Session>()
+            .expect("no session: add `middleware::session(...)` to the application")
     }
 
     // ----- Paramètres de route et query string ------------------------------

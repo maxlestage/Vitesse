@@ -103,6 +103,8 @@ pub mod http3;
 pub mod middleware;
 #[cfg(feature = "multipart")]
 pub mod multipart;
+#[cfg(feature = "session")]
+pub mod session;
 pub mod sse;
 pub mod test;
 #[cfg(feature = "tls")]

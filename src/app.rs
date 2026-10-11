@@ -55,6 +55,8 @@ pub struct App {
     workers: Option<usize>,
     thread_per_core: bool,
     config: ServerConfig,
+    #[cfg(feature = "session")]
+    cookie_key: Option<crate::session::Key>,
     #[cfg(feature = "http3")]
     http3: Option<crate::http3::Http3>,
     #[cfg(feature = "tls")]
@@ -84,6 +86,8 @@ impl App {
             workers: None,
             thread_per_core: true,
             config: ServerConfig::default(),
+            #[cfg(feature = "session")]
+            cookie_key: None,
             #[cfg(feature = "http3")]
             http3: None,
             #[cfg(feature = "tls")]
@@ -176,6 +180,20 @@ impl App {
     /// ```
     pub fn state<T: Send + Sync + 'static>(&mut self, value: T) -> &mut Self {
         self.state.insert(value);
+        self
+    }
+
+    /// The secret that signs cookies (`cookieParser(secret)` in Express),
+    /// for [`Request::sign_cookie`], [`Request::signed_cookie`] and the
+    /// session cookie. Needs the `session` feature. Keep it out of the code
+    /// (an environment variable): whoever knows it can forge cookies.
+    ///
+    /// # Panics
+    /// If the secret is shorter than 32 bytes.
+    #[cfg(feature = "session")]
+    #[track_caller]
+    pub fn cookie_secret(&mut self, secret: impl AsRef<[u8]>) -> &mut Self {
+        self.cookie_key = Some(crate::session::Key::new(secret.as_ref()));
         self
     }
 
@@ -321,6 +339,8 @@ impl App {
             },
             config: self.config,
             shared: Shared {
+                #[cfg(feature = "session")]
+                cookie_key: self.cookie_key,
                 routes: Some(tree),
                 names: self
                     .names

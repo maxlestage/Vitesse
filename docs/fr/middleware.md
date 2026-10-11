@@ -246,7 +246,7 @@ Compresse les réponses en Brotli, ou en gzip quand le navigateur n'accepte pas 
 
 ```toml
 [dependencies]
-vitesse = { version = "0.1", features = ["compress"] }
+vitesse = { git = "https://github.com/maxlestage/Vitesse", features = ["compress"] }
 ```
 
 ```rust

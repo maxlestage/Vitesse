@@ -246,7 +246,7 @@ Compresses responses with Brotli, or with gzip when the browser does not accept 
 
 ```toml
 [dependencies]
-vitesse = { version = "0.1", features = ["compress"] }
+vitesse = { git = "https://github.com/maxlestage/Vitesse", features = ["compress"] }
 ```
 
 ```rust

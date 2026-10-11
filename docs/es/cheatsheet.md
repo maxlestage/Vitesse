@@ -32,8 +32,8 @@ fn main() -> std::io::Result<()> {
 
 ```toml
 [dependencies]
-vitesse = { version = "0.1", features = ["http3"] }        # añade HTTP/3
-# vitesse = { version = "0.1", default-features = false } # sin WebSocket
+vitesse = { git = "https://github.com/maxlestage/Vitesse", features = ["http3"] }        # añade HTTP/3
+# vitesse = { git = "https://github.com/maxlestage/Vitesse", default-features = false } # sin WebSocket
 ```
 
 Consulta [Instalación](installation.md#features-de-cargo).

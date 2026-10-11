@@ -8,7 +8,7 @@ Les réponses aux questions les plus fréquentes sur Vitesse, suivies d'une list
 
 Vitesse est jeune (version 0.1), mais son moteur a été pensé pour la production dès le départ : la suite de tests couvre le moteur HTTP en détail (pipelining, corps `chunked`, `Expect: 100-continue`, limites de taille, arrêt propre) et tourne sous Linux, macOS et Windows à chaque modification. Les paniques deviennent des réponses `500` au lieu de faire tomber le serveur, les requêtes malformées sont rejetées, et `SIGTERM` laisse finir les requêtes en cours.
 
-D'ici la version 1.0, l'API peut encore évoluer d'une version mineure à l'autre. Dépendez de `vitesse = "0.1"` (Cargo n'installe alors que les mises à jour compatibles `0.1.x`), lisez le journal des modifications avant de mettre à jour, placez un reverse proxy devant pour le HTTPS (voir [Production](production.md)), et faites des tests de charge avec votre propre trafic.
+D'ici la version 1.0, l'API peut encore évoluer d'une version mineure à l'autre. Dépendez de `vitesse = { git = "https://github.com/maxlestage/Vitesse" }` (Cargo n'installe alors que les mises à jour compatibles `0.1.x`), lisez le journal des modifications avant de mettre à jour, placez un reverse proxy devant pour le HTTPS (voir [Production](production.md)), et faites des tests de charge avec votre propre trafic.
 
 ### Le projet est-il vraiment 100 % Rust ?
 

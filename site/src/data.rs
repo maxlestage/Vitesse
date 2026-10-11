@@ -2,7 +2,7 @@
 //! benchmark, icônes et étiquettes de code (les textes sont dans `i18n` et
 //! `labels`).
 
-pub const CRATES: &str = "https://crates.io/crates/vitesse";
+pub const CRATES: &str = "https://github.com/maxlestage/Vitesse";
 pub const DOCS_RS: &str = "https://docs.rs/vitesse";
 
 /// La licence, servie par le site lui-même (une copie du LICENSE du dépôt) : propriétaire,
@@ -24,7 +24,7 @@ pub const ECOSYSTEM: [(&str, &str); 6] = [
 ];
 
 /// La commande d'installation du héros.
-pub const INSTALL: &str = "cargo add vitesse";
+pub const INSTALL: &str = "cargo add vitesse --git https://github.com/maxlestage/Vitesse";
 
 /// Un scénario du benchmark : requêtes par seconde et temps CPU par requête
 /// de chaque serveur, dans l'ordre de [`SERVERS`].

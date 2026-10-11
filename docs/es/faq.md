@@ -8,7 +8,7 @@ Las respuestas a las preguntas más habituales sobre Vitesse, seguidas de una li
 
 Vitesse es joven (versión 0.1), pero su motor se pensó para producción desde el principio: la batería de pruebas cubre a fondo el motor HTTP (pipelining, cuerpos `chunked`, `Expect: 100-continue`, límites de tamaño, apagado ordenado) y se ejecuta en Linux, macOS y Windows con cada cambio. Los pánicos se convierten en respuestas `500` en lugar de tumbar el servidor, las peticiones mal formadas se rechazan y `SIGTERM` deja terminar las peticiones en curso.
 
-Hasta la versión 1.0, la API todavía puede cambiar entre versiones menores. Depende de `vitesse = "0.1"` (así Cargo solo instala actualizaciones compatibles `0.1.x`), lee el registro de cambios antes de actualizar, pon un proxy inverso delante para HTTPS (consulta [Producción](production.md)) y haz pruebas de carga con tu propio tráfico.
+Hasta la versión 1.0, la API todavía puede cambiar entre versiones menores. Depende de `vitesse = { git = "https://github.com/maxlestage/Vitesse" }` (así Cargo solo instala actualizaciones compatibles `0.1.x`), lee el registro de cambios antes de actualizar, pon un proxy inverso delante para HTTPS (consulta [Producción](production.md)) y haz pruebas de carga con tu propio tráfico.
 
 ### ¿El proyecto es realmente 100 % Rust?
 

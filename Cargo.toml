@@ -7,6 +7,7 @@ description = "An Express.js-style web framework in native Rust, built for speed
 authors = ["Maxime Nathan Lestage"]
 license-file = "LICENSE"
 homepage = "https://maxlestage.github.io/Vitesse/"
+repository = "https://github.com/maxlestage/Vitesse"
 documentation = "https://docs.rs/vitesse"
 readme = "README.md"
 keywords = ["web", "framework", "express", "websocket", "http3"]

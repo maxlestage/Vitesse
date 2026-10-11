@@ -64,7 +64,7 @@ Pour une requête, l'ordre est le suivant : middlewares globaux (`app.middleware
 
 ### Les requêtes auxquelles aucune route ne répond
 
-Les middlewares d'un routeur s'exécutent aussi pour les requêtes sous son préfixe auxquelles aucune de ses routes ne répond : le `404` (ou votre `app.fallback`), le `405 Method Not Allowed` et la réponse automatique à `OPTIONS` (`204` avec `Allow`). Dans l'exemple ci-dessus, `GET /admin/inconnu` passe lui aussi par `require_token` : sans jeton, le visiteur reçoit un `401` et ne sait même pas si la page existe.
+Les middlewares d'un routeur s'exécutent aussi pour les requêtes sous son préfixe auxquelles aucune de ses routes ne répond : le `404` (le [fallback](#le-fallback-dun-routeur) du routeur s'il en a un, sinon celui de l'application), le `405 Method Not Allowed` et la réponse automatique à `OPTIONS` (`204` avec `Allow`). Dans l'exemple ci-dessus, `GET /admin/inconnu` passe lui aussi par `require_token` : sans jeton, le visiteur reçoit un `401` et ne sait même pas si la page existe.
 
 C'est ce qui permet à un logger ou à CORS sur un routeur de fonctionner comme on s'y attend :
 
@@ -85,6 +85,33 @@ Quelques précisions :
 - Les middlewares globaux (`app.middleware`) passent toujours en premier, pour chaque requête. Avec des routeurs imbriqués, viennent ensuite les middlewares du routeur extérieur, puis ceux du routeur intérieur.
 - Si un middleware du routeur réécrit le chemin d'une telle requête avec `req.set_uri(...)`, le routage est refait sur le nouveau chemin.
 - Un préfixe peut contenir des paramètres : un routeur monté sur `/users/:user_id/posts` couvre `/users/42/posts/...`, quelle que soit la valeur de `:user_id`.
+
+## Le fallback d'un routeur
+
+Par défaut, un chemin inconnu sous le préfixe d'un routeur reçoit la `404` de l'application : votre `app.fallback`, ou la réponse par défaut `{"error":"Cannot GET /nope"}`. `router.fallback(handler)` y répond à la place. Une API peut ainsi garder des erreurs JSON pendant que le reste du site affiche une page HTML :
+
+```rust
+let mut api = Router::new();
+api.get("/users", |_| async { Json(vec!["ada", "grace"]) });
+api.fallback(|req: Request| async move {
+    (404, Json(json!({ "error": format!("aucune route d'API pour {}", req.path()) })))
+});
+
+let mut app = App::new();
+app.mount("/api", api);
+app.fallback(|_| async { (404, Html("<h1>Page introuvable</h1>")) });
+```
+
+| Requête | Réponse |
+|---|---|
+| `GET /api/users` | la route |
+| `GET /api/nope` | le fallback du routeur : `404 {"error":"aucune route d'API pour /api/nope"}` |
+| `POST /api/users` | `405 Method Not Allowed` : le chemin existe, aucun fallback n'est donc appelé |
+| `GET /nope` | le fallback de l'application : la page HTML |
+
+- Le fallback s'exécute après les middlewares du routeur, comme l'une de ses routes : un routeur protégé par une authentification protège aussi son fallback, et les en-têtes qu'ajoutent ses middlewares figurent sur les réponses du fallback.
+- Avec des routeurs imbriqués, c'est le routeur le plus profond doté d'un fallback qui l'emporte : un fallback sur le routeur monté sur `/api/admin` répond à `/api/admin/nope`, celui de `/api` répond au reste de `/api`. Un routeur sans fallback utilise celui de son parent, et en dernier lieu celui de l'application.
+- Comme `app.fallback`, il peut répondre n'importe quoi, pas seulement une `404` : une redirection, une page HTML, ou l'`index.html` d'une application monopage qui vit sous le préfixe.
 
 ## Imbriquer des routeurs
 
@@ -140,7 +167,7 @@ app.mount("/live", live); // ws://example.com/live/feed
 - **Le routeur est consommé** par `mount`. Pour monter deux fois les mêmes routes (`/api/v1` et `/api/latest`, par exemple), construisez le routeur dans une fonction et appelez-la deux fois.
 - **Les conflits sont détectés au démarrage** : si la même méthode et le même chemin sont définis deux fois, même dans des routeurs différents, le programme panique dès son lancement, avec un message comme `duplicate route: GET /api/x is already defined`.
 - **La priorité des routes** est globale : un segment statique passe avant un paramètre, qui passe avant un joker (`/users/new` avant `/users/:id`), quel que soit le routeur d'origine.
-- Le handler de repli (`app.fallback`), le gestionnaire d'erreurs (`app.on_error`) et l'état (`app.state`) appartiennent à l'application, pas aux routeurs.
+- Le gestionnaire d'erreurs (`app.on_error`) et l'état (`app.state`) appartiennent à l'application, pas aux routeurs. Un routeur peut toutefois avoir son propre [fallback](#le-fallback-dun-routeur), qui répond avant `app.fallback`.
 
 ## Organiser un projet
 

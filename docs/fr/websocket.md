@@ -347,6 +347,18 @@ async fn echoes_text_messages() {
 
 D'autres exemples dans [Tests](testing.md#tester-les-websockets).
 
+## WebSocket sécurisé : `wss://`
+
+Une page servie en HTTPS ne peut ouvrir que des connexions `wss://`, du WebSocket sur TLS. Quand Vitesse sert lui-même HTTPS (la feature `tls` et `app.tls(...)`, voir [HTTPS et HTTP/2](https.md)), vos routes `app.ws` répondent en `wss://` sans aucun changement dans leur code :
+
+```js
+const socket = new WebSocket(`wss://${location.host}/echo`);
+```
+
+Derrière un reverse proxy qui termine TLS, le navigateur parle `wss://` au proxy, et le proxy transmet du `ws://` simple à Vitesse.
+
+WebSocket reste sur HTTP/1.1 : même quand le reste du site utilise HTTP/2 ou HTTP/3, les navigateurs ouvrent une connexion HTTP/1.1 séparée pour chaque WebSocket.
+
 ## Derrière un reverse proxy
 
 Le proxy doit laisser passer l'`Upgrade`, puis garder la connexion ouverte :
@@ -371,8 +383,8 @@ Les proxys et les hébergeurs ferment les connexions qui restent trop longtemps 
 
 ## Limites
 
-- **HTTP/1.1 uniquement.** WebSocket n'est pas disponible en [HTTP/3](http3.md) : les clients ouvrent leurs connexions WebSocket sur une connexion TCP ordinaire, même quand le reste du site passe en HTTP/3.
-- **Arrêt propre.** Sur `Ctrl+C` ou `SIGTERM`, le serveur n'attend pas les connexions WebSocket ouvertes : elles sont coupées dès que les requêtes HTTP en cours sont terminées, et au plus tard à la fin du délai de grâce de 10 secondes (voir [Configuration du serveur](server.md#arrêt-propre)). Elles sont coupées sans fermeture en bonne et due forme, et les clients constatent une fermeture anormale (code `1006`). Faites en sorte que vos clients se reconnectent automatiquement, ce qu'il leur faut de toute façon pour les coupures réseau.
+- **HTTP/1.1 uniquement.** WebSocket n'est disponible ni en [HTTP/2](https.md) ni en [HTTP/3](http3.md) : les clients ouvrent leurs connexions WebSocket sur une connexion HTTP/1.1 ordinaire (TLS compris, pour `wss://`), même quand le reste du site passe en HTTP/2 ou en HTTP/3.
+- **Arrêt propre.** Sur `Ctrl+C` ou `SIGTERM`, le serveur n'attend pas les connexions WebSocket ouvertes : elles sont coupées dès que les requêtes HTTP en cours sont terminées, et au plus tard à la fin du délai de grâce (10 secondes par défaut, `app.shutdown_timeout` ; voir [Configuration du serveur](server.md#arrêt-propre)). Elles sont coupées sans fermeture en bonne et due forme, et les clients constatent une fermeture anormale (code `1006`). Faites en sorte que vos clients se reconnectent automatiquement, ce qu'il leur faut de toute façon pour les coupures réseau.
 - **Taille des messages.** 16 Mio par message par défaut ; abaissez-la avec `Upgrade::max_message_size` pour les points d'accès publics.
 - **Threads.** En mode un thread par cœur, une connexion reste sur le thread qui l'a acceptée : comme dans tout handler, ne le bloquez pas (voir [Performances](performance.md)).
 

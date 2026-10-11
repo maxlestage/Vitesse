@@ -22,6 +22,10 @@ Si vous connaissez Express, vous connaissez déjà l'essentiel de Vitesse : les 
 | `process.env.PORT` | `std::env::var("PORT")` |
 | `app.locals.db = db` | `app.state(db)`, lu avec `req.state::<Db>()` |
 | `app.use((req, res) => res.status(404)…)` | `app.fallback(handler)` |
+| `app.set('trust proxy', 'loopback')` | `app.trust_proxy("loopback")` (ou `true`, un nombre de sauts, des plages d'IP : voir [Derrière un proxy](requests.md#derrière-un-proxy--trust_proxy)) |
+| `https.createServer({ key, cert }, app).listen(443)` | `app.tls(Tls::from_pem_files("fullchain.pem", "privkey.pem")?)` puis `app.run(443)`, feature `tls` (voir [HTTPS et HTTP/2](https.md)) |
+| `server.keepAliveTimeout = 5000` | `app.keep_alive(Duration::from_secs(5))` |
+| `server.headersTimeout = 10000` | `app.header_timeout(Duration::from_secs(10))` |
 
 ### Routage
 
@@ -35,6 +39,8 @@ Si vous connaissez Express, vous connaissez déjà l'essentiel de Vitesse : les 
 | `express.Router()` | `Router::new()` |
 | `app.use('/api', router)` | `app.mount("/api", router)` |
 | `router.use(mw)` | `router.middleware(mw)`, qui s'exécute aussi pour les `404` sous le préfixe du routeur |
+| Un dernier `router.use((req, res) => res.status(404)…)` | `router.fallback(handler)` (voir [Le fallback d'un routeur](routers.md#le-fallback-dun-routeur)) |
+| `method-override` | `req.set_method(...)` dans un middleware global (voir [Surcharger la méthode](requests.md#surcharger-la-méthode)) |
 | `app.ws('/echo', (ws, req) => …)` (express-ws) | `app.ws("/echo", \|req, socket\| async move { … })` : la requête vient en premier, et une boucle remplace `ws.on('message')` (voir [WebSocket](websocket.md)) |
 
 ### Requête
@@ -46,11 +52,18 @@ Si vous connaissez Express, vous connaissez déjà l'essentiel de Vitesse : les 
 | `express.json()` + `req.body` | `req.json::<T>().await?` |
 | `express.urlencoded()` + `req.body` | `req.form::<T>().await?` |
 | `express.text()` / `express.raw()` | `req.text().await?` / `req.bytes().await?` |
+| `express.json({ limit: '10mb' })` | `handler.with(middleware::body_limit(10 * 1024 * 1024))` pour une route, `app.body_limit(...)` pour toute l'application |
+| `multer` + `req.file` / `req.files` | `req.multipart()?`, puis `form.next_field().await?`, feature `multipart` (voir [Envois de fichiers](requests.md#envois-de-fichiers-multipart)) |
 | `req.get('host')` | `req.header("host")` |
 | `req.cookies.session` (cookie-parser) | `req.cookie("session")`, intégré |
-| `req.ip` / `req.hostname` | `req.ip()` / `req.hostname()` |
+| `req.ip` | `req.ip()`, qui suit `app.trust_proxy` comme Express |
+| `req.host` / `req.hostname` | `req.host()` / `req.hostname()` |
+| `req.protocol` / `req.secure` | `req.protocol()` / `req.secure()` |
 | `req.method` / `req.path` / `req.originalUrl` | `req.method()` / `req.path()` / `req.uri()` |
+| `req.route.path` | `req.route()` |
 | `req.is('json')` | `req.is("json")` |
+| `req.accepts(['html', 'json'])` | `req.accepts(&["html", "json"])`, une `Option` (`None` : répondre `406`) |
+| `req.acceptsLanguages('en', 'fr')` | `req.accepts_language(&["en", "fr"])` |
 | `res.locals.user = user` | `req.set(user)`, lu avec `req.get::<User>()` |
 
 ### Réponse
@@ -70,6 +83,8 @@ Si vous connaissez Express, vous connaissez déjà l'essentiel de Vitesse : les 
 | `res.attachment('rapport.csv')` | `.attachment("rapport.csv")` |
 | `res.sendFile(path)` | `res::file(path).await` |
 | `res.download(path, 'rapport.pdf')` | `res::download(path, "rapport.pdf").await` |
+| `res.write('data: …\n\n')` sur une réponse `text/event-stream` (SSE) | `let (tx, stream) = sse::channel(16);`, renvoyer `stream`, puis `tx.send(Event::new().data("…")).await` depuis une tâche (voir [Server-Sent Events](responses.md#server-sent-events)) |
+| `req.on('close', …)` pendant un flux SSE | `tx.send(…)` renvoie une erreur, ou `tx.closed().await` |
 
 ### Middlewares et erreurs
 
@@ -85,6 +100,10 @@ Si vous connaissez Express, vous connaissez déjà l'essentiel de Vitesse : les 
 | `cors()` | `middleware::cors()` |
 | `helmet()` | `middleware::helmet()` |
 | `connect-timeout` | `middleware::timeout(durée)` |
+| `compression()` | `middleware::compress()`, feature `compress` |
+| `express-rate-limit` | `middleware::rate_limit(100, Duration::from_secs(15 * 60))` |
+| `express-basic-auth` | `middleware::basic_auth(("admin", "secret"))` |
+| `express-request-id` | `middleware::request_id()` |
 | `express.static('public')` | `app.middleware(ServeDir::new("public"))` |
 | `app.use('/static', express.static('public'))` | `app.static_dir("/static", "public")` |
 
@@ -432,6 +451,7 @@ Les requêtes sont traitées en parallèle sur plusieurs threads : pas de variab
 - **Les query strings sont plates.** `?user[name]=ada` ne devient pas un objet imbriqué. Pour une clé répétée comme `?tag=a&tag=b`, parcourez `req.query_pairs()`.
 - **Pas de paramètres facultatifs ni d'expressions régulières,** ni de paramètres partiels dans un segment (`/:id?`, `/:id(\d+)`, `/vols/:de-:vers`) : déclarez des routes distinctes, ou analysez le segment vous-même.
 - **Les erreurs sont en JSON par défaut** (`{"error": "..."}`), et les détails internes n'atteignent jamais le client, même en développement. Utilisez `app.on_error` pour un autre format.
+- **Derrière un proxy, déclarez-le.** Comme avec Express sans `trust proxy`, `req.ip()` et `req.protocol()` décrivent le proxy tant que vous n'appelez pas `app.trust_proxy(...)`.
 - **`req.set(valeur)` exige `Clone`.** Ajoutez `#[derive(Clone)]` aux types que vous attachez à une requête.
 - **Le corps est lu à la demande, et une seule fois depuis le réseau.** Le résultat est mis en cache : appeler `req.text()` puis `req.bytes()` fonctionne.
 - **Recharger à chaque modification.** `cargo run` recompile ce qui a changé ; pour une boucle à la `nodemon`, utilisez un outil comme [cargo-watch](https://crates.io/crates/cargo-watch) (`cargo watch -x run`). Compilez avec `cargo build --release` pour la production.

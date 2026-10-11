@@ -34,6 +34,9 @@ app.route(purge, "/cache", |_| async { "cache vidé" });
 > [!WARNING]
 > `app.route` n'est pas le `app.route(chemin)` d'Express. Dans Vitesse, il enregistre une seule route pour la `Method` passée. Pour mettre plusieurs méthodes sur le même chemin, enchaînez plutôt les appels (voir plus bas).
 
+> [!TIP]
+> Les formulaires HTML ne savent envoyer que `GET` et `POST`. Pour atteindre une route `PUT` ou `DELETE` depuis un formulaire, changez la méthode dans un middleware global avec `req.set_method(...)`, comme le `method-override` d'Express : voir [Surcharger la méthode](requests.md#surcharger-la-méthode).
+
 ### Handlers
 
 Un handler est une fonction ou une closure `async` qui prend une `Request` et renvoie n'importe quoi qui implémente `IntoResponse` : du texte, `Json(...)`, un tuple `(statut, corps)`, un `Result`, etc. (voir [Envoyer la réponse](responses.md)).
@@ -202,6 +205,39 @@ thread 'main' panicked at src/main.rs:12:9:
 duplicate route: GET /users/:name is already defined
 ```
 
+## La route correspondante : `req.route()`
+
+`req.route()` renvoie le motif de la route qui a correspondu, préfixe de montage compris, comme le `req.route.path` d'Express (ou le `MatchedPath` d'axum) :
+
+```rust
+app.get("/users/:id", |req: Request| async move {
+    format!("route : {}", req.route().unwrap_or("?")) // "route : /users/:id"
+});
+```
+
+| Requête | `req.path()` | `req.route()` |
+|---|---|---|
+| `GET /users/42` | `/users/42` | `Some("/users/:id")` |
+| `GET /api/v1/items/a/b`, routeur monté sur `/api/:version` avec une route `/items/*path` | `/api/v1/items/a/b` | `Some("/api/:version/items/*path")` |
+| `DELETE /users/42`, sans route `DELETE` (`405`) | `/users/42` | `None` |
+| `GET /nope` (`404`) | `/nope` | `None` |
+
+C'est ce qu'il vous faut dans les journaux et les métriques : `/users/:id` donne une seule ligne dans un tableau de bord, là où le chemin brut en donnerait une par utilisateur. Les middlewares globaux s'exécutent avant le routage : à cet endroit, `req.route()` cherche donc la route à la demande. Appelez-la avant `next.run(req)`, qui prend la requête ; le résultat est une `&'static str`, vous pouvez donc le garder ensuite :
+
+```rust
+use std::time::Instant;
+
+app.middleware(|req: Request, next: Next| async move {
+    let route = req.route().unwrap_or("aucune route");
+    let start = Instant::now();
+    let res = next.run(req).await;
+    println!("{route} {} {:?}", res.status_code(), start.elapsed());
+    res
+});
+```
+
+Dans les middlewares de routeur, les middlewares de route et les handlers, la route est déjà connue et `req.route()` ne coûte rien.
+
 ## HEAD, OPTIONS et 405
 
 Vitesse se charge des comportements HTTP standard :
@@ -250,6 +286,7 @@ app.fallback(|_| async { res::file("dist/index.html").await });
 
 - Le fallback s'exécute après les middlewares globaux, comme n'importe quelle route.
 - Il n'est pas appelé pour une `405`, puisque le chemin existe, simplement pas pour cette méthode.
+- Un [routeur](routers.md#le-fallback-dun-routeur) peut avoir son propre fallback pour les chemins sous son préfixe, avec `router.fallback(handler)` : des `404` en JSON sous `/api`, par exemple, et une page HTML partout ailleurs.
 - Pour changer d'un coup le format de *toutes* les réponses d'erreur (404, 405, 400, 500, etc.), utilisez plutôt `app.on_error`. Voir [Gestion des erreurs](errors.md).
 
 ## Organiser ses routes

@@ -85,6 +85,7 @@ mod handler;
 mod http1;
 #[cfg(feature = "http2")]
 mod http2;
+mod negotiation;
 #[cfg(any(feature = "tls", feature = "http3"))]
 mod pem;
 mod proxy;
@@ -100,6 +101,8 @@ mod util;
 #[cfg(feature = "http3")]
 pub mod http3;
 pub mod middleware;
+#[cfg(feature = "multipart")]
+pub mod multipart;
 pub mod test;
 #[cfg(feature = "tls")]
 pub mod tls;

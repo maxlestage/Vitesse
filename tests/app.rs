@@ -1234,3 +1234,68 @@ async fn router_fallbacks_cover_their_prefix() {
     assert_eq!(c.get("/docs/nope").await.text(), "<h1>404</h1>");
     assert_eq!(c.get("/elsewhere").await.text(), "<h1>404</h1>");
 }
+
+#[tokio::test]
+async fn content_negotiation() {
+    let mut app = App::new();
+    app.get("/user", |req: Request| async move {
+        match req.accepts(&["html", "json"]) {
+            Some("html") => res::html("<b>Ada</b>"),
+            Some(_) => res::json(json!({ "name": "Ada" })),
+            None => res::send_status(406),
+        }
+    });
+    app.get("/lang", |req: Request| async move {
+        req.accepts_language(&["en", "fr", "es"])
+            .unwrap_or("en")
+            .to_owned()
+    });
+    let c = TestClient::new(app);
+    let browser = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8";
+    let r = c.get("/user").header("accept", browser).await;
+    assert_eq!(r.text(), "<b>Ada</b>");
+    let r = c.get("/user").header("accept", "application/json").await;
+    assert_eq!(r.text(), r#"{"name":"Ada"}"#);
+    assert_eq!(c.get("/user").await.text(), "<b>Ada</b>");
+    let r = c.get("/user").header("accept", "image/png").await;
+    assert_eq!(r.status(), 406);
+    let r = c
+        .get("/lang")
+        .header("accept-language", "fr-FR,fr;q=0.9,en;q=0.8")
+        .await;
+    assert_eq!(r.text(), "fr");
+    assert_eq!(
+        c.get("/lang").header("accept-language", "de").await.text(),
+        "en"
+    );
+}
+
+#[tokio::test]
+async fn body_limit_per_route() {
+    let echo = |req: Request| async move {
+        let limit = req.body_limit();
+        let bytes = req.bytes().await?;
+        Ok::<_, Error>(format!("{} / {limit}", bytes.len()))
+    };
+    let mut app = App::new();
+    app.body_limit(1000);
+    app.post("/small", echo);
+    app.post("/large", echo.with(middleware::body_limit(10_000)));
+    let mut tiny = Router::new();
+    tiny.middleware(middleware::body_limit(10));
+    tiny.post("/", echo);
+    app.mount("/tiny", tiny);
+    let c = TestClient::new(app);
+
+    assert_eq!(
+        c.post("/small").body(vec![0; 1000]).await.text(),
+        "1000 / 1000"
+    );
+    assert_eq!(c.post("/small").body(vec![0; 5000]).await.status(), 413);
+    assert_eq!(
+        c.post("/large").body(vec![0; 5000]).await.text(),
+        "5000 / 10000"
+    );
+    assert_eq!(c.post("/large").body(vec![0; 20_000]).await.status(), 413);
+    assert_eq!(c.post("/tiny").body(vec![0; 11]).await.status(), 413);
+}

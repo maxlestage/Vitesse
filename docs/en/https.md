@@ -211,7 +211,7 @@ This needs tokio in your `Cargo.toml` (`tokio = { version = "1", features = ["fu
 
 ### Ports below 1024
 
-On Linux, only root may open ports below 1024. Don't run the app as root: under systemd, add `AmbientCapabilities=CAP_NET_BIND_SERVICE` to the `[Service]` section (see [Going to production](production.md#run-it-as-a-service-with-systemd)). In a container, the image's user can't open them either: listen on 8443 and 8080, and publish them on 443 and 80 (`docker run -p 443:8443 -p 80:8080`).
+On Linux, only root may open ports below 1024. Don't run the app as root: under systemd, add `AmbientCapabilities=CAP_NET_BIND_SERVICE` to the `[Service]` section (see [Going to production](production.md#run-it-as-a-service-with-systemd)). In a container, you can also listen on unprivileged ports, such as 8443 and 8080, and publish them on 443 and 80 (`docker run -p 443:8443 -p 80:8080`).
 
 ## HTTP/2 over TLS: browsers
 
@@ -223,7 +223,7 @@ What HTTP/2 changes for your app:
 - each request is handled in its own task, by the same global middleware, routes, router middleware and `app.on_error` as HTTP/1.1;
 - `req.version()` is `HTTP/2.0` (`vitesse::http::Version::HTTP_2`), and the `Host` header is rebuilt from the `:authority` pseudo-header, so `req.header("host")`, `req.host()` and `req.hostname()` work as in HTTP/1.1;
 - request bodies are streamed to the handler, as in HTTP/1.1, within `app.body_limit` (or the [route's limit](requests.md#body-size-limit-and-413));
-- responses are streamed too ([Server-Sent Events](responses.md), files, `Body::from_stream`); Vitesse adds `date` and `content-length` (when the size is known), and removes the headers specific to HTTP/1.1 (`connection`, `transfer-encoding`, `upgrade`, `keep-alive`).
+- responses are streamed too ([Server-Sent Events](responses.md#server-sent-events), files, `Body::from_stream`); Vitesse adds `date` and `content-length` (when the size is known), and removes the headers specific to HTTP/1.1 (`connection`, `transfer-encoding`, `upgrade`, `keep-alive`).
 
 ## HTTP/2 in clear text (h2c)
 
@@ -314,7 +314,7 @@ Open TCP port 443 **and** UDP port 443 in the firewall (`sudo ufw allow 443`, wh
 | Graceful shutdown | The client receives a `GOAWAY`, and requests in progress get the [`shutdown_timeout`](server.md#graceful-shutdown) to finish |
 | TLS handshake | 10 seconds at most |
 
-`app.max_connections` counts connections, not requests: with HTTP/2, one connection can carry 256 requests at once. To cap the requests themselves, use `middleware::concurrency_limit` (see [Middleware](middleware.md)).
+`app.max_connections` counts connections, not requests: with HTTP/2, one connection can carry 256 requests at once. To cap the requests themselves, use [`middleware::concurrency_limit`](middleware.md#concurrency_limit).
 
 Not supported:
 
@@ -344,7 +344,7 @@ Both work; choose with your hosting in mind.
 - one process less, one network hop less, and nothing else to configure;
 - HTTPS, HTTP/2 and HTTP/3 from one binary, with `alt-svc` sent directly to browsers;
 - `req.ip()` is the client's real address, without `trust_proxy`;
-- but you handle the certificates: renewal with certbot, then a restart (a few hundredths of a second, during which new connections fail), or your own rustls resolver to reload them;
+- but you handle the certificates: renewal with certbot, then a restart (a fraction of a second, during which new connections fail), or your own rustls resolver to reload them;
 - and the redirect from HTTP, the privileged ports, and rate limiting and compression with Vitesse's middleware (`rate_limit`, `compress`).
 
 **A reverse proxy (Caddy, Nginx) in front**:

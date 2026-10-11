@@ -11,8 +11,8 @@
 Vitesse es un framework web minimalista que lleva la API de Express
 (`app.get`, `req.params`, `res.status(201).json(...)`, `app.use`, `Router`,
 `express.static`…) a Rust nativo, con su propio motor HTTP/1.1 sobre
-[tokio](https://tokio.rs), WebSocket integrado y HTTP/3 sobre QUIC como
-opción.
+[tokio](https://tokio.rs), WebSocket integrado, y HTTPS, HTTP/2 y HTTP/3
+sobre QUIC como opciones.
 
 ```rust
 use vitesse::prelude::*;
@@ -27,10 +27,14 @@ fn main() -> std::io::Result<()> {
 ```
 
 - **Familiar**: rutas y parámetros, middlewares con `next`, routers,
-  archivos estáticos, cookies, JSON y formularios, y un cliente de pruebas en
-  memoria.
-- **Tiempo real y protocolos modernos**: WebSocket con `app.ws`, y HTTP/3
-  sobre QUIC con una sola línea (feature `http3`).
+  archivos estáticos, cookies, JSON, formularios y subida de archivos, y un
+  cliente de pruebas en memoria.
+- **Tiempo real y protocolos modernos**: WebSocket con `app.ws`, Server-Sent
+  Events, HTTPS y HTTP/2 (features `tls` y `http2`), y HTTP/3 sobre QUIC con
+  una sola línea (feature `http3`).
+- **Todo incluido**: CORS, compresión, IDs de petición, autenticación Basic
+  y Bearer, limitación de tasa y de concurrencia, proxies de confianza, y
+  cualquier capa de [tower](https://crates.io/crates/tower) (feature `tower`).
 - **Rápido**: más rápido que actix-web, axum y Drogon en el benchmark de
   abajo.
 - **Robusto**: los pánicos se convierten en respuestas `500`, los límites de
@@ -103,12 +107,16 @@ ordenada con `Ctrl+C` / `SIGTERM`. Si ya tienes un runtime de tokio, usa
 | Feature | Por defecto | Añade |
 |---|---|---|
 | `ws` | Activada | WebSocket: `app.ws(...)` y `vitesse::ws` ([guía](docs/es/websocket.md)) |
+| `tls` | Desactivada | HTTPS: `app.tls(...)` y `vitesse::tls`, con rustls ([guía](docs/es/https.md)) |
+| `http2` | Desactivada | HTTP/2: mediante ALPN con `tls`, y h2c sin cifrar ([guía](docs/es/https.md)) |
 | `http3` | Desactivada | HTTP/3 sobre QUIC: `app.http3(...)` y `vitesse::http3` ([guía](docs/es/http3.md)) |
-| `compress` | Desactivada | `middleware::compress()`: respuestas en Brotli o gzip ([guía](docs/es/middleware.md#compress)) |
+| `multipart` | Desactivada | Subida de archivos: `req.multipart()` y `vitesse::multipart` ([guía](docs/es/requests.md)) |
+| `compress` | Desactivada | `middleware::compress()` y `middleware::decompress()`: Brotli, gzip ([guía](docs/es/middleware.md#compress)) |
+| `tower` | Desactivada | Capas de tower como middlewares, la aplicación como `Service` de tower ([guía](docs/es/middleware.md)) |
 
 ```toml
 [dependencies]
-vitesse = { git = "https://github.com/maxlestage/Vitesse", features = ["http3"] }
+vitesse = { git = "https://github.com/maxlestage/Vitesse", features = ["tls", "http2"] }
 ```
 
 ## Recorrido rápido
@@ -204,6 +212,39 @@ app.run(443) // HTTP/1.1 en TCP 443, HTTP/3 en UDP 443
 Certificados, `Alt-Svc` y despliegue detrás de Caddy o Nginx:
 [HTTP/3 y QUIC](docs/es/http3.md).
 
+### HTTPS y HTTP/2
+
+```rust
+use vitesse::tls::Tls;
+
+// Con las features `tls` y `http2`: TLS con rustls, HTTP/2 para los navegadores.
+app.tls(Tls::from_pem_files("fullchain.pem", "privkey.pem")?);
+app.run(443)
+```
+
+Sin TLS, la feature `http2` también responde a los clientes que hablan
+HTTP/2 sin cifrar (h2c). Consulta [HTTPS y HTTP/2](docs/es/https.md).
+
+### Server-Sent Events
+
+```rust
+use vitesse::sse::Event;
+
+app.get("/clock", |_| async {
+    let (tx, events) = sse::channel(16);
+    tokio::spawn(async move {
+        for tick in 0.. {
+            // Falla en cuanto el navegador se ha ido.
+            if tx.send(Event::new().data(tick.to_string())).await.is_err() {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        }
+    });
+    events
+});
+```
+
 ## Documentación
 
 - **Sitio web**: https://maxlestage.github.io/Vitesse/es/docs/
@@ -248,6 +289,9 @@ despliegues automáticos con GitHub Actions:
 | `app.listen(3000)` | `app.run(3000)` |
 
 La tabla completa está en [Viniendo de Express](docs/es/from-express.md).
+¿Vienes de los frameworks del propio Rust? [Viniendo de axum o
+actix-web](docs/es/from-axum-actix.md) relaciona sus funcionalidades,
+extractor por extractor y capa por capa.
 
 ## Por qué es rápido
 
@@ -275,13 +319,14 @@ Los detalles están en [Rendimiento](docs/es/performance.md).
 
 ## Límites actuales
 
-Como Express, Vitesse hace pocas cosas a propósito. No incluye (todavía):
-HTTP/2 ni TLS sobre TCP (colócalo detrás de un proxy inverso como Nginx o
-Caddy, como se suele hacer con Express: consulta
-[Puesta en producción](docs/es/production.md); HTTP/3, cuyo TLS va
-integrado, sí está soportado), WebSocket sobre HTTP/3, compresión, motores
-de plantillas ni parámetros parciales dentro de un segmento
-(`/vuelos/:origen-:destino`).
+No incluye (todavía): WebSocket sobre HTTP/2 o HTTP/3, un almacén de
+sesiones (usa
+[tower-sessions](docs/es/from-axum-actix.md#sesiones-con-tower-sessions)
+con la feature `tower`), rutas con nombre y generación de URL, expresiones
+regulares en las rutas, parámetros parciales dentro de un segmento
+(`/vuelos/:origen-:destino`) ni motores de plantillas (usa cualquier crate de
+plantillas y devuelve `Html(...)`). La lista completa está en las
+[preguntas frecuentes](docs/es/faq.md).
 
 ## Ejecutar el proyecto
 
@@ -291,6 +336,8 @@ cargo run --release --example rest_api   # API CRUD completa
 cargo run --release --example demo       # la app de demostración desplegada en Heroku (lee $PORT)
 cargo run --release --example chat       # sala de chat WebSocket (websocat ws://localhost:3000/chat/ada)
 cargo run --release --example http3 --features http3   # HTTP/1.1 + HTTP/3 en el puerto 4433, certificado autofirmado
+cargo run --release --example https --features tls,http2   # HTTPS + HTTP/2 en el puerto 3443, certificado autofirmado
+cargo run --release --example live --features multipart    # Server-Sent Events y subida de archivos
 cargo test                               # tests unitarios, de integración y doctests
 cargo run --release --manifest-path bench/runner/Cargo.toml   # benchmark (Linux, wrk, y Drogon si está instalado)
 docker build -t vitesse-demo . && docker run --rm -p 8080:8080 vitesse-demo

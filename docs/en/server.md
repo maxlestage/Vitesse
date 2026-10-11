@@ -193,7 +193,7 @@ app.body_limit(10 * 1024 * 1024); // 10 MiB
 
 The default is `vitesse::DEFAULT_BODY_LIMIT`, 1 MiB. The limit applies whenever a handler reads the body with `req.bytes()`, `req.text()`, `req.json()` or `req.form()`: beyond it, the request fails with `413 Payload Too Large`. If the announced `Content-Length` is already too big, the 413 is returned without reading anything.
 
-The body is only read if the handler asks for it, so routes that never read it are unaffected. `req.take_body()`, which hands you the raw stream (proxies), is not limited: counting the bytes is then up to you. [Multipart forms](requests.md) (`req.multipart()`) are limited too, even though they are read as a stream.
+The body is only read if the handler asks for it, so routes that never read it are unaffected. `req.take_body()`, which hands you the raw stream (proxies), is not limited: counting the bytes is then up to you. [Multipart forms](requests.md#file-uploads-multipart) (`req.multipart()`) are limited too, even though they are read as a stream.
 
 `app.body_limit` sets the default for the whole application. To accept larger bodies on a few routes only (uploads), or smaller ones, change the limit per route or per router with the `body_limit` middleware:
 
@@ -237,7 +237,7 @@ When to change them:
 - **`keep_alive`**: behind a proxy or a load balancer, keep it longer than the proxy's own idle timeout, so the proxy always closes first and never reuses a connection that Vitesse is closing (an AWS load balancer waits 60 s by default: use 65 s or more).
 - **`header_timeout`**: lower it (10 s) when the app faces the internet directly, without a proxy.
 - **`shutdown_timeout`**: raise it if some requests (reports, uploads) take longer than 10 s, and keep it shorter than the time your platform waits before killing the process.
-- **`max_connections`**: to cap the memory and file descriptors used by connections. With `app.run` in thread-per-core mode, there is one accept loop per thread, so the total is `n` × the number of threads; in the other modes, `n` is the total. It counts connections, not requests: an HTTP/2 connection can carry many requests at once. To cap the requests being handled, use `middleware::concurrency_limit` (see [Middleware](middleware.md)).
+- **`max_connections`**: to cap the memory and file descriptors used by connections. With `app.run` in thread-per-core mode, there is one accept loop per thread, so the total is `n` × the number of threads; in the other modes, `n` is the total. It counts connections, not requests: an HTTP/2 connection can carry many requests at once. To cap the requests being handled, use [`middleware::concurrency_limit`](middleware.md#concurrency_limit).
 
 ## Limits built into the engine
 
@@ -271,7 +271,7 @@ On the response side, the engine computes `content-length`, adds the `date` head
 app.middleware(middleware::timeout(Duration::from_secs(30))); // std::time::Duration
 ```
 
-To protect the server from load peaks and abusive clients, see also `middleware::concurrency_limit` and `middleware::rate_limit` in [Middleware](middleware.md).
+To protect the server from load peaks and abusive clients, see also [`middleware::concurrency_limit`](middleware.md#concurrency_limit) and [`middleware::rate_limit`](middleware.md#rate_limit).
 
 ## Graceful shutdown
 

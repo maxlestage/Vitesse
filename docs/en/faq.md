@@ -31,7 +31,7 @@ Vitesse is a good fit if:
 What remains different:
 
 - **no extractors, by design**: a handler asks its `Request` for what it needs (`req.param_as`, `req.json`…) instead of declaring typed arguments;
-- **a young API**: Vitesse is at version 0.1 and may still change before 1.0, while axum and actix-web have years of production use behind them;
+- **no stable 1.x API yet**: Vitesse is at version 0.1 and may still change before 1.0, while axum and actix-web have years of production use behind them;
 - **a smaller ecosystem**: fewer crates, examples and answers online are written for Vitesse, although tower layers and services bridge much of the gap.
 
 ### How is it different from Express?
@@ -48,7 +48,7 @@ Rust 1.85 or later (the 2024 edition), as declared by `rust-version` in Vitesse'
 
 ### Does it work on Windows and macOS?
 
-Yes: the test suite runs on Linux, macOS and Windows. The thread-per-core mode (one event loop and one `SO_REUSEPORT` socket per core) is a Linux-only optimisation; on other systems, `app.run` uses tokio's multi-threaded runtime, which is a bit slower but offers exactly the same API. `Ctrl+C` stops the server cleanly everywhere, `SIGTERM` on Unix. The benchmark runner (`bench/runner`) only runs on Linux.
+Yes: the test suite runs on Linux, macOS and Windows. The thread-per-core mode (one event loop and one `SO_REUSEPORT` socket per core) is a Linux-only optimisation; on other systems, `app.run` uses tokio's multi-threaded runtime, which is a bit slower but offers exactly the same API. `Ctrl+C` stops the server cleanly everywhere, `SIGTERM` on Unix. Unix domain sockets (`app.run_unix`) are not available on Windows. The benchmark runner (`bench/runner`) only runs on Linux.
 
 ## Features
 
@@ -139,7 +139,7 @@ See [File uploads](requests.md#file-uploads-multipart).
 
 ### Sessions and authentication?
 
-For authentication, two middlewares are built in: `middleware::basic_auth(("admin", "secret"))` (the browser asks for a user name and a password) and `middleware::bearer_auth(token)` (`Authorization: Bearer …`, for APIs). Both take a closure too, to check the credentials against your own users, and compare them in constant time. They send credentials with every request: only use them over HTTPS. See [Middleware](middleware.md#basic_auth-and-bearer_auth).
+For authentication, two middlewares are built in: `middleware::basic_auth(("admin", "secret"))` (the browser asks for a user name and a password) and `middleware::bearer_auth(token)` (`Authorization: Bearer …`, for APIs). Both take a closure too, to check the credentials against your own users, and compare them in constant time. They send credentials with every request: only use them over HTTPS. See [`basic_auth` and `bearer_auth`](middleware.md#basic_auth-and-bearer_auth).
 
 For sessions, Vitesse has no store of its own: use [tower-sessions](https://crates.io/crates/tower-sessions) through the `tower` feature, as with axum:
 

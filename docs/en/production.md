@@ -68,7 +68,7 @@ fn main() -> std::io::Result<()> {
 Two setups work well:
 
 - **Vitesse serves HTTPS itself**, with the `tls` and `http2` features (and `http3` if you like): one binary on ports 80 and 443, no other component. You handle certificate renewal (certbot, then a restart). See [HTTPS and HTTP/2](https.md).
-- **A reverse proxy in front** (Caddy, Nginx): it handles HTTPS, certificates and HTTP/2, can host several apps on the same machine and balance the load across instances, and talks plain HTTP/1.1 to Vitesse. The rest of this section describes this setup.
+- **A reverse proxy in front** (Caddy, Nginx): it handles HTTPS, certificates and HTTP/2, can host several apps on the same machine and balance the load across instances, and talks plain HTTP/1.1 to Vitesse. The next sections describe this setup.
 
 On a platform (Heroku, Cloud Run, Render…), HTTPS is already handled at the platform's edge: neither is needed.
 
@@ -396,7 +396,7 @@ If the app depends on a database, add a separate route (for example `/ready`) th
 - A panic in a handler or a middleware becomes a `500`, and Rust prints the panic message on standard error.
 - `middleware::request_id()` gives every request an id: the `X-Request-Id` sent by the proxy or the calling service, or a new UUID. It is sent back in the response's `X-Request-Id` header, so a user who reports an error can give you the id to look for in the logs.
 
-Need JSON logs for a log collector? Write your own middleware (see [Middleware](middleware.md)). `req.route()` gives the pattern of the matched route (`/users/:id` rather than `/users/42`), which is easier to group and to search than the path (see [Routing](routing.md)):
+Need JSON logs for a log collector? Write your own middleware (see [Middleware](middleware.md)). `req.route()` gives the pattern of the matched route (`/users/:id` rather than `/users/42`), which is easier to group and to search than the path (see [The matched route](routing.md#the-matched-route-reqroute)):
 
 ```rust
 use vitesse::middleware::RequestId;
@@ -563,4 +563,4 @@ app.get("/metrics", |req: Request| async move {
 
 Prometheus can scrape this text format. Don't expose `/metrics` publicly: block it at the proxy, or protect the route with `middleware::bearer_auth(token)`, added with `.with()`, and give the token to Prometheus.
 
-To count requests or measure durations per route, label them with `req.route()`: `/users/:id` gives one series for every user, where the path would create a new series for each id. Read it before `next.run(req)`, and `None` means no route matched (a `404`). See [Routing](routing.md).
+To count requests or measure durations per route, label them with `req.route()`: `/users/:id` gives one series for every user, where the path would create a new series for each id. Read it before `next.run(req)`, and `None` means no route matched (a `404`). See [The matched route](routing.md#the-matched-route-reqroute).

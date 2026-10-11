@@ -70,9 +70,9 @@ Some parts of Vitesse are Cargo features, which you turn on or off in `Cargo.tom
 | `tls` | Disabled | `app.tls(...)` and the `vitesse::tls` module: HTTPS (TLS 1.2 and 1.3, with rustls), see [HTTPS and HTTP/2](https.md) |
 | `http2` | Disabled | HTTP/2: negotiated by browsers over TLS (with `tls`), and in clear text for the clients that start in HTTP/2, see [HTTPS and HTTP/2](https.md) |
 | `http3` | Disabled | `app.http3(...)` and the `vitesse::http3` module: HTTP/3 over QUIC, see [HTTP/3 and QUIC](http3.md) |
-| `multipart` | Disabled | `req.multipart()` and the `vitesse::multipart` module: file uploads (`multipart/form-data`), see [Reading requests](requests.md) |
-| `compress` | Disabled | `middleware::compress()` (Brotli or gzip responses) and `middleware::decompress()` (compressed request bodies), see [Middleware](middleware.md) |
-| `tower` | Disabled | `middleware::layer(...)`, `app.into_service()` and the `vitesse::tower` module: tower and tower-http middleware, see [Middleware](middleware.md) |
+| `multipart` | Disabled | `req.multipart()` and the `vitesse::multipart` module: file uploads (`multipart/form-data`), see [File uploads](requests.md#file-uploads-multipart) |
+| `compress` | Disabled | `middleware::compress()` (Brotli or gzip responses) and `middleware::decompress()` (compressed request bodies), see [`compress`](middleware.md#compress) |
+| `tower` | Disabled | `middleware::layer(...)`, `app.into_service()` and the `vitesse::tower` module: tower and tower-http middleware, see [Tower layers](middleware.md#tower-layers) |
 
 Everything else, Server-Sent Events (`vitesse::sse`) and the other built-in middleware included, is always available.
 

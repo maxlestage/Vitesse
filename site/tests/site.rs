@@ -176,7 +176,7 @@ async fn every_page_ends_with_the_signature_footer() {
             "{lang}"
         );
         assert!(footer.contains(&format!("v{}", vitesse::VERSION)), "{lang}");
-        // Les six projets de l'écosystème, celui-ci marqué comme la page courante.
+        // Les sept projets de l'écosystème, celui-ci marqué comme la page courante.
         for project in [
             "Active",
             "Vitesse",
@@ -184,6 +184,7 @@ async fn every_page_ends_with_the_signature_footer() {
             "Memoire",
             "Paquets",
             "FerroSwift",
+            "Solidify",
         ] {
             assert!(
                 footer.contains(&format!(

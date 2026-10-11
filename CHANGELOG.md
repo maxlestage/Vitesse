@@ -15,8 +15,10 @@ First public release.
   commercially too, but not to modify or redistribute. The MIT/Apache-2.0
   dual license is withdrawn.
 - Credits: Maxime Nathan Lestage is named as the author in the crate
-  metadata, the README and the website's footer, which now links the six
+  metadata, the README and the website's footer, which now links the seven
   projects of the ecosystem.
+- Credits: Solidify joins the projects linked by the README, the license and
+  the website's footer.
 
 ### Added
 

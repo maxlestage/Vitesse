@@ -14,13 +14,14 @@ pub const AUTHOR: &str = "Maxime Nathan Lestage";
 
 /// Les projets frères de Vitesse, du même auteur : (nom, site). Le pied de page les
 /// présente dans cet ordre ; `i18n::Texts::footer_projects` décrit chacun dans le même ordre.
-pub const ECOSYSTEM: [(&str, &str); 6] = [
+pub const ECOSYSTEM: [(&str, &str); 7] = [
     ("Active", "https://maxlestage.github.io/Active/"),
     ("Vitesse", "https://maxlestage.github.io/Vitesse/"),
     ("Securite", "https://maxlestage.github.io/Securite/"),
     ("Memoire", "https://maxlestage.github.io/Memoire/"),
     ("Paquets", "https://maxlestage.github.io/Paquets/"),
     ("FerroSwift", "https://maxlestage.github.io/FerroSwift/"),
+    ("Solidify", "https://maxlestage.github.io/Solidify/"),
 ];
 
 /// La commande d'installation du héros.

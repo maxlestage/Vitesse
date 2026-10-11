@@ -84,7 +84,7 @@ Seules les requêtes `POST` sont réécrites, et seulement en `PUT`, `PATCH` ou 
 
 ## Paramètres de route
 
-Ils sont détaillés dans [Routage](routing.md). En bref :
+Ils sont détaillés dans [Routage](routing.md#paramètres-de-chemin). En bref :
 
 ```rust
 app.get("/users/:id/posts/:post", |req: Request| async move {

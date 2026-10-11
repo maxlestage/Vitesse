@@ -71,6 +71,8 @@ html.with-loader.intro-seen {
 }
 
 html {
+  /* Never a horizontal scroll, on phones too: nothing may stick out of the screen. */
+  overflow-x: clip;
   scroll-behavior: smooth;
   -webkit-text-size-adjust: 100%;
   background: var(--bg);
@@ -84,7 +86,7 @@ body {
   font-size: 17px;
   line-height: 1.6;
   -webkit-font-smoothing: antialiased;
-  overflow-x: hidden;
+  overflow-x: clip;
 }
 
 /* Le lien d'évitement, visible seulement au clavier. */

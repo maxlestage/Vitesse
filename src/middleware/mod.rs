@@ -40,6 +40,11 @@ pub use auth::{
 pub use limit::{ConcurrencyLimit, RateLimit, concurrency_limit, rate_limit};
 pub use request_id::{RequestId, SetRequestId, request_id};
 
+/// Runs a tower `Layer` as a middleware (`tower` feature): see
+/// [`vitesse::tower`](crate::tower).
+#[cfg(feature = "tower")]
+pub use crate::tower::layer;
+
 /// Logs every request, like `morgan('dev')`:
 ///
 /// ```text

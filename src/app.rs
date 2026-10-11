@@ -309,6 +309,14 @@ impl App {
         }))
     }
 
+    /// Turns the application into a tower `Service`, to serve it with hyper,
+    /// nest it in an axum router or test it with tower's `ServiceExt`. See
+    /// [`tower`](crate::tower).
+    #[cfg(feature = "tower")]
+    pub fn into_service(self) -> crate::tower::AppService {
+        crate::tower::AppService::new(self.build())
+    }
+
     /// Opens the port without starting the server: handy to find out which
     /// port was picked when listening on port `0`.
     pub async fn bind(self, addr: impl ListenAddr) -> io::Result<Server> {

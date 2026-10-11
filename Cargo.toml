@@ -55,6 +55,10 @@ rustls = { version = "0.23", default-features = false, features = ["ring", "std"
 tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "logging"], optional = true }
 h2 = { version = "0.4", optional = true }
 
+# Interopérabilité avec tower (`tower`) : couches tower-http, service hyper.
+tower-layer = { version = "0.3", optional = true }
+tower-service = { version = "0.3", optional = true }
+
 # Formulaires `multipart/form-data` (`multipart`).
 multer = { version = "3", optional = true }
 
@@ -68,6 +72,8 @@ http3 = ["dep:quinn", "dep:h3", "dep:h3-quinn", "dep:rustls"]
 tls = ["dep:rustls", "dep:tokio-rustls", "rustls/tls12", "tokio-rustls/tls12"]
 # HTTP/2 : négocié par ALPN avec `tls`, et en clair (h2c, « prior knowledge »).
 http2 = ["dep:h2"]
+# `middleware::layer(...)`, `app.into_service()` et le module `vitesse::tower`.
+tower = ["dep:tower-layer", "dep:tower-service"]
 # `req.multipart()` et le module `vitesse::multipart` : envois de fichiers.
 multipart = ["dep:multer"]
 # `middleware::compress()` : réponses en Brotli ou gzip.
@@ -92,6 +98,9 @@ rcgen = "0.14"
 tokio-tungstenite = { version = "0.30", features = ["connect"] }
 serde = { version = "1", features = ["derive"] }
 tokio = { version = "1", features = ["full"] }
+# Des couches tower réelles pour tester `vitesse::tower`.
+tower05 = { package = "tower", version = "0.5", features = ["limit", "util"] }
+tower-http = { version = "0.6", features = ["set-header", "validate-request", "limit", "normalize-path", "cors"] }
 
 [profile.release]
 lto = "fat"

@@ -353,17 +353,38 @@ impl fmt::Display for Closed {
 
 impl std::error::Error for Closed {}
 
+/// Why [`Sender::try_send`] did not send an event (given back).
+#[derive(Debug)]
+pub enum TrySendError {
+    /// `buffer` events are already waiting: the connection is slow.
+    Full(Event),
+    /// The browser has gone away.
+    Closed(Event),
+}
+
+impl fmt::Display for TrySendError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            TrySendError::Full(_) => f.write_str("the SSE buffer is full"),
+            TrySendError::Closed(_) => f.write_str("the SSE connection is closed"),
+        }
+    }
+}
+
+impl std::error::Error for TrySendError {}
+
 impl Sender {
     /// Sends an event, waiting if `buffer` events are already waiting.
     pub async fn send(&self, event: Event) -> Result<(), Closed> {
         self.tx.send(event).await.map_err(|e| Closed(e.0))
     }
 
-    /// Sends an event without waiting; fails if the buffer is full or the
-    /// connection is closed.
-    pub fn try_send(&self, event: Event) -> Result<(), Closed> {
+    /// Sends an event without waiting; fails if `buffer` events are already
+    /// waiting (a slow connection) or if the browser has gone away.
+    pub fn try_send(&self, event: Event) -> Result<(), TrySendError> {
         self.tx.try_send(event).map_err(|e| match e {
-            mpsc::error::TrySendError::Full(e) | mpsc::error::TrySendError::Closed(e) => Closed(e),
+            mpsc::error::TrySendError::Full(e) => TrySendError::Full(e),
+            mpsc::error::TrySendError::Closed(e) => TrySendError::Closed(e),
         })
     }
 

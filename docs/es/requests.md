@@ -1,6 +1,6 @@
 # Leer la petición
 
-Cada handler recibe una `Request`. De ella lees el método, la ruta, los parámetros de ruta, la query string, las cabeceras, las cookies, el cuerpo, los archivos subidos y la dirección del cliente, y averiguas qué formato prefiere el cliente. Esta página repasa todo eso, con el equivalente de Express cuando existe.
+Cada handler recibe una `Request`. De ella lees el método, la ruta, los parámetros de ruta, la query string, las cabeceras, las cookies y la sesión, el cuerpo, los archivos subidos y la dirección del cliente, averiguas qué formato prefiere el cliente y construyes las URL de tus rutas. Esta página repasa todo eso, con el equivalente de Express cuando existe.
 
 ## El objeto `Request`
 
@@ -98,6 +98,26 @@ app.get("/users/:id/posts/:post", |req: Request| async move {
 ### La ruta elegida
 
 `req.route()` devuelve el patrón de la ruta que responde a la petición, prefijo de montaje incluido: `Some("/users/:id/posts/:post")` para `/users/42/posts/7`. Es el `req.route.path` de Express, y es lo que quieres en los registros y las métricas, donde la ruta en bruto daría una línea por usuario. Consulta [Enrutamiento](routing.md#la-ruta-elegida-reqroute).
+
+### Construir URL: `path_for` y `url_for`
+
+Dale un nombre a una ruta con `.name(...)`, y cualquier handler puede construir su URL en lugar de escribirla a mano (el `url_for` de actix-web; Express no tiene equivalente):
+
+```rust
+app.get("/users/:id", show_user).name("user");
+
+app.post("/users", |req: Request| async move {
+    let id = 42; // el id del usuario que acabas de crear
+    let location = req.url_for("user", &[&id])?; // "https://example.com/users/42"
+    Ok::<_, Error>(res::status(201).header("location", location).json(json!({ "id": id })))
+});
+```
+
+- `req.path_for(nombre, &[...])` devuelve la ruta, `"/users/42"`: los valores rellenan los parámetros de la ruta en orden, y se codifican (`"a b"` da `a%20b`). Pasa `&[]` para una ruta sin parámetros, y `&[&"LAX", &"SFO"]` para varios.
+- `req.url_for(nombre, &[...])` añade el protocolo y el host de la petición actual (`req.protocol()` y `req.host()`, así que sigue a [`trust_proxy`](#detrás-de-un-proxy-trust_proxy)). Para los enlaces que salen del sitio, en un correo por ejemplo, prefiere `path_for` precedido de una URL base sacada de tu configuración (consulta [Host y protocolo](#host-y-protocolo)).
+- Los dos devuelven un `Error` para un nombre desconocido, un valor que falta o que sobra, o un valor que no cumple la restricción del parámetro (y `url_for`, para una petición sin host). Son errores de programación, no del cliente: el cliente recibe un simple `500 {"error":"Internal Server Error"}`, y la causa se escribe en la salida de error.
+
+Las rutas con nombre, los parámetros opcionales y las restricciones se explican en [Enrutamiento](routing.md#rutas-con-nombre-y-generación-de-url).
 
 ## Query string
 
@@ -244,7 +264,21 @@ app.get("/", |req: Request| async move {
 });
 ```
 
-El valor se devuelve tal como lo envió el navegador (sin las comillas que lo rodean). No se decodifica ni se verifica ninguna firma. Para crear o borrar cookies, consulta [Enviar la respuesta](responses.md).
+El valor se devuelve tal como lo envió el navegador (sin las comillas que lo rodean), sin decodificar. Para crear o borrar cookies, consulta [Enviar la respuesta](responses.md#cookies).
+
+### Cookies firmadas y la sesión
+
+Con la feature `session`, de las cookies salen dos cosas más. `req.signed_cookie(nombre)` lee una cookie firmada con el secreto de la aplicación (`app.cookie_secret(...)`), como `req.signedCookies.nombre` en Express: obtienes el valor, o `None` si la cookie falta o si el visitante la modificó. Y con el middleware `session`, `req.session()` devuelve la sesión del visitante, como `req.session` con express-session:
+
+```rust
+app.get("/", |req: Request| async move {
+    let theme = req.signed_cookie("theme").unwrap_or_else(|| "light".into());
+    let user: Option<String> = req.session().get("user");
+    format!("tema: {theme}, usuario: {user:?}")
+});
+```
+
+La firma, las sesiones, el inicio y el cierre de sesión y los almacenes de sesiones se explican en [Cookies firmadas y sesiones](sessions.md).
 
 ## Cuerpo
 
@@ -386,7 +420,7 @@ async fn larger_bodies_for_admins(mut req: Request, next: Next) -> Response {
 
 - El límite solo entra en juego cuando lees el cuerpo. Un handler que nunca lo lee nunca produce un `413`.
 - También cubre [`req.multipart()`](#subida-de-archivos-multipart) (el formulario entero) y [`middleware::decompress()`](middleware.md#decompress) (el tamaño comprimido y el descomprimido), pero no `take_body()`.
-- En [HTTP/3](http3.md), los cuerpos se leen antes del enrutamiento, dentro de `app.body_limit`: si los clientes HTTP/3 suben archivos grandes, sube también el límite global.
+- Funciona igual sobre HTTP/1.1, [HTTP/2](https.md) y [HTTP/3](http3.md).
 - Un cuerpo cortado por el `RequestBodyLimitLayer` de tower-http (consulta [Capas de tower](middleware.md#capas-de-tower)) también da un `413`.
 
 ### Streaming con `take_body`
@@ -644,6 +678,8 @@ app.get("/me", |req: Request| async move {
 | `secure()` | `req.secure` | `bool` |
 | `set_uri(uri)` | asignar `req.url` | |
 | `route()` | `req.route.path` | `Option<&'static str>` |
+| `path_for(nombre, &[...])` | | `Result<String, Error>` (`500`): la ruta concreta de una ruta con nombre |
+| `url_for(nombre, &[...])` | | `Result<String, Error>` (`500`): lo mismo, con protocolo y host |
 | `param(nombre)` | `req.params.nombre` | `Option<&str>` |
 | `param_as::<T>(nombre)` | | `Result<T, Error>` (`400`) |
 | `params()` | `req.params` | iterador de `(&str, &str)` |
@@ -659,6 +695,9 @@ app.get("/me", |req: Request| async move {
 | `accepts(&[...])` | `req.accepts([...])` | `Option<&str>` (`None`: responde `406`) |
 | `accepts_language(&[...])` | `req.acceptsLanguages(...)` | `Option<&str>` |
 | `cookie(nombre)` | `req.cookies.nombre` | `Option<&str>` |
+| `signed_cookie(nombre)` (feature `session`) | `req.signedCookies.nombre` | `Option<String>` (`None` si falta o se modificó) |
+| `sign_cookie(cookie)` (feature `session`) | `res.cookie(nombre, valor, { signed: true })` | `Cookie`, para enviar con `.cookie(...)` |
+| `session()` (feature `session`) | `req.session` | `&Session` (`500` sin el middleware `session`) |
 | `json::<T>().await` | `req.body` + `express.json()` | `Result<T, Error>` |
 | `form::<T>().await` | `req.body` + `express.urlencoded()` | `Result<T, Error>` |
 | `text().await` | `req.body` + `express.text()` | `Result<String, Error>` |
@@ -672,3 +711,4 @@ app.get("/me", |req: Request| async move {
 | `state::<T>()` / `try_state::<T>()` | `req.app.locals` | `&T` / `Option<&T>` |
 | `get::<T>()` / `set(valor)` | `res.locals` | `Option<&T>` / `Option<T>` (el valor anterior) |
 | `extensions()` / `extensions_mut()` | | `&Extensions` / `&mut Extensions` |
+| `render(plantilla, contexto)` (feature `templates`) | `res.render(vista, locals)` | `Result<Html<String>, Error>`, consulta [Plantillas HTML](templates.md) |

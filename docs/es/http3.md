@@ -192,7 +192,7 @@ En el lado del proxy, mantén la configuración habitual (ver [Puesta en producc
 Con systemd, un usuario sin privilegios no puede abrir el puerto 443: añade `AmbientCapabilities=CAP_NET_BIND_SERVICE` a la sección `[Service]`. Las claves de Let's Encrypt solo las puede leer root: cópialas a una carpeta que el usuario del servicio pueda leer (desde el hook de certbot que también reinicia la aplicación).
 
 > [!WARNING]
-> Las peticiones HTTP/3 no pasan por el proxy: sus cabeceras `X-Forwarded-For` y `X-Forwarded-Proto`, si las hay, vienen directamente del cliente. Declara el proxy por su dirección, `app.trust_proxy("loopback")`, y Vitesse solo cree estas cabeceras cuando vienen de él: `req.ip()` es entonces la dirección real del cliente en los dos protocolos (consulta [Puesta en producción](production.md#obtener-la-ip-del-cliente)). Del mismo modo, lo que hace el proxy (compresión, limitación de peticiones, registros de acceso, tamaño máximo de los cuerpos) no se aplica a las peticiones HTTP/3: usa los middlewares de Vitesse (`compress`, `rate_limit`) y `app.body_limit`.
+> Las peticiones HTTP/3 no pasan por el proxy: sus cabeceras `X-Forwarded-For` y `X-Forwarded-Proto`, si las hay, vienen directamente del cliente. Declara el proxy por su dirección, `app.trust_proxy("loopback")`, y Vitesse solo cree estas cabeceras cuando vienen de él: `req.ip()` es entonces la dirección real del cliente en los dos protocolos (consulta [Puesta en producción](production.md#obtener-la-ip-del-cliente)). Del mismo modo, lo que hace el proxy (compresión, limitación de peticiones, registros de acceso, tamaño máximo de los cuerpos) no se aplica a las peticiones HTTP/3: usa los middlewares de Vitesse (`compress`, `rate_limit`, `body_limit`) y `app.body_limit`, que se aplican a todos los protocolos.
 
 ## `bind` y `http3_addr`
 
@@ -222,10 +222,12 @@ async fn main() -> std::io::Result<()> {
 
 ## Qué cambia y qué no se admite (todavía)
 
-- **Los cuerpos de las peticiones** se leen enteros antes de ejecutar el handler, hasta `app.body_limit` (`413` si se supera). Por eso `req.take_body()` da un cuerpo que ya está en memoria, no un flujo: leer por partes los cuerpos de las peticiones en HTTP/3 todavía no se admite.
+- **Los cuerpos de las peticiones** se transmiten al handler por partes, a medida que llegan, como en HTTP/1.1 y HTTP/2: `req.take_body()` es un flujo de verdad, `field.save(path)` escribe una [subida](requests.md#subida-de-archivos-multipart) en disco a medida que llega, y el límite del cuerpo es el de la propia petición, `app.body_limit` o el [`middleware::body_limit`](requests.md#límite-de-tamaño-del-cuerpo-y-413) de la ruta (`413` si se supera).
 - **Las respuestas** se envían por partes como en HTTP/1.1 (`Body::from_stream`, archivos…). Vitesse añade `date` y `content-length` (cuando se conoce el tamaño), y quita las cabeceras propias de HTTP/1.1 (`connection`, `transfer-encoding`, `upgrade`, `keep-alive`).
 - **Los hilos**: con `app.run` en modo de un hilo por núcleo (el predeterminado en Linux), HTTP/3 lo sirve un solo hilo, junto a los hilos de HTTP/1.1. Si la mayor parte de tu tráfico es HTTP/3, compara con `app.thread_per_core(false)`.
-- **No se admite**: [WebSocket](websocket.md) sobre HTTP/3 (los clientes abren sus conexiones WebSocket en HTTP/1.1), 0-RTT (*early data*) ni la lectura por partes de los cuerpos de las peticiones. HTTP/2 está disponible sobre TCP, con la feature `http2`: consulta [HTTPS y HTTP/2](https.md).
+- **WebSocket sobre HTTP/3** (RFC 9220) no se admite: el crate h3 no lo implementa, y los navegadores no dependen de él. Abren sus [WebSockets](websocket.md#websocket-sobre-http2) sobre HTTP/2 o HTTP/1.1, en TCP, aunque la página haya llegado por HTTP/3.
+- **0-RTT** (*early data*) no se admite, a propósito: permite que un cliente que vuelve envíe su primera petición antes de que termine el handshake, pero un atacante que grabe esa petición puede reenviarla, y un `POST` reenviado podría, por ejemplo, hacer un pedido dos veces. Vitesse espera al final del handshake, que con QUIC solo cuesta un viaje de ida y vuelta.
+- HTTP/2 está disponible sobre TCP, con la feature `http2`: consulta [HTTPS y HTTP/2](https.md).
 
 ## Cortafuegos y alojamiento
 

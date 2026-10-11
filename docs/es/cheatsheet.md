@@ -33,6 +33,8 @@ fn main() -> std::io::Result<()> {
 | `http3` | Desactivada | `app.http3`, `server.http3_addr` y el módulo `vitesse::http3` |
 | `multipart` | Desactivada | `req.multipart()` y el módulo `vitesse::multipart` |
 | `compress` | Desactivada | `middleware::compress()` y `middleware::decompress()` |
+| `session` | Desactivada | `app.cookie_secret`, las cookies firmadas, `middleware::session` y el módulo `vitesse::session` |
+| `templates` | Desactivada | `app.views`, `app.templates`, `req.render` y el módulo `vitesse::templates` (minijinja) |
 | `tower` | Desactivada | `middleware::layer`, `app.into_service()` y el módulo `vitesse::tower` |
 
 ```toml
@@ -57,6 +59,10 @@ Consulta [Instalación](installation.md#features-de-cargo).
 | `app.state(valor)` | Registra un estado global, uno por tipo (`app.locals`) |
 | `app.body_limit(bytes)` | Tamaño máximo de un cuerpo leído en memoria (por defecto `DEFAULT_BODY_LIMIT`, 1 MiB); por ruta: `middleware::body_limit` |
 | `app.trust_proxy(valor)` | Proxies inversos de confianza (`app.set('trust proxy')`): `false` (por defecto), `true`, un número de saltos o `"loopback, 10.0.0.0/8"` |
+| `app.case_sensitive(false)` | Las rutas coinciden sin importar las mayúsculas, como en Express por defecto (por defecto en Vitesse: `true`) |
+| `app.cookie_secret(secreto)` | El secreto que firma las cookies y la cookie de sesión, de 32 bytes como mínimo (`cookieParser(secret)`, feature `session`) |
+| `app.views(carpeta)` | Carpeta de las plantillas HTML para `req.render` (`app.set('views')`, feature `templates`) |
+| `app.templates(env)` | Tu propio `Environment` de minijinja: filtros, funciones, plantillas integradas (feature `templates`) |
 | `app.workers(n)` | Número de hilos para `run` (por defecto: uno por CPU) |
 | `app.thread_per_core(bool)` | Modo de un hilo por núcleo para `run` (por defecto `true`, solo en Linux) |
 | `app.keep_alive(duración)` | Las conexiones keep-alive inactivas se cierran pasado este tiempo (por defecto 60 s); `Duration::ZERO` desactiva el keep-alive |
@@ -87,15 +93,21 @@ Estos métodos existen tanto en `App` como en `Router`, y se pueden encadenar.
 | `app.static_dir(prefijo, carpeta)` | Sirve una carpeta bajo `prefijo` |
 | `app.serve_dir(prefijo, serve_dir)` | Lo mismo, con un `ServeDir` configurado |
 | `app.ws(ruta, handler)` | Ruta WebSocket (`GET`): `handler(req, socket)` se hace cargo de la conexión (express-ws) |
+| `.name("user")` | Da nombre a la ruta añadida justo antes, para `req.path_for` y `req.url_for`; los nombres son globales en la aplicación, prefijos de montaje incluidos |
 
 | Patrón | Coincide con |
 |---|---|
 | `/users` | Exactamente `/users` (y `/users/`) |
 | `/users/:id` | Un segmento, que se lee con `req.param("id")`; nombres con letras, cifras y `_` |
+| `/flights/:from-:to` | Varios parámetros en un segmento, separados por texto: `LAX-SFO` da `from=LAX`, `to=SFO` |
+| `/files/:name.:ext` | `archive.tar.gz` da `name=archive`, `ext=tar.gz`: el primer parámetro toma lo menos posible |
+| `/api/v:version/status` | Texto y un parámetro en un segmento: `/api/v2/status` |
+| `r"/users/:id(\d+)"` | Un parámetro restringido por una expresión regular, que tiene que coincidir con el valor entero |
+| `/archive/:year?/:month?` | Parámetros opcionales, solo al final: `/archive`, `/archive/2024`, `/archive/2024/05` (`req.param("month")` es `None` cuando falta) |
 | `/files/*path` | El resto de la ruta, que se lee con `req.param("path")`; también coincide con `/files` |
 | `/*` | Todas las rutas; el parámetro se llama `*` |
 
-Prioridad: estática > parámetro > comodín. Los parámetros se decodifican (`%C3%A9` → `é`), la coincidencia distingue mayúsculas y minúsculas, un método equivocado responde `405` con `Allow`, y una ruta no válida o duplicada provoca un pánico al arrancar. Consulta [Enrutamiento](routing.md).
+Prioridad: estática > segmento con restricción o compuesto > parámetro > comodín, así que `r"/users/:id(\d+)"` y `/users/:name` pueden convivir. Los parámetros se decodifican (`%C3%A9` → `é`), la coincidencia distingue mayúsculas y minúsculas (salvo con `app.case_sensitive(false)`), un método equivocado responde `405` con `Allow`, y una ruta no válida o duplicada, o una expresión regular no válida, provoca un pánico al arrancar. Consulta [Enrutamiento](routing.md#parámetros-de-ruta) y [Rutas con nombre](routing.md#rutas-con-nombre-y-generación-de-url).
 
 ## Handlers
 
@@ -120,6 +132,8 @@ Prioridad: estática > parámetro > comodín. Los parámetros se decodifican (`%
 | `req.set_uri(uri)` | Reemplaza la URI (reescritura de URL en un middleware global) |
 | `req.set_method(método)` | Cambia el método antes del enrutamiento (sobrescritura del método, en un middleware global) |
 | `req.route()` | El patrón de la ruta elegida, prefijo de montaje incluido (`Some("/users/:id")`); `None` si ninguna ruta coincide |
+| `req.path_for("user", &[&42])?` | La ruta de una ruta con nombre, con los valores codificados: `"/users/42"`; `500` para un nombre desconocido o un valor que falta |
+| `req.url_for("user", &[&42])?` | Lo mismo, con el protocolo y el host de la petición: `"https://example.com/users/42"` |
 | `req.header(nombre)` | Una cabecera como `Option<&str>`, sin distinguir mayúsculas (`req.get('host')`) |
 | `req.header_all(nombre)` | Todos los valores de una cabecera repetida |
 | `req.headers()`, `req.headers_mut()` | Todas las cabeceras (`HeaderMap`) |
@@ -132,6 +146,10 @@ Prioridad: estática > parámetro > comodín. Los parámetros se decodifican (`%
 | `req.protocol()` | `"https"` o `"http"` (`X-Forwarded-Proto` detrás de un proxy de confianza) |
 | `req.secure()` | `true` sobre TLS, HTTP/3, o con `X-Forwarded-Proto: https` de un proxy de confianza |
 | `req.cookie(nombre)` | El valor de una cookie (`req.cookies.nombre`) |
+| `req.signed_cookie(nombre)` | El valor de una cookie firmada, `Option<String>`; `None` si falta o se ha manipulado (`req.signedCookies.nombre`, feature `session`) |
+| `req.sign_cookie(cookie)` | Firma una cookie antes de `.cookie(...)`; entra en pánico sin `app.cookie_secret` (feature `session`) |
+| `req.session()` | La sesión del visitante, `&Session` (`req.session`); `500` sin el middleware `session` |
+| `req.render(nombre, contexto)` | Renderiza una plantilla: `Result<Html<String>, Error>` (`res.render()`, feature `templates`) |
 | `req.param(nombre)` | Un parámetro de ruta, `Option<&str>` |
 | `req.param_as::<T>(nombre)?` | Un parámetro convertido a `T`; `400` si falla |
 | `req.params()` | Todos los parámetros `(nombre, valor)` |
@@ -234,6 +252,7 @@ El cuerpo se lee bajo demanda y se guarda en caché: los métodos de lectura se 
 | `Cookie::new(nombre, valor)` | Una cookie con `Path=/` |
 | `.path(p)`, `.domain(d)`, `.max_age(duración)` | Atributos de la cookie |
 | `.secure(bool)`, `.http_only(bool)`, `.same_site(SameSite::Lax)` | Atributos de la cookie (`vitesse::SameSite`: `Strict`, `Lax`, `None`) |
+| `cookie.name()`, `cookie.value()`, `cookie.with_value(v)` | Leer una cookie; la misma cookie con otro valor |
 | `Body::empty()`, `Body::from(x)` | Cuerpo vacío, o a partir de `&'static str`, `String`, `Vec<u8>`, `Bytes`… |
 | `Body::from_stream(flujo)` | Cuerpo enviado como flujo (`chunked`) a partir de un `Stream` de `Result<impl Into<Bytes>, E>` |
 | `Body::wrap(cuerpo)` | Envuelve cualquier `http_body::Body` (proxies) |
@@ -314,6 +333,7 @@ Consulta [Errores](errors.md).
 | `.max_wait(duración)` | | `503` + `Retry-After` pasada esta espera (`Duration::ZERO`: de inmediato) |
 | `middleware::rate_limit(max, periodo)` | `express-rate-limit` | `max` peticiones por `periodo` y por IP, después `429` + `Retry-After`; cabeceras `X-RateLimit-Limit` y `X-RateLimit-Remaining` |
 | `.key(\|req: &Request\| -> Option<String>)` | `keyGenerator` | Otra clave de cliente (clave de API, id de usuario); `None`: sin límite |
+| `middleware::session(almacén)` | `express-session` | Sesiones del lado del servidor, que se leen con `req.session()` (feature `session`); consulta [más abajo](#cookies-firmadas-y-sesiones-feature-session) |
 | `middleware::compress()` | `compression()` | Respuestas en Brotli o gzip (feature `compress`) |
 | `middleware::decompress()` | | Descomprime los cuerpos de petición `gzip`, `br` y `deflate` (feature `compress`) |
 | `middleware::layer(capa_tower)` | | Cualquier `Layer` de tower / tower-http (feature `tower`) |
@@ -349,6 +369,45 @@ Consulta [Routers](routers.md).
 
 Incluido: tipos MIME, `index.html`, `ETag` y `Last-Modified` (`304`), peticiones parciales `Range` (`206`), envío en flujo de archivos grandes, protección contra `../` y los archivos ocultos. Consulta [Archivos estáticos](static-files.md).
 
+## Cookies firmadas y sesiones (feature `session`)
+
+| Uso | Descripción |
+|---|---|
+| `app.cookie_secret(secreto)` | El secreto (`&str`, `String` o bytes), de 32 bytes como mínimo o entra en pánico; léelo de una variable de entorno |
+| `.cookie(req.sign_cookie(Cookie::new("theme", "dark")))` | Envía `theme=dark.<firma>`: legible pero no modificable, sin cifrar (`res.cookie(…, { signed: true })`) |
+| `req.signed_cookie("theme")` | `Some("dark")`, o `None` si falta o se ha modificado (`req.signedCookies.theme`) |
+| `app.middleware(middleware::session(MemoryStore::new()))` | Sesiones del lado del servidor (`express-session`), con el id en la cookie `vitesse.sid` |
+| `.cookie_name("sid")`, `.max_age(duración)`, `.rolling(true)` | Nombre de la cookie; duración tras el último cambio (por defecto 1 día); prolongarla en cada petición |
+| `.secure(bool)`, `.same_site(SameSite::Strict)`, `.domain(d)`, `.path(p)` | Atributos de la cookie; por defecto `HttpOnly`, `SameSite=Lax`, `Path=/`, y `Secure` sobre HTTPS |
+| `req.session().get::<T>(clave)` | Un valor, deserializado: `Option<T>` |
+| `session.insert(clave, valor)?` | Guarda cualquier valor `Serialize` |
+| `session.remove(clave)`, `session.contains(clave)` | Quita un valor y lo devuelve; comprueba una clave |
+| `session.clear()`, `session.is_empty()` | Quita todos los valores; comprueba si no hay ninguno |
+| `session.regenerate()` | Un id nuevo, los mismos datos: llámalo al iniciar sesión |
+| `session.destroy()` | Borra la sesión, en el almacén y en el navegador: cierre de sesión |
+| `session.id()` | El id, `None` hasta que la sesión se guarda por primera vez |
+| `vitesse::session::MemoryStore` | Sesiones en la memoria del proceso: se pierden al reiniciar, no se comparten entre instancias |
+| `impl SessionStore for MyStore` | `load(id)`, `save(id, &record, ttl)` y `delete(id)`, que devuelven cada uno un `BoxFuture`; un `Record` es un `serde_json::Map` |
+
+Una sesión se guarda, y su cookie se envía, solo cuando un handler la modifica (o en cada petición con `rolling(true)`); la cookie se firma cuando la aplicación tiene un `cookie_secret`. Consulta [Cookies firmadas y sesiones](sessions.md).
+
+## Plantillas HTML (feature `templates`)
+
+| Uso | Descripción |
+|---|---|
+| `app.views("templates")` | La carpeta de las plantillas (`app.set('views')`); cada plantilla se lee la primera vez que se usa, y después se guarda en caché |
+| `req.render("users.html", json!({ … }))` | Renderiza una plantilla (`res.render()`): `Result<Html<String>, Error>`; cualquier valor `Serialize` como contexto |
+| `app.templates(env)` | Tu propio `vitesse::templates::minijinja::Environment` en lugar de `app.views` |
+| `env.add_filter(nombre, f)`, `env.add_function(nombre, f)`, `env.add_global(nombre, valor)` | Filtros, funciones y variables propios |
+| `env.add_template(nombre, include_str!("../templates/x.html"))` | Una plantilla integrada en el binario |
+| `{{ value }}`, `{{ value\|upper }}` | Un valor, escapado en las plantillas `.html`, `.htm` y `.xml`; un filtro |
+| `{% for x in list %}…{% else %}…{% endfor %}`, `{% if %}…{% elif %}…{% endif %}` | Bucles y condiciones |
+| `{% extends "layout.html" %}`, `{% block content %}…{% endblock %}` | Plantillas base |
+| `{% include "partials/nav.html" %}`, `{% macro %}`, `{% import %}` | Fragmentos y macros |
+| `{{ html\|safe }}` | HTML de confianza, sin escapar |
+
+Una plantilla que falta o un error de renderizado dan un `500` (la causa va al log); reinicia el servidor para ver un cambio en una plantilla. Consulta [Plantillas HTML](templates.md).
+
 ## WebSocket
 
 | Uso | Descripción |
@@ -367,7 +426,7 @@ Incluido: tipos MIME, `index.html`, `ETag` y `Last-Modified` (`304`), peticiones
 | `.max_message_size(bytes)` | Tamaño máximo de mensajes y tramas (por defecto `ws::DEFAULT_MAX_MESSAGE_SIZE`, 16 MiB) |
 | `.on_upgrade(req, \|req, socket\| async move { … })` | Devuelve la respuesta `101 Switching Protocols` y después ejecuta el handler |
 
-`WebSocket` implementa `Stream` y `Sink`; los middlewares globales y de router se ejecutan sobre el handshake. Consulta [WebSocket](websocket.md).
+`WebSocket` implementa `Stream` y `Sink`; los middlewares globales y de router se ejecutan sobre el handshake. Los WebSockets funcionan sobre HTTP/1.1 y, con la feature `http2`, sobre HTTP/2 (RFC 8441), pero no sobre HTTP/3. Consulta [WebSocket](websocket.md).
 
 ## Servidor
 
@@ -396,7 +455,7 @@ Consulta [Configuración del servidor](server.md).
 | Feature `http2` | HTTP/2 sobre TLS (navegadores, ALPN), y h2c con prior knowledge en un puerto sin cifrar |
 | `req.version() == Version::HTTP_2` | Una petición recibida por HTTP/2 (`vitesse::http::Version`) |
 
-Mismas rutas, middlewares y handlers en todos los protocolos; WebSocket va sobre HTTP/1.1 (`wss://`). Consulta [HTTPS y HTTP/2](https.md).
+Mismas rutas, middlewares y handlers en todos los protocolos. Con la feature `ws`, los navegadores también abren WebSockets sobre HTTP/2 (RFC 8441), en la misma conexión que la página; los handlers de `app.ws` no cambian. Consulta [HTTPS y HTTP/2](https.md).
 
 ## Proxies de confianza
 
@@ -423,7 +482,7 @@ Efectos: `req.ip()` (`X-Forwarded-For`), `req.protocol()` y `req.secure()` (`X-F
 | `.alt_svc_port(443)` | Puerto público anunciado en `alt-svc` (detrás de un proxy, Docker o NAT) |
 | `req.version()` | `HTTP/3.0` para una petición recibida por HTTP/3 |
 
-Mismas rutas, middlewares y handlers en los dos protocolos; los cuerpos de las peticiones se leen enteros antes del handler. Con `app.tls(...)` además, las respuestas HTTPS llevan `alt-svc` y los navegadores pasan a HTTP/3 directamente. Consulta [HTTP/3 y QUIC](http3.md).
+Mismas rutas, middlewares y handlers en los dos protocolos; los cuerpos de las peticiones llegan al handler por partes, con los mismos límites de cuerpo. Con `app.tls(...)` además, las respuestas HTTPS llevan `alt-svc` y los navegadores pasan a HTTP/3 directamente. Consulta [HTTP/3 y QUIC](http3.md).
 
 ## tower (feature `tower`)
 
@@ -450,6 +509,7 @@ La capa puede cambiar el método, la URI, las cabeceras, las extensiones y el cu
 | `res.status()`, `res.header(nombre)`, `res.headers()` | Estado y cabeceras |
 | `res.text()`, `res.bytes()`, `res.json::<T>()` | El cuerpo |
 | `client.get("/ruta-ws")` | En una ruta WebSocket: solo la respuesta al handshake (`426` para HTTP normal); prueba las conversaciones en un puerto real |
+| `.header("cookie", "vitesse.sid=…")` | Devuelve una cookie leída de `res.header("set-cookie")`: el cliente no guarda las cookies (sesiones, cookies firmadas) |
 | `app.into_service().oneshot(request).await` | Pruebas a través de tower (feature `tower` y `ServiceExt` de tower) |
 
 Consulta [Pruebas](testing.md).
@@ -463,6 +523,8 @@ Consulta [Pruebas](testing.md).
 | `vitesse::serde_json`, `json!` | El crate `serde_json` y su macro |
 | `vitesse::tokio` | El crate `tokio`, con las features que usa Vitesse |
 | `vitesse::http3::rustls`, `vitesse::tls::rustls` | El crate `rustls` que usan HTTP/3 y HTTPS (features `http3` y `tls`) |
+| `vitesse::templates::minijinja` | El crate `minijinja` (feature `templates`) |
+| `vitesse::session::{Session, Sessions, SessionStore, MemoryStore, Record}` | Los tipos de las sesiones (feature `session`) |
 | `vitesse::DEFAULT_BODY_LIMIT` | `1024 * 1024` bytes |
 | `vitesse::VERSION` | La versión del crate (`"0.1.0"`) |
 | `Handler`, `Middleware`, `IntoResponse`, `IntoStatus`, `HandlerExt`, `ListenAddr` | Los traits públicos |

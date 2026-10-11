@@ -271,7 +271,9 @@ Las rutas [WebSocket](websocket.md) funcionan sobre HTTPS sin ningún cambio: lo
 const socket = new WebSocket("wss://example.com/chat");
 ```
 
-La propia conexión WebSocket usa HTTP/1.1 dentro de TLS: los navegadores abren para ella una conexión HTTP/1.1 aparte. WebSocket sobre HTTP/2 (RFC 8441) no se admite: una respuesta `101 Switching Protocols` en una conexión HTTP/2 se convierte en `505 HTTP Version Not Supported`.
+Con la feature `http2`, los navegadores que lo admiten (Chrome y Firefox, por ejemplo) abren el WebSocket en un stream de la conexión HTTP/2 que ya tienen con el sitio (RFC 8441), en lugar de una conexión HTTP/1.1 aparte. Tus handlers no cambian: el handshake se enruta como un `GET`, recibe un `200` en lugar de un `101`, y `req.version()` es `HTTP/2.0` en el handler. Sin la feature `http2`, o con un navegador que no lo hace, el WebSocket usa su propia conexión HTTP/1.1 dentro de TLS. Consulta [WebSocket sobre HTTP/2](websocket.md#websocket-sobre-http2).
+
+Cualquier otro cambio de protocolo (una respuesta `101 Switching Protocols` a una petición que no es un handshake WebSocket) es imposible sobre HTTP/2 y se convierte en `505 HTTP Version Not Supported`.
 
 ## HTTPS y HTTP/3 juntos
 
@@ -318,9 +320,10 @@ Abre el puerto TCP 443 **y** el puerto UDP 443 en el cortafuegos (`sudo ufw allo
 
 No se admite:
 
-- **`Upgrade: h2c`**: esas peticiones se responden en HTTP/1.1; usa prior knowledge, o TLS;
-- **el server push**: de todos modos, los navegadores lo han abandonado;
-- **WebSocket sobre HTTP/2**: WebSocket usa HTTP/1.1, con o sin TLS.
+- **`Upgrade: h2c`**: la RFC 9113, la especificación actual de HTTP/2, eliminó este mecanismo, y esas peticiones simplemente se responden en HTTP/1.1; usa prior knowledge, o TLS;
+- **el server push**: Chrome lo eliminó en 2022 y Firefox en 2024, y axum y actix-web tampoco lo ofrecen.
+
+[WebSocket](websocket.md#websocket-sobre-http2) funciona sobre HTTP/2, con la feature `http2`, además de sobre HTTP/1.1.
 
 ## Pruébalo en local
 

@@ -180,10 +180,22 @@ La ruta de inicio de sesión envía `Set-Cookie: session=abc123; Path=/; Max-Age
 | `.http_only(true)` | `HttpOnly` |
 | `.same_site(SameSite::Strict / Lax / None)` | `SameSite` |
 
-Cada llamada a `.cookie(...)` añade su propia cabecera `Set-Cookie`, así que puedes enviar varias. `.clear_cookie(nombre)` envía `nombre=; Path=/; Max-Age=0`: si la cookie se creó con otra ruta u otro dominio, construye tú mismo la cookie de borrado con los mismos atributos y `.max_age(Duration::ZERO)`. Para leer las cookies que envía el navegador, usa `req.cookie("session")` (ver [Leer la petición](requests.md)).
+`cookie.name()` y `cookie.value()` leen de nuevo una cookie, y `cookie.with_value(valor)` devuelve la misma cookie con otro valor.
+
+Cada llamada a `.cookie(...)` añade su propia cabecera `Set-Cookie`, así que puedes enviar varias. `.clear_cookie(nombre)` envía `nombre=; Path=/; Max-Age=0`: si la cookie se creó con otra ruta u otro dominio, construye tú mismo la cookie de borrado con los mismos atributos y `.max_age(Duration::ZERO)`. Para leer las cookies que envía el navegador, usa `req.cookie("session")` (ver [Leer la petición](requests.md#cookies)).
 
 > [!IMPORTANT]
-> El valor se escribe tal cual: no se firma, ni se cifra, ni se codifica. Mantenlo compatible con una URL (un token de sesión aleatorio, por ejemplo) y guarda los datos sensibles en el servidor. Los navegadores solo aceptan `SameSite::None` junto con `.secure(true)`.
+> El valor se escribe tal cual: no se cifra ni se codifica, y no se firma salvo que lo firmes tú (abajo). Mantenlo compatible con una URL (un token de sesión aleatorio, por ejemplo) y guarda los datos sensibles en el servidor. Los navegadores solo aceptan `SameSite::None` junto con `.secure(true)`.
+
+Con la feature `session` y un secreto (`app.cookie_secret(...)`), `req.sign_cookie(cookie)` firma una cookie antes de enviarla, como `res.cookie(nombre, valor, { signed: true })` en Express. El visitante sigue pudiendo leer el valor, pero no cambiarlo: `req.signed_cookie(nombre)` lo vuelve a leer, y devuelve `None` para una cookie manipulada.
+
+```rust
+app.post("/theme/dark", |req: Request| async move {
+    res::send_status(204).cookie(req.sign_cookie(Cookie::new("theme", "dark")))
+});
+```
+
+Esto envía `Set-Cookie: theme=dark.<firma>; Path=/`. Para datos que el visitante no debe ver, o que tienes que poder revocar (quién ha iniciado sesión), usa una sesión: el navegador solo guarda entonces un id aleatorio. Los dos casos se explican en [Cookies firmadas y sesiones](sessions.md).
 
 ### Redirecciones
 
@@ -200,6 +212,19 @@ app.post("/contacto", |_| async { Redirect::see_other("/gracias") });
 ```
 
 Para otro estado, pon la cabecera tú mismo: `res::status(308).header("location", "/v2")`. Una URL con caracteres inválidos (como un salto de línea) produce un `500`.
+
+## Renderizar plantillas
+
+`Html(...)` envía HTML que has construido tú. Para páginas de verdad, con una plantilla base, bucles y escapado, activa la feature `templates`: `req.render(plantilla, contexto)` renderiza una plantilla de la carpeta declarada con `app.views(...)`, como `res.render` en Express:
+
+```rust
+app.views("templates");
+app.get("/users", |req: Request| async move {
+    req.render("users.html", json!({ "title": "Usuarios", "users": ["Ada", "Grace"] }))
+});
+```
+
+Devuelve un `Result<Html<String>, Error>`: un `200` con `content-type: text/html; charset=utf-8`, o un `500` si la plantilla no existe o falla al renderizarse (la causa va al log). El contexto puede ser `json!` o cualquier estructura `Serialize`. Todo lo relativo a las plantillas está en [Plantillas HTML](templates.md).
 
 ## Archivos y descargas
 

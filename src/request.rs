@@ -25,6 +25,7 @@ use crate::util::percent_decode;
 pub(crate) struct Shared {
     pub(crate) state: StateMap,
     pub(crate) body_limit: usize,
+    pub(crate) trust_proxy: crate::proxy::TrustProxy,
 }
 
 /// Typed storage for the global state (`app.state(...)`).
@@ -202,6 +203,8 @@ struct Inner {
     captures: Captures,
     params: Params,
     remote: Option<SocketAddr>,
+    /// Received over TLS (HTTPS, HTTP/3).
+    secure: bool,
     /// The request carries `Range`, `If-Range`, `If-None-Match` or
     /// `If-Modified-Since` (spotted while parsing, at no extra cost).
     conditional: bool,
@@ -229,6 +232,7 @@ impl Inner {
             captures: Vec::new(),
             params: Params::default(),
             remote: None,
+            secure: false,
             conditional: false,
             shared,
         }
@@ -262,6 +266,7 @@ impl Inner {
         self.params.names = &[];
         self.params.values.clear();
         self.remote = None;
+        self.secure = false;
         self.conditional = false;
     }
 
@@ -325,6 +330,7 @@ impl Request {
     /// Builds a request read from the network; `head` is the raw head,
     /// copied into a recycled box.
     #[inline]
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn from_wire(
         head: &[u8],
         method: Method,
@@ -332,6 +338,7 @@ impl Request {
         target: (usize, usize),
         raw_headers: &RawHeaders,
         remote: Option<SocketAddr>,
+        secure: bool,
         shared: &'static Shared,
     ) -> Self {
         let mut inner = Inner::take(shared);
@@ -340,6 +347,7 @@ impl Request {
         inner.head.extend_from_slice(head);
         inner.raw_headers.copy_from(raw_headers);
         inner.remote = remote;
+        inner.secure = secure;
         let (start, end) = target;
         if head.get(start) == Some(&b'/') {
             inner.set_target(start, end);
@@ -367,6 +375,7 @@ impl Request {
         parts: http::request::Parts,
         body: ReqBody,
         remote: Option<SocketAddr>,
+        secure: bool,
         shared: &'static Shared,
     ) -> Self {
         let mut inner = Inner::take(shared);
@@ -382,6 +391,7 @@ impl Request {
         inner.extensions = parts.extensions;
         *inner.body.get_mut().unwrap_or_else(PoisonError::into_inner) = body;
         inner.remote = remote;
+        inner.secure = secure;
         Request {
             inner: ManuallyDrop::new(inner),
         }
@@ -586,15 +596,63 @@ impl Request {
     }
 
     /// The requested host, without the port (`req.hostname`).
+    ///
+    /// Behind a trusted proxy ([`App::trust_proxy`](crate::App::trust_proxy)),
+    /// the host comes from `X-Forwarded-Host`.
     pub fn hostname(&self) -> Option<&str> {
-        let host = match self.header(header::HOST) {
-            Some(host) => host,
-            None => self.inner.uri.get()?.host()?,
-        };
+        let host = self.host()?;
         if host.starts_with('[') {
             return host.split_once(']').map(|(h, _)| &h[1..]);
         }
         Some(host.rsplit_once(':').map_or(host, |(h, _)| h))
+    }
+
+    /// The requested host, with its port if there is one (`req.host` in
+    /// Express 5): `Host`, the authority of an HTTP/2 or HTTP/3 request, or,
+    /// behind a trusted proxy, `X-Forwarded-Host`.
+    pub fn host(&self) -> Option<&str> {
+        if self.trusts_proxy() {
+            if let Some(host) = self.forwarded("x-forwarded-host") {
+                return Some(host);
+            }
+        }
+        match self.header(header::HOST) {
+            Some(host) => Some(host),
+            None => self.inner.uri.get()?.authority().map(|a| a.as_str()),
+        }
+    }
+
+    /// `"https"` when the request arrived over TLS (or, behind a trusted
+    /// proxy, when `X-Forwarded-Proto` says so), `"http"` otherwise
+    /// (`req.protocol`).
+    pub fn protocol(&self) -> &'static str {
+        if self.secure() { "https" } else { "http" }
+    }
+
+    /// Whether the request arrived over HTTPS (`req.secure`): TLS, HTTP/3,
+    /// or `X-Forwarded-Proto: https` from a trusted proxy.
+    pub fn secure(&self) -> bool {
+        self.inner.secure
+            || (self.trusts_proxy()
+                && self
+                    .forwarded("x-forwarded-proto")
+                    .is_some_and(|p| p.eq_ignore_ascii_case("https")))
+    }
+
+    /// The direct peer is a trusted proxy.
+    fn trusts_proxy(&self) -> bool {
+        let trust = &self.inner.shared.trust_proxy;
+        *trust != crate::proxy::TrustProxy::None
+            && self
+                .inner
+                .remote
+                .is_some_and(|peer| trust.trusts(peer.ip(), 0))
+    }
+
+    /// The first value of an `X-Forwarded-*` header.
+    fn forwarded(&self, name: &str) -> Option<&str> {
+        let value = self.header(name)?.split(',').next()?.trim();
+        (!value.is_empty()).then_some(value)
     }
 
     /// The value of a cookie (`req.cookies.name`).
@@ -703,11 +761,20 @@ impl Request {
         self.inner.remote
     }
 
-    /// The client's IP (`req.ip`). Behind a proxy, look at the
-    /// `X-Forwarded-For` header instead.
+    /// The client's IP (`req.ip`).
+    ///
+    /// By default, this is the address of the TCP peer: behind a reverse
+    /// proxy, the proxy's address. Declare your proxies with
+    /// [`App::trust_proxy`](crate::App::trust_proxy), and the client's
+    /// address is read from `X-Forwarded-For`, like in Express.
     #[inline]
     pub fn ip(&self) -> Option<IpAddr> {
-        self.inner.remote.map(|a| a.ip())
+        let peer = self.inner.remote?.ip();
+        let trust = &self.inner.shared.trust_proxy;
+        if *trust == crate::proxy::TrustProxy::None {
+            return Some(peer);
+        }
+        Some(trust.client_ip(peer, self.header_all("x-forwarded-for")))
     }
 
     // ----- État global et données locales -----------------------------------

@@ -38,14 +38,13 @@ use h3::server::RequestStream;
 use http::{HeaderValue, Method, StatusCode, header};
 use http_body::Body as _;
 use http_body_util::BodyExt;
-use rustls::pki_types::pem::PemObject;
-use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use tokio::sync::watch;
 use tokio::task::JoinSet;
 
 pub use rustls;
 
 use crate::app::AppService;
+use crate::pem::invalid;
 use crate::request::{ReqBody, Request};
 use crate::server::{ResponseFuture, SHUTDOWN_GRACE};
 use crate::util::http_date;
@@ -72,23 +71,12 @@ impl std::fmt::Debug for Http3 {
     }
 }
 
-fn invalid(e: impl std::fmt::Display) -> io::Error {
-    io::Error::new(io::ErrorKind::InvalidInput, e.to_string())
-}
-
 impl Http3 {
     /// From a certificate chain and a private key in PEM (the server
     /// certificate first, then the intermediates).
     pub fn from_pem(cert_chain: &[u8], private_key: &[u8]) -> io::Result<Self> {
-        let certs = CertificateDer::pem_slice_iter(cert_chain)
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(invalid)?;
-        if certs.is_empty() {
-            return Err(invalid("no certificate found in the PEM data"));
-        }
-        let key = PrivateKeyDer::from_pem_slice(private_key).map_err(invalid)?;
-        let provider = Arc::new(rustls::crypto::ring::default_provider());
-        let tls = rustls::ServerConfig::builder_with_provider(provider)
+        let (certs, key) = crate::pem::load(cert_chain, private_key)?;
+        let tls = rustls::ServerConfig::builder_with_provider(crate::pem::provider())
             .with_protocol_versions(&[&rustls::version::TLS13])
             .map_err(invalid)?
             .with_no_client_auth()
@@ -301,7 +289,7 @@ async fn respond<S>(
     } else {
         ReqBody::Buffered(body.freeze())
     };
-    let req = Request::from_parts(parts, body, Some(peer), &app.shared);
+    let req = Request::from_parts(parts, body, Some(peer), true, &app.shared);
     let res = ResponseFuture::new(app, req).await;
 
     let (mut head, body) = res.into_http().into_parts();

@@ -83,6 +83,11 @@ mod body;
 mod error;
 mod handler;
 mod http1;
+#[cfg(feature = "http2")]
+mod http2;
+#[cfg(any(feature = "tls", feature = "http3"))]
+mod pem;
+mod proxy;
 mod request;
 mod response;
 mod router;
@@ -96,6 +101,8 @@ mod util;
 pub mod http3;
 pub mod middleware;
 pub mod test;
+#[cfg(feature = "tls")]
+pub mod tls;
 #[cfg(feature = "ws")]
 pub mod ws;
 
@@ -106,6 +113,7 @@ pub use app::{App, DEFAULT_BODY_LIMIT};
 pub use body::{Body, BoxError};
 pub use error::{Error, Result};
 pub use handler::{BoxFuture, Chained, Handler, HandlerExt, Middleware, Next};
+pub use proxy::{Network, TrustProxy};
 pub use request::Request;
 pub use response::{
     Cookie, Html, IntoResponse, IntoStatus, Json, Redirect, Response, SameSite, res,

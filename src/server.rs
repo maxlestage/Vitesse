@@ -5,7 +5,6 @@ use std::io;
 use std::net::{IpAddr, SocketAddr, ToSocketAddrs};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::pin::{Pin, pin};
-use std::sync::atomic::Ordering;
 use std::task::{Context, Poll};
 use std::time::Duration;
 
@@ -213,7 +212,19 @@ pub(crate) async fn serve(
             },
         };
         let _ = stream.set_nodelay(true);
-        connections.spawn(serve_connection(stream, peer, app, state));
+        #[cfg(feature = "tls")]
+        if let Some(acceptor) = &app.tls {
+            connections.spawn(crate::tls::serve(
+                acceptor.clone(),
+                stream,
+                peer,
+                app,
+                state,
+            ));
+            while connections.try_join_next().is_some() {}
+            continue;
+        }
+        connections.spawn(serve_connection(stream, peer, false, app, state));
         // Libère les connexions terminées.
         while connections.try_join_next().is_some() {}
     }
@@ -221,7 +232,7 @@ pub(crate) async fn serve(
     // Arrêt propre : on n'accepte plus rien, on laisse les requêtes en cours
     // se terminer, puis on ferme les connexions inactives.
     drop(listener);
-    state.shutdown.store(true, Ordering::Relaxed);
+    state.stop();
     let deadline = tokio::time::Instant::now() + SHUTDOWN_GRACE;
     while state.busy() > 0 && tokio::time::Instant::now() < deadline {
         tokio::time::sleep(Duration::from_millis(5)).await;

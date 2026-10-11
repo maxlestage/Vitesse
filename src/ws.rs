@@ -41,7 +41,6 @@ use bytes::Bytes;
 use futures_util::stream::{SplitSink, SplitStream};
 use futures_util::{Sink, SinkExt, Stream, StreamExt};
 use http::{HeaderValue, Method, StatusCode, header};
-use tokio::net::TcpStream;
 use tokio_tungstenite::WebSocketStream;
 use tokio_tungstenite::tungstenite;
 use tokio_tungstenite::tungstenite::handshake::derive_accept_key;
@@ -50,7 +49,7 @@ use tokio_tungstenite::tungstenite::protocol::{Role, WebSocketConfig};
 use crate::handler::BoxFuture;
 use crate::request::Request;
 use crate::response::Response;
-use crate::upgrade::{UpgradeHandle, Upgraded};
+use crate::upgrade::{BoxIo, UpgradeHandle, Upgraded};
 
 /// Default maximum size of a message (and of a frame): 16 MiB.
 pub const DEFAULT_MAX_MESSAGE_SIZE: usize = 16 * 1024 * 1024;
@@ -207,7 +206,7 @@ impl std::error::Error for Error {
 /// and write from two tasks at once, [`split`](Self::split) it. It also
 /// implements [`Stream`] and [`Sink`].
 pub struct WebSocket {
-    inner: WebSocketStream<TcpStream>,
+    inner: WebSocketStream<BoxIo>,
     protocol: Option<String>,
 }
 
@@ -297,7 +296,7 @@ impl Sink<Message> for WebSocket {
 
 /// The sending half of a [`WebSocket`] (see [`WebSocket::split`]).
 pub struct WebSocketSender {
-    inner: SplitSink<WebSocketStream<TcpStream>, tungstenite::Message>,
+    inner: SplitSink<WebSocketStream<BoxIo>, tungstenite::Message>,
 }
 
 impl WebSocketSender {
@@ -321,7 +320,7 @@ impl WebSocketSender {
 
 /// The receiving half of a [`WebSocket`] (see [`WebSocket::split`]).
 pub struct WebSocketReceiver {
-    inner: SplitStream<WebSocketStream<TcpStream>>,
+    inner: SplitStream<WebSocketStream<BoxIo>>,
 }
 
 impl WebSocketReceiver {

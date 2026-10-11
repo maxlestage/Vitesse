@@ -198,3 +198,158 @@ async fn graceful_shutdown_lets_streams_finish() {
         .unwrap()
         .unwrap();
 }
+
+/// WebSocket sur HTTP/2 (RFC 8441) : un CONNECT étendu, puis les trames
+/// WebSocket dans les trames DATA du flux.
+#[cfg(feature = "ws")]
+mod websocket {
+    use std::io;
+    use std::pin::Pin;
+    use std::task::{Context, Poll};
+
+    use bytes::{Buf, Bytes};
+    use futures_util::{SinkExt, StreamExt};
+    use h2::{RecvStream, SendStream};
+    use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
+    use tokio_tungstenite::WebSocketStream;
+    use tokio_tungstenite::tungstenite::Message;
+    use tokio_tungstenite::tungstenite::protocol::Role;
+
+    use super::*;
+
+    struct Tunnel {
+        send: SendStream<Bytes>,
+        recv: RecvStream,
+        pending: Bytes,
+    }
+
+    impl AsyncRead for Tunnel {
+        fn poll_read(
+            mut self: Pin<&mut Self>,
+            cx: &mut Context<'_>,
+            buf: &mut ReadBuf<'_>,
+        ) -> Poll<io::Result<()>> {
+            if self.pending.is_empty() {
+                match std::task::ready!(self.recv.poll_data(cx)) {
+                    Some(Ok(data)) => {
+                        let _ = self.recv.flow_control().release_capacity(data.len());
+                        self.pending = data;
+                    }
+                    Some(Err(e)) => return Poll::Ready(Err(io::Error::other(e))),
+                    None => return Poll::Ready(Ok(())),
+                }
+            }
+            let n = self.pending.len().min(buf.remaining());
+            buf.put_slice(&self.pending[..n]);
+            self.pending.advance(n);
+            Poll::Ready(Ok(()))
+        }
+    }
+
+    impl AsyncWrite for Tunnel {
+        fn poll_write(
+            mut self: Pin<&mut Self>,
+            cx: &mut Context<'_>,
+            buf: &[u8],
+        ) -> Poll<io::Result<usize>> {
+            loop {
+                let capacity = self.send.capacity();
+                if capacity > 0 {
+                    let n = capacity.min(buf.len());
+                    self.send
+                        .send_data(Bytes::copy_from_slice(&buf[..n]), false)
+                        .map_err(io::Error::other)?;
+                    return Poll::Ready(Ok(n));
+                }
+                self.send.reserve_capacity(buf.len());
+                match std::task::ready!(self.send.poll_capacity(cx)) {
+                    Some(Ok(_)) => continue,
+                    Some(Err(e)) => return Poll::Ready(Err(io::Error::other(e))),
+                    None => return Poll::Ready(Err(io::ErrorKind::BrokenPipe.into())),
+                }
+            }
+        }
+
+        fn poll_flush(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<io::Result<()>> {
+            Poll::Ready(Ok(()))
+        }
+
+        fn poll_shutdown(mut self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<io::Result<()>> {
+            let _ = self.send.send_data(Bytes::new(), true);
+            Poll::Ready(Ok(()))
+        }
+    }
+
+    #[tokio::test]
+    async fn websocket_over_http2() {
+        let mut app = App::new();
+        app.ws("/echo/:name", |req, mut socket| async move {
+            let name = req.param("name").unwrap_or("?").to_owned();
+            let _ = socket
+                .send(format!("hello {name} over {:?}", req.version()))
+                .await;
+            while let Some(Ok(message)) = socket.recv().await {
+                if socket.send(message).await.is_err() {
+                    break;
+                }
+            }
+        });
+        let addr = server(app).await;
+        let tcp = TcpStream::connect(addr).await.unwrap();
+        let (client, conn) = h2::client::handshake(tcp).await.unwrap();
+        tokio::spawn(async move {
+            let _ = conn.await;
+        });
+        let mut client = client.ready().await.unwrap();
+        // Le serveur annonce SETTINGS_ENABLE_CONNECT_PROTOCOL.
+        for _ in 0..100 {
+            if client.is_extended_connect_protocol_enabled() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert!(client.is_extended_connect_protocol_enabled());
+
+        let mut req = http::Request::builder()
+            .method(Method::CONNECT)
+            .uri("http://localhost/echo/ada")
+            .header("sec-websocket-version", "13")
+            .body(())
+            .unwrap();
+        req.extensions_mut()
+            .insert(h2::ext::Protocol::from_static("websocket"));
+        let (res, send) = client.send_request(req, false).unwrap();
+        let res = res.await.unwrap();
+        assert_eq!(res.status(), 200);
+        let recv = res.into_body();
+        let tunnel = Tunnel {
+            send,
+            recv,
+            pending: Bytes::new(),
+        };
+        let mut ws = WebSocketStream::from_raw_socket(tunnel, Role::Client, None).await;
+        let hello = ws.next().await.unwrap().unwrap();
+        assert_eq!(
+            hello.into_text().unwrap().as_str(),
+            "hello ada over HTTP/2.0"
+        );
+        for text in ["un", "deux", &"x".repeat(100_000)] {
+            ws.send(Message::text(text)).await.unwrap();
+            let echo = ws.next().await.unwrap().unwrap();
+            assert_eq!(echo.into_text().unwrap().as_str(), text);
+        }
+        ws.close(None).await.unwrap();
+
+        // Une route ordinaire refuse le CONNECT étendu comme un GET sans WebSocket.
+        let mut req = http::Request::builder()
+            .method(Method::CONNECT)
+            .uri("http://localhost/nope")
+            .header("sec-websocket-version", "13")
+            .body(())
+            .unwrap();
+        req.extensions_mut()
+            .insert(h2::ext::Protocol::from_static("websocket"));
+        let (res, _send) = client.send_request(req, false).unwrap();
+        assert_eq!(res.await.unwrap().status(), 404);
+    }
+}

@@ -8,6 +8,7 @@ use http::{Method, StatusCode};
 
 use crate::error::Error;
 use crate::handler::{BoxFuture, Chain, Handler, Middleware, Next};
+use crate::proxy::TrustProxy;
 use crate::request::{Request, Shared, StateMap};
 use crate::response::{IntoResponse, Response};
 use crate::router::{MethodMap, Route, Scope, routing_methods};
@@ -44,10 +45,13 @@ pub struct App {
     error_handler: Option<Arc<dyn Fn(Error) -> Response + Send + Sync>>,
     state: StateMap,
     body_limit: usize,
+    trust_proxy: TrustProxy,
     workers: Option<usize>,
     thread_per_core: bool,
     #[cfg(feature = "http3")]
     http3: Option<crate::http3::Http3>,
+    #[cfg(feature = "tls")]
+    tls: Option<crate::tls::Tls>,
 }
 
 impl Default for App {
@@ -67,10 +71,13 @@ impl App {
             error_handler: None,
             state: StateMap::default(),
             body_limit: DEFAULT_BODY_LIMIT,
+            trust_proxy: TrustProxy::None,
             workers: None,
             thread_per_core: true,
             #[cfg(feature = "http3")]
             http3: None,
+            #[cfg(feature = "tls")]
+            tls: None,
         }
     }
 
@@ -156,6 +163,28 @@ impl App {
         self
     }
 
+    /// Declares the reverse proxies in front of the application
+    /// (`app.set('trust proxy', …)` in Express), so that [`Request::ip`],
+    /// [`Request::protocol`], [`Request::secure`] and [`Request::hostname`]
+    /// read `X-Forwarded-For`, `X-Forwarded-Proto` and `X-Forwarded-Host`.
+    ///
+    /// Only trust what your own proxies set: a client can send these headers
+    /// too. See [`TrustProxy`] for the accepted values.
+    ///
+    /// ```
+    /// use vitesse::prelude::*;
+    ///
+    /// let mut app = App::new();
+    /// app.trust_proxy("loopback, 10.0.0.0/8"); // or `true`, or a number of hops
+    /// app.get("/ip", |req: Request| async move {
+    ///     format!("{:?} over {}", req.ip(), req.protocol())
+    /// });
+    /// ```
+    pub fn trust_proxy(&mut self, trust: impl Into<TrustProxy>) -> &mut Self {
+        self.trust_proxy = trust.into();
+        self
+    }
+
     /// Number of server threads for [`App::run`] (one per core by default).
     pub fn workers(&mut self, workers: usize) -> &mut Self {
         self.workers = Some(workers.max(1));
@@ -188,6 +217,27 @@ impl App {
         self
     }
 
+    /// Serves HTTPS: every TCP connection speaks TLS (1.2 or 1.3), with
+    /// HTTP/2 for the clients that offer it when the `http2` feature is on.
+    /// See [`tls`](crate::tls).
+    ///
+    /// ```no_run
+    /// # use vitesse::prelude::*;
+    /// # fn main() -> std::io::Result<()> {
+    /// use vitesse::tls::Tls;
+    ///
+    /// let mut app = App::new();
+    /// app.get("/", |_| async { "Hello over HTTPS!" });
+    /// app.tls(Tls::from_pem_files("fullchain.pem", "privkey.pem")?);
+    /// app.run(443)
+    /// # }
+    /// ```
+    #[cfg(feature = "tls")]
+    pub fn tls(&mut self, config: crate::tls::Tls) -> &mut Self {
+        self.tls = Some(config);
+        self
+    }
+
     /// Freezes the application. It then lives until the end of the program,
     /// so requests never have to touch a reference count.
     pub(crate) fn build(self) -> &'static AppService {
@@ -212,11 +262,14 @@ impl App {
             shared: Shared {
                 state: self.state,
                 body_limit: self.body_limit,
+                trust_proxy: self.trust_proxy,
             },
             #[cfg(feature = "http3")]
             http3: self.http3,
             #[cfg(feature = "http3")]
             alt_svc: std::sync::OnceLock::new(),
+            #[cfg(feature = "tls")]
+            tls: self.tls.map(|tls| tls.acceptor()),
         }))
     }
 
@@ -270,6 +323,9 @@ pub(crate) struct AppService {
     /// HTTP/3 port is open.
     #[cfg(feature = "http3")]
     pub(crate) alt_svc: std::sync::OnceLock<Box<[u8]>>,
+    /// Set by [`App::tls`]: TCP connections start with a TLS handshake.
+    #[cfg(feature = "tls")]
+    pub(crate) tls: Option<tokio_rustls::TlsAcceptor>,
 }
 
 impl AppService {

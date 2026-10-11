@@ -1103,3 +1103,55 @@ async fn graceful_shutdown_finishes_requests() {
         .unwrap();
     assert!(tokio::net::TcpStream::connect(addr).await.is_err());
 }
+
+#[tokio::test]
+async fn trust_proxy_reads_forwarded_headers_like_express() {
+    fn app(trust: Option<vitesse::TrustProxy>) -> TestClient {
+        let mut app = App::new();
+        if let Some(trust) = trust {
+            app.trust_proxy(trust);
+        }
+        app.get("/", |req: Request| async move {
+            format!(
+                "{} {} {} {}",
+                req.ip().unwrap(),
+                req.protocol(),
+                req.hostname().unwrap_or("-"),
+                req.host().unwrap_or("-"),
+            )
+        });
+        TestClient::new(app)
+    }
+    let forwarded = |c: TestClient| async move {
+        c.get("/")
+            .header("host", "internal:8080")
+            .header("x-forwarded-for", "203.0.113.9, 10.0.0.2")
+            .header("x-forwarded-proto", "https")
+            .header("x-forwarded-host", "example.com")
+            .await
+            .text()
+    };
+
+    // Par défaut : rien n'est cru, l'adresse est celle du pair TCP.
+    assert_eq!(
+        forwarded(app(None)).await,
+        "127.0.0.1 http internal internal:8080"
+    );
+    assert_eq!(
+        forwarded(app(Some(true.into()))).await,
+        "203.0.113.9 https example.com example.com"
+    );
+    assert_eq!(
+        forwarded(app(Some(1.into()))).await,
+        "10.0.0.2 https example.com example.com"
+    );
+    assert_eq!(
+        forwarded(app(Some("loopback, 10.0.0.0/8".into()))).await,
+        "203.0.113.9 https example.com example.com"
+    );
+    // Le pair (127.0.0.1) n'est pas un proxy de confiance.
+    assert_eq!(
+        forwarded(app(Some("10.0.0.0/8".into()))).await,
+        "127.0.0.1 http internal internal:8080"
+    );
+}

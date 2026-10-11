@@ -1632,3 +1632,24 @@ async fn url_generation_errors_are_not_shown_to_clients() {
     assert_eq!(r.status(), 500);
     assert_eq!(r.text(), r#"{"error":"Internal Server Error"}"#);
 }
+
+#[tokio::test]
+async fn each_router_prefix_gets_only_its_own_middlewares() {
+    let mut versioned = Router::new();
+    versioned.middleware(|req: Request, next: Next| async move {
+        next.run(req).await.header("x-v", "1")
+    });
+    versioned.fallback(|_| async { (404, "v-api 404") });
+    let mut admin = Router::new();
+    admin.fallback(|_| async { (404, "admin 404") });
+    let mut app = App::new();
+    app.mount("/api/v:version", versioned);
+    app.mount("/api/admin", admin);
+    let c = TestClient::new(app);
+    let r = c.get("/api/admin/nope").await;
+    assert_eq!(r.text(), "admin 404");
+    assert_eq!(r.header("x-v"), None);
+    let r = c.get("/api/v2/nope").await;
+    assert_eq!(r.text(), "v-api 404");
+    assert_eq!(r.header("x-v"), Some("1"));
+}

@@ -57,7 +57,7 @@ First public release.
 - A 100% Rust repository: the website and the benchmark runner
   (`bench/runner`) are Rust.
 - The website (https://maxlestage.github.io/Vitesse/) is served by Vitesse
-  itself and written with [active](https://maxlestage.github.io/Active/):
+  itself and written with [Active](https://maxlestage.github.io/Active/):
   pages rendered on the server with complete SEO tags, interactive parts
   hydrated as WebAssembly islands, real addresses per language (`/en/`,
   `/fr/docs/routing/`…, the old `#/docs/…` links lead to them), the

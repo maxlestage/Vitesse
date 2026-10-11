@@ -297,9 +297,9 @@ docker build -t vitesse-demo . && docker run --rm -p 8080:8080 vitesse-demo
 Le dossier [`site/`](site) contient le site du projet, en français, en
 anglais et en espagnol, avec la documentation de [`docs/`](docs). Il est
 servi par Vitesse lui-même : le serveur est une application Vitesse dont les
-pages sont écrites avec [active](https://maxlestage.github.io/Active/)
+pages sont écrites avec [Active](https://maxlestage.github.io/Active/)
 (rendues sur le serveur, avec toutes les balises SEO), et les parties
-interactives sont des îlots active compilés en WebAssembly. C'est une
+interactives sont des îlots Active compilés en WebAssembly. C'est une
 Progressive Web App : il s'installe sur l'écran d'accueil d'un téléphone et
 reste lisible hors ligne. Le workflow `Site` l'exporte en fichiers statiques
 et le publie sur GitHub Pages à chaque modification sur `master`.

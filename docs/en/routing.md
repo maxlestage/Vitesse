@@ -328,8 +328,11 @@ app.get("/users/:id", |req: Request| async move {
 |---|---|---|
 | `GET /users/42` | `/users/42` | `Some("/users/:id")` |
 | `GET /api/v1/items/a/b`, router mounted at `/api/:version` with a route `/items/*path` | `/api/v1/items/a/b` | `Some("/api/:version/items/*path")` |
+| `GET /archive/2024`, route `/archive/:year?/:month?` | `/archive/2024` | `Some("/archive/:year?/:month?")` |
 | `DELETE /users/42`, with no `DELETE` route (`405`) | `/users/42` | `None` |
 | `GET /nope` (`404`) | `/nope` | `None` |
+
+The pattern is the one you declared, constraints and `?` included: `r"/users/:id(\d+)"` gives `/users/:id(\d+)`.
 
 It's what you want in logs and metrics: `/users/:id` makes one line in a dashboard, where the raw path would make one per user. Global middleware runs before routing, so there `req.route()` looks the route up on demand. Call it before `next.run(req)`, which takes the request; the result is a `&'static str`, so you can keep it afterwards:
 
@@ -346,6 +349,49 @@ app.middleware(|req: Request, next: Next| async move {
 ```
 
 In router middleware, route middleware and handlers, the route is already known and `req.route()` costs nothing.
+
+## Named routes and URL generation
+
+Writing `/users/42` by hand in every link and redirect works until the route changes. Give the route a name instead, with `.name(...)` right after it, and let Vitesse build its paths, like actix-web's `url_for`:
+
+```rust
+async fn show_user(req: Request) -> String {
+    format!("user {}", req.param("id").unwrap_or("?"))
+}
+
+async fn create_user(req: Request) -> vitesse::Result<Redirect> {
+    let id = 42; // the id of the new user
+    let link = req.path_for("user", &[&id])?; // "/users/42"
+    Ok(Redirect::see_other(link))
+}
+
+app.get("/users/:id", show_user).name("user");
+app.post("/users", create_user);
+```
+
+- `req.path_for(name, &[values])` returns the path of the named route, with its parameters filled in **in order**. The values can be anything that implements `Display`: `&[&42]`, `&[&"LAX", &"SFO"]`, `&[]` for a route without parameters.
+- `req.url_for(name, &[values])` returns the absolute URL, `https://example.com/users/42`: the same path, preceded by `req.protocol()` and `req.host()`. Behind a proxy, declare it with [`app.trust_proxy`](production.md#getting-the-clients-ip-address) so they reflect the client's view.
+
+| Route | Call | Result |
+|---|---|---|
+| `/users/:id` | `path_for("user", &[&42])` | `/users/42` |
+| `/users/:id` | `path_for("user", &[&"ada lovelace"])` | `/users/ada%20lovelace` |
+| `/flights/:from-:to` | `path_for("flight", &[&"LAX", &"SFO"])` | `/flights/LAX-SFO` |
+| `/files/*path` | `path_for("file", &[&"docs/report 2024.pdf"])` | `/files/docs/report%202024.pdf` |
+| `/archive/:year?/:month?` | `path_for("archive", &[&2024])` | `/archive/2024` |
+| `/users/:id` | `url_for("user", &[&42])` | `https://example.com/users/42` |
+
+- Values are percent-encoded, so a space becomes `%20` and a `/` becomes `%2F`. Only a wildcard keeps its `/`, since it stands for several segments.
+- Optional parameters at the end can be left out, and so can a wildcard: `path_for("archive", &[])` gives `/archive`.
+- Constraints are checked: `path_for` refuses `"ada"` for `r"/users/:id(\d+)"`.
+- The path is built when you call it, so it can go anywhere: a `Location` header, a link in `Html(...)`, a JSON field.
+
+Names are checked at two moments:
+
+- **At startup**, `name` panics if no route comes right before it (a `mount`, for instance), or if the name is already taken: names are unique across the whole application.
+- **When you call it**, `path_for` and `url_for` return a `500` error if the name is unknown, if a value is missing or extra, if a value doesn't satisfy its constraint, or (`url_for` only) if the request has no host. The message says which: `{"error":"cannot build the URL of 'user': missing a value for ':id'"}`.
+
+Routes declared in a [router](routers.md#named-routes-in-routers) can be named too. The name belongs to the whole application, and the path includes the mount prefix: its parameters come first in the list of values.
 
 ## HEAD, OPTIONS and 405
 

@@ -73,3 +73,79 @@ async fn leaves_the_rest_alone() {
         assert_ne!(res.header("content-encoding"), Some("gzip"), "{path}");
     }
 }
+
+#[tokio::test]
+async fn decompresses_request_bodies() {
+    use std::io::Write;
+
+    let mut app = App::new();
+    app.middleware(middleware::decompress());
+    app.body_limit(10_000);
+    app.post("/echo", |req: Request| async move {
+        let text = req.text().await?;
+        Ok::<_, Error>(format!(
+            "{} {}",
+            req.header("content-encoding").unwrap_or("-"),
+            text.len()
+        ))
+    });
+    let client = TestClient::new(app);
+    let text = "bonjour ".repeat(1000);
+
+    let mut gzip = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+    gzip.write_all(text.as_bytes()).unwrap();
+    let res = client
+        .post("/echo")
+        .header("content-encoding", "gzip")
+        .body(gzip.finish().unwrap())
+        .await;
+    assert_eq!(res.text(), "- 8000");
+
+    let mut br = Vec::new();
+    {
+        let mut w = brotli::CompressorWriter::new(&mut br, 4096, 5, 22);
+        w.write_all(text.as_bytes()).unwrap();
+    }
+    let res = client
+        .post("/echo")
+        .header("content-encoding", "br")
+        .body(br)
+        .await;
+    assert_eq!(res.text(), "- 8000");
+
+    let mut deflate = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default());
+    deflate.write_all(text.as_bytes()).unwrap();
+    let res = client
+        .post("/echo")
+        .header("content-encoding", "deflate")
+        .body(deflate.finish().unwrap())
+        .await;
+    assert_eq!(res.text(), "- 8000");
+
+    // Petit une fois compressé, trop gros une fois décompressé.
+    let mut bomb = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::best());
+    bomb.write_all(&vec![0u8; 1_000_000]).unwrap();
+    let bomb = bomb.finish().unwrap();
+    assert!(bomb.len() < 10_000);
+    let res = client
+        .post("/echo")
+        .header("content-encoding", "gzip")
+        .body(bomb)
+        .await;
+    assert_eq!(res.status(), 413);
+
+    let res = client
+        .post("/echo")
+        .header("content-encoding", "zstd")
+        .body("x")
+        .await;
+    assert_eq!(res.status(), 415);
+    let res = client
+        .post("/echo")
+        .header("content-encoding", "gzip")
+        .body("not gzip")
+        .await;
+    assert_eq!(res.status(), 400);
+    // Sans `Content-Encoding`, rien ne change.
+    assert_eq!(client.post("/echo").body("abc").await.text(), "- 3");
+}

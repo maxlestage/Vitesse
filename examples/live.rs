@@ -27,17 +27,29 @@ const PAGE: &str = r#"<!doctype html>
 </script>
 "#;
 
+/// Escapes text sent by the client before putting it in the page.
+fn escape(text: &str) -> String {
+    text.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&#39;")
+}
+
 async fn upload(req: Request) -> vitesse::Result<Html<String>> {
     let mut form = req.multipart()?;
     let mut lines = Vec::new();
     while let Some(field) = form.next_field().await? {
-        let name = field.name().unwrap_or("?").to_owned();
-        match field.file_name().map(str::to_owned) {
+        let name = escape(field.name().unwrap_or("?"));
+        match field.file_name().map(escape) {
             Some(file) => {
                 let size = field.bytes().await?.len();
                 lines.push(format!("<li>{name}: {file} ({size} bytes)</li>"));
             }
-            None => lines.push(format!("<li>{name} = {}</li>", field.text().await?)),
+            None => lines.push(format!(
+                "<li>{name} = {}</li>",
+                escape(&field.text().await?)
+            )),
         }
     }
     Ok(Html(format!(

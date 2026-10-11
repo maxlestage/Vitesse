@@ -84,7 +84,7 @@ Solo se reescriben las peticiones `POST`, y solo a `PUT`, `PATCH` o `DELETE`, co
 
 ## Parámetros de ruta
 
-Están explicados en detalle en [Enrutamiento](routing.md). En resumen:
+Están explicados en detalle en [Enrutamiento](routing.md#parámetros-de-ruta). En resumen:
 
 ```rust
 app.get("/users/:id/posts/:post", |req: Request| async move {

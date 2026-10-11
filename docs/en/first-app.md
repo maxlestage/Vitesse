@@ -13,8 +13,6 @@ cargo add vitesse
 cargo add serde --features derive
 ```
 
-If Vitesse isn't on crates.io yet, use `cargo add vitesse --git https://maxlestage.github.io/Vitesse/` instead (see [Installation](installation.md#add-vitesse)).
-
 ## 2. Hello World
 
 Replace `src/main.rs` with:

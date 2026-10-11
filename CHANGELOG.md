@@ -54,7 +54,7 @@ First public release.
 - A 100% Rust repository: the website and the benchmark runner
   (`bench/runner`) are Rust.
 - The website (https://maxlestage.github.io/Vitesse/) is served by Vitesse
-  itself and written with [active](https://github.com/maxlestage/Active):
+  itself and written with [active](https://maxlestage.github.io/Active/):
   pages rendered on the server with complete SEO tags, interactive parts
   hydrated as WebAssembly islands, real addresses per language (`/en/`,
   `/fr/docs/routing/`…, the old `#/docs/…` links lead to them), the
@@ -62,4 +62,4 @@ First public release.
   for GitHub Pages. It is a Progressive Web App: installable on a phone's
   home screen, and readable offline.
 
-[0.1.0]: https://github.com/maxlestage/Vitesse/releases/tag/v0.1.0
+[0.1.0]: https://crates.io/crates/vitesse/0.1.0

@@ -180,10 +180,22 @@ The login route sends `Set-Cookie: session=abc123; Path=/; Max-Age=604800; HttpO
 | `.http_only(true)` | `HttpOnly` |
 | `.same_site(SameSite::Strict / Lax / None)` | `SameSite` |
 
-Each `.cookie(...)` call adds its own `Set-Cookie` header, so you can send several. `.clear_cookie(name)` sends `name=; Path=/; Max-Age=0`: if the cookie was created with another path or domain, build the deletion cookie yourself with the same attributes and `.max_age(Duration::ZERO)`. To read cookies sent by the browser, use `req.cookie("session")` (see [Reading requests](requests.md)).
+`cookie.name()` and `cookie.value()` read a cookie back, and `cookie.with_value(value)` returns the same cookie with another value.
+
+Each `.cookie(...)` call adds its own `Set-Cookie` header, so you can send several. `.clear_cookie(name)` sends `name=; Path=/; Max-Age=0`: if the cookie was created with another path or domain, build the deletion cookie yourself with the same attributes and `.max_age(Duration::ZERO)`. To read cookies sent by the browser, use `req.cookie("session")` (see [Reading requests](requests.md#cookies)).
 
 > [!IMPORTANT]
-> The value is written as is: it is not signed, encrypted or encoded. Keep it URL-safe (a random session token, for instance) and store sensitive data on the server. Browsers only accept `SameSite::None` together with `.secure(true)`.
+> The value is written as is: it is not encrypted or encoded, and not signed unless you sign it (below). Keep it URL-safe (a random session token, for instance) and store sensitive data on the server. Browsers only accept `SameSite::None` together with `.secure(true)`.
+
+With the `session` feature and a secret (`app.cookie_secret(...)`), `req.sign_cookie(cookie)` signs a cookie before you send it, like `res.cookie(name, value, { signed: true })` in Express. The visitor can still read the value, but can't change it: `req.signed_cookie(name)` reads it back, and returns `None` for a cookie that was tampered with.
+
+```rust
+app.post("/theme/dark", |req: Request| async move {
+    res::send_status(204).cookie(req.sign_cookie(Cookie::new("theme", "dark")))
+});
+```
+
+This sends `Set-Cookie: theme=dark.<signature>; Path=/`. For data that the visitor shouldn't see, or that you must be able to revoke (who is logged in), use a session: the browser then only holds a random id. Both are covered in [Signed cookies and sessions](sessions.md).
 
 ### Redirects
 
@@ -200,6 +212,19 @@ app.post("/contact", |_| async { Redirect::see_other("/thanks") });
 ```
 
 For another status, set the header yourself: `res::status(308).header("location", "/v2")`. A URL containing invalid characters (such as a newline) produces a `500`.
+
+## Rendering templates
+
+`Html(...)` sends HTML that you built yourself. For real pages, with a layout, loops and escaping, enable the `templates` feature: `req.render(template, context)` renders a template from the folder declared with `app.views(...)`, like Express's `res.render`:
+
+```rust
+app.views("templates");
+app.get("/users", |req: Request| async move {
+    req.render("users.html", json!({ "title": "Users", "users": ["Ada", "Grace"] }))
+});
+```
+
+It returns a `Result<Html<String>, Error>`: a `200` with `content-type: text/html; charset=utf-8`, or a `500` if the template is missing or fails to render (the cause is logged). The context can be `json!` or any `Serialize` struct. Everything about it is in [HTML templates](templates.md).
 
 ## Files and downloads
 

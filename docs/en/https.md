@@ -271,7 +271,9 @@ Behind a reverse proxy that handles TLS, the connection between the proxy and Vi
 const socket = new WebSocket("wss://example.com/chat");
 ```
 
-The WebSocket connection itself uses HTTP/1.1 inside TLS: browsers open a separate HTTP/1.1 connection for it. WebSocket over HTTP/2 (RFC 8441) is not supported: a `101 Switching Protocols` answer on an HTTP/2 connection becomes `505 HTTP Version Not Supported`.
+With the `http2` feature, browsers that support it (Chrome and Firefox, for example) open the WebSocket on a stream of the HTTP/2 connection they already have with the site (RFC 8441), instead of a separate HTTP/1.1 connection. Your handlers don't change: the handshake is routed as a `GET`, gets a `200` instead of a `101`, and `req.version()` is `HTTP/2.0` in the handler. Without the `http2` feature, or with a browser that doesn't do it, the WebSocket uses its own HTTP/1.1 connection inside TLS. See [WebSocket over HTTP/2](websocket.md#websocket-over-http2).
+
+Any other protocol switch (a `101 Switching Protocols` answer to a request that isn't a WebSocket handshake) is impossible over HTTP/2 and becomes `505 HTTP Version Not Supported`.
 
 ## HTTPS and HTTP/3 together
 
@@ -318,9 +320,10 @@ Open TCP port 443 **and** UDP port 443 in the firewall (`sudo ufw allow 443`, wh
 
 Not supported:
 
-- **`Upgrade: h2c`**: those requests are answered in HTTP/1.1; use prior knowledge, or TLS;
-- **server push**: browsers have dropped it anyway;
-- **WebSocket over HTTP/2**: WebSocket uses HTTP/1.1, over TLS or not.
+- **`Upgrade: h2c`**: RFC 9113, the current HTTP/2 specification, removed this mechanism, and those requests are simply answered in HTTP/1.1; use prior knowledge, or TLS;
+- **server push**: Chrome removed it in 2022 and Firefox in 2024, and axum and actix-web don't offer it either.
+
+[WebSocket](websocket.md#websocket-over-http2) works over HTTP/2, with the `http2` feature, as well as over HTTP/1.1.
 
 ## Try it locally
 

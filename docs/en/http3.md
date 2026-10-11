@@ -192,7 +192,7 @@ On the proxy side, keep the usual configuration (see [Going to production](produ
 Under systemd, an unprivileged user can't open port 443: add `AmbientCapabilities=CAP_NET_BIND_SERVICE` to the `[Service]` section. Let's Encrypt keys are only readable by root: copy them to a folder the service's user can read (from the certbot hook that also restarts the app).
 
 > [!WARNING]
-> HTTP/3 requests don't go through the proxy: their `X-Forwarded-For` and `X-Forwarded-Proto` headers, if any, come straight from the client. Declare the proxy by its address, `app.trust_proxy("loopback")`, and Vitesse only believes these headers when they come from it: `req.ip()` is then the client's real address for both protocols (see [Going to production](production.md#getting-the-clients-ip-address)). Likewise, what the proxy does (compression, rate limiting, access logs, body size limit) doesn't apply to HTTP/3 requests: use Vitesse's middleware (`compress`, `rate_limit`) and `app.body_limit`.
+> HTTP/3 requests don't go through the proxy: their `X-Forwarded-For` and `X-Forwarded-Proto` headers, if any, come straight from the client. Declare the proxy by its address, `app.trust_proxy("loopback")`, and Vitesse only believes these headers when they come from it: `req.ip()` is then the client's real address for both protocols (see [Going to production](production.md#getting-the-clients-ip-address)). Likewise, what the proxy does (compression, rate limiting, access logs, body size limit) doesn't apply to HTTP/3 requests: use Vitesse's middleware (`compress`, `rate_limit`, `body_limit`) and `app.body_limit`, which apply to every protocol.
 
 ## `bind` and `http3_addr`
 
@@ -222,10 +222,12 @@ async fn main() -> std::io::Result<()> {
 
 ## What changes, and what isn't supported (yet)
 
-- **Request bodies** are read in full before the handler runs, up to `app.body_limit` (`413` beyond). `req.take_body()` therefore gives a body that is already in memory, not a stream: streaming request bodies over HTTP/3 is not supported yet.
+- **Request bodies** are streamed to the handler as they arrive, as over HTTP/1.1 and HTTP/2: `req.take_body()` is a real stream, `field.save(path)` writes an [upload](requests.md#file-uploads-multipart) to disk as it comes in, and the body limit is the request's own, `app.body_limit` or the route's [`middleware::body_limit`](requests.md#body-size-limit-and-413) (`413` beyond).
 - **Responses** are streamed as in HTTP/1.1 (`Body::from_stream`, files…). Vitesse adds `date` and `content-length` (when the size is known), and removes the headers specific to HTTP/1.1 (`connection`, `transfer-encoding`, `upgrade`, `keep-alive`).
 - **Threads**: with `app.run` in thread-per-core mode (the default on Linux), HTTP/3 is served by a single thread, next to the HTTP/1.1 threads. If most of your traffic is HTTP/3, compare with `app.thread_per_core(false)`.
-- **Not supported**: [WebSocket](websocket.md) over HTTP/3 (clients open WebSocket connections over HTTP/1.1), 0-RTT (early data), and streaming request bodies. HTTP/2 is available over TCP, with the `http2` feature: see [HTTPS and HTTP/2](https.md).
+- **WebSocket over HTTP/3** (RFC 9220) is not supported: the h3 crate doesn't implement it, and browsers don't rely on it. They open their [WebSockets](websocket.md#websocket-over-http2) over HTTP/2 or HTTP/1.1, on TCP, even when the page came over HTTP/3.
+- **0-RTT** (early data) is not supported, on purpose: it lets a returning client send its first request before the handshake is over, but an attacker who records that request can replay it, and a replayed `POST` could, say, place an order twice. Vitesse waits for the end of the handshake, which costs a single round trip with QUIC.
+- HTTP/2 is available over TCP, with the `http2` feature: see [HTTPS and HTTP/2](https.md).
 
 ## Firewall and hosting
 

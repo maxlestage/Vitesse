@@ -383,6 +383,65 @@ async fn reads_the_visitor_behind_the_proxy() {
 
 The same trick tests [`middleware::rate_limit`](middleware.md#rate_limit) with several clients: without `trust_proxy`, every test request shares the counter of `127.0.0.1`; with it, each `x-forwarded-for` value counts as a different visitor.
 
+## Testing sessions
+
+`TestClient` doesn't keep cookies from one request to the next: the test plays the browser. Read the `Set-Cookie` header of the response that opened the [session](sessions.md), and send its `name=value` part back in a `cookie` header:
+
+```rust
+use vitesse::test::{TestClient, TestResponse};
+
+/// The `name=value` part of the response's `Set-Cookie` header.
+fn cookie_of(res: &TestResponse) -> String {
+    let set_cookie = res.header("set-cookie").expect("no Set-Cookie header");
+    set_cookie.split(';').next().unwrap().to_owned()
+}
+
+#[tokio::test]
+async fn logs_in_and_out() {
+    let client = TestClient::new(my_api::app());
+
+    let res = client
+        .post("/login")
+        .form(&[("email", "ada@example.com"), ("password", "secret")])
+        .await;
+    let cookie = cookie_of(&res); // "vitesse.sid=…"
+
+    let res = client.get("/account").header("cookie", &cookie).await;
+    assert_eq!(res.status(), 200);
+
+    let res = client.post("/logout").header("cookie", &cookie).await;
+    assert!(res.header("set-cookie").unwrap().contains("Max-Age=0")); // deleted in the browser
+    assert_eq!(client.get("/account").header("cookie", &cookie).await.status(), 401);
+}
+```
+
+- `res.header("set-cookie")` returns the first `Set-Cookie` header. When a response sets several cookies, go through `res.headers().get_all("set-cookie")`.
+- [Signed cookies](sessions.md#signed-cookies) are tested the same way. Change the value to check that a forged cookie is refused: `cookie.replacen("dark", "light", 1)` must behave as if there were no cookie.
+- Each `TestClient::new(my_api::app())` starts with an empty `MemoryStore`, so tests don't share sessions.
+
+## Testing templates
+
+With `app.views`, a template is compiled the first time it's rendered, so a syntax error in a page only shows up when someone opens it. A test that renders each page catches it before a deployment:
+
+```rust
+use vitesse::test::TestClient;
+
+#[tokio::test]
+async fn every_page_renders() {
+    let client = TestClient::new(my_api::app());
+    for path in ["/", "/users", "/login"] {
+        let res = client.get(path).await;
+        assert_eq!(res.status(), 200, "{path}");
+        assert_eq!(res.header("content-type"), Some("text/html; charset=utf-8"));
+    }
+    assert!(client.get("/users").await.text().contains("<li>Ada</li>"));
+}
+```
+
+- `cargo test` runs the tests from the package's root, so `app.views("templates")` finds the same folder as `cargo run`.
+- A failed render is a `500`, and its cause, with the template's name and line, is printed in the test output (`[vitesse] error 500: …`).
+- To try a template on its own, give a small test app an environment with that template, `env.add_template(name, source)`, through [`app.templates(env)`](templates.md#filters-functions-and-embedded-templates-apptemplates).
+
 ## Testing Server-Sent Events
 
 `TestClient` reads the whole body before returning, so an [event stream](responses.md#server-sent-events) is easy to test as long as it ends: `res.text()` then holds every event, exactly as the browser would receive them.

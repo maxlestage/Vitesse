@@ -72,6 +72,8 @@ Some parts of Vitesse are Cargo features, which you turn on or off in `Cargo.tom
 | `http3` | Disabled | `app.http3(...)` and the `vitesse::http3` module: HTTP/3 over QUIC, see [HTTP/3 and QUIC](http3.md) |
 | `multipart` | Disabled | `req.multipart()` and the `vitesse::multipart` module: file uploads (`multipart/form-data`), see [File uploads](requests.md#file-uploads-multipart) |
 | `compress` | Disabled | `middleware::compress()` (Brotli or gzip responses) and `middleware::decompress()` (compressed request bodies), see [`compress`](middleware.md#compress) |
+| `session` | Disabled | `app.cookie_secret(...)`, signed cookies (`req.sign_cookie`, `req.signed_cookie`), `middleware::session(...)` and the `vitesse::session` module, with the hmac, sha2 and getrandom crates: see [Signed cookies and sessions](sessions.md) |
+| `templates` | Disabled | `app.views(...)`, `app.templates(...)`, `req.render(...)` and the `vitesse::templates` module, with [minijinja](https://crates.io/crates/minijinja): see [HTML templates](templates.md) |
 | `tower` | Disabled | `middleware::layer(...)`, `app.into_service()` and the `vitesse::tower` module: tower and tower-http middleware, see [Tower layers](middleware.md#tower-layers) |
 
 Everything else, Server-Sent Events (`vitesse::sse`) and the other built-in middleware included, is always available.
@@ -82,6 +84,8 @@ Everything else, Server-Sent Events (`vitesse::sse`) and the other built-in midd
 vitesse = { git = "https://github.com/maxlestage/Vitesse", features = ["tls", "http2"] }
 # A website with uploads and compression, behind a reverse proxy:
 # vitesse = { git = "https://github.com/maxlestage/Vitesse", features = ["multipart", "compress"] }
+# Server-rendered pages with logins:
+# vitesse = { git = "https://github.com/maxlestage/Vitesse", features = ["templates", "session"] }
 # Without WebSocket, to compile a little less:
 # vitesse = { git = "https://github.com/maxlestage/Vitesse", default-features = false }
 ```

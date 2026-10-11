@@ -4,7 +4,7 @@ Vitesse es un framework web minimalista para Rust que toma prestada la API de Ex
 
 ## ¿Qué es Vitesse?
 
-Vitesse («velocidad» en francés) es una biblioteca para crear servidores HTTP, sitios web y API JSON. Trae su propio motor HTTP/1.1 construido sobre [tokio](https://tokio.rs), un enrutador sin expresiones regulares, una cadena de middlewares y algunos middlewares listos para usar, además de WebSocket y, de forma opcional, HTTP/3 sobre QUIC.
+Vitesse («velocidad» en francés) es una biblioteca para crear servidores HTTP, sitios web y API JSON. Trae su propio motor HTTP/1.1 construido sobre [tokio](https://tokio.rs), un enrutador sin expresiones regulares, una cadena de middlewares y un conjunto de middlewares listos para usar, además de WebSocket y, de forma opcional, HTTPS, HTTP/2 y HTTP/3 sobre QUIC.
 
 Este es un servidor completo:
 
@@ -41,7 +41,7 @@ No necesitas ser experto en Rust. La mayoría de los handlers ocupan pocas líne
 
 ## Filosofía
 
-- **Un núcleo pequeño, como Express.** Vitesse cubre el enrutamiento, los middlewares, utilidades para leer peticiones y construir respuestas, los archivos estáticos, WebSocket y un cliente de pruebas. Base de datos, plantillas, autenticación: tú eliges tus crates.
+- **Un núcleo pequeño, como Express.** Vitesse cubre el enrutamiento, los middlewares, utilidades para leer peticiones y construir respuestas, los archivos estáticos, WebSocket y un cliente de pruebas. Base de datos, plantillas, sesiones: tú eliges tus crates.
 - **Una API conocida.** La mayoría de los conceptos de Express tienen su equivalente directo en Vitesse. La correspondencia completa está en [Viniendo de Express](from-express.md).
 - **Sin magia.** Un handler le pide a la petición lo que necesita (`req.param("id")`, `req.json().await`). Los errores son valores normales, y `?` los convierte en respuestas HTTP.
 - **Rápido por defecto.** Las cifras de abajo no requieren ningún ajuste. `app.run(3000)` ya reparte el trabajo entre todos los núcleos.
@@ -52,13 +52,16 @@ No necesitas ser experto en Rust. La mayoría de los handlers ocupan pocas líne
 - **Enrutamiento al estilo Express**: `get`, `post`, `put`, `patch`, `delete`, `all`, parámetros (`/users/:id`) y comodines (`/files/*path`). `HEAD`, `OPTIONS` y `405 Method Not Allowed` se gestionan solos.
 - **Entradas tipadas**: `req.param_as::<u64>("id")?`, `req.query_as::<T>()?`, `req.json::<T>().await?` y `req.form::<T>().await?` responden `400` o `413` automáticamente cuando la entrada no es válida.
 - **Respuestas flexibles**: devuelve un `&str`, un `String`, `Json(...)`, `json!({...})`, `Html(...)`, una tupla `(estado, cuerpo)`, un `Option` o un `Result`. También puedes construir la respuesta tú mismo con `res::status(201).header(...).json(...)`.
-- **Middlewares** en tres niveles (global, por enrutador, por ruta) con `next.run(req).await`. Incluye `logger`, `cors`, `helmet` y `timeout`.
-- **Enrutadores** que se montan bajo un prefijo, **estado compartido** para toda la aplicación y **datos por petición** que añaden los middlewares.
+- **Middlewares** en tres niveles (global, por enrutador, por ruta) con `next.run(req).await`. Incluidos: `logger`, `cors`, `helmet`, `timeout`, ids de petición, autenticación `Basic` y `Bearer`, límites de peticiones por cliente y de concurrencia, límites de cuerpo por ruta, y compresión en los dos sentidos (feature `compress`).
+- **Enrutadores** que se montan bajo un prefijo, cada uno con sus propios middlewares y su fallback, **estado compartido** para toda la aplicación y **datos por petición** que añaden los middlewares.
 - **Un único tipo de error** (`vitesse::Error`), que se convierte en `{"error": "..."}`. Con `app.on_error` puedes cambiar el formato de todas las respuestas de error.
 - **Archivos estáticos** con tipos MIME, `ETag`/`Last-Modified`, peticiones `Range`, y protección contra `../` y los archivos ocultos.
-- **Cookies, redirecciones, descargas y streaming** del cuerpo en ambos sentidos.
+- **Cookies, redirecciones, descargas y streaming** del cuerpo en ambos sentidos, **negociación de contenido** (`req.accepts(&["html", "json"])`) y **subida de archivos** (feature `multipart`) leída como flujo.
+- **Server-Sent Events** con `vitesse::sse`: envía actualizaciones en directo al `EventSource` del navegador.
 - **WebSocket** con `app.ws("/chat", |req, socket| async move { … })`, al estilo de `express-ws`: los parámetros de ruta, los middlewares y el estado funcionan como en cualquier ruta.
-- **HTTP/3 sobre QUIC**, con la feature opcional `http3`: la misma aplicación también responde por UDP, junto a HTTP/1.1.
+- **HTTPS y HTTP/2**, con las features opcionales `tls` y `http2`: sin necesidad de proxy inverso. **HTTP/3 sobre QUIC** con la feature `http3`: la misma aplicación también responde por UDP.
+- **Ajustes de producción**: keep-alive y tiempos de espera, un límite de conexiones, proxies de confianza (`app.trust_proxy`, para la dirección real del cliente), sockets Unix.
+- **Interoperabilidad con tower** (feature `tower`): usa middlewares de tower y tower-http, o sirve la aplicación como un `Service` de tower.
 - **Un `TestClient`** que prueba tu aplicación en memoria, sin abrir ningún puerto.
 - **Un runtime gestionado**: no necesitas `#[tokio::main]`. Vitesse usa un hilo por núcleo en Linux y se apaga de forma ordenada.
 
@@ -88,17 +91,21 @@ Todas estas mediciones se hicieron en una VM de 4 vCPU: el servidor fijado en 2 
 
 Como Express, Vitesse hace pocas cosas a propósito. Todavía no incluye:
 
-- HTTP/2 ni TLS sobre TCP (HTTPS). Pon Vitesse detrás de un proxy inverso como Nginx o Caddy, como se suele hacer con Express (consulta [Puesta en producción](production.md)). [HTTP/3](http3.md), en cambio, trae TLS integrado.
-- WebSocket sobre HTTP/3: [WebSocket](websocket.md) funciona sobre HTTP/1.1.
-- Compresión de respuestas.
-- Motores de plantillas.
-- Parámetros parciales dentro de un segmento, como `/vuelos/:desde-:hasta`.
+- Extractores: por diseño, un handler recibe una sola `Request` y le pide lo que necesita.
+- Motores de plantillas: usa un crate de plantillas y devuelve `Html(...)`.
+- Un almacén de sesiones integrado: usa [tower-sessions](from-axum-actix.md#sesiones-con-tower-sessions) a través de la feature `tower`.
+- WebSocket sobre HTTP/2 y HTTP/3: [WebSocket](websocket.md) funciona sobre HTTP/1.1 (`ws://` o `wss://`).
+- Parámetros parciales dentro de un segmento, como `/vuelos/:desde-:hasta`, parámetros opcionales y expresiones regulares en las rutas.
+- Generación de URL a partir de rutas con nombre.
+- Runtimes distintos de tokio.
+
+Las [preguntas frecuentes](faq.md#límites-actuales) mantienen la lista completa.
 
 ## Cómo está organizada esta documentación
 
 - **Primeros pasos**: [Instalación](installation.md) y luego [Tu primera aplicación](first-app.md), un tutorial paso a paso.
 - **Lo esencial**: [Enrutamiento](routing.md), [Leer la petición](requests.md), [Enviar la respuesta](responses.md), [Middlewares](middleware.md), [Enrutadores](routers.md), [Estado compartido](state.md), [Gestión de errores](errors.md), [Archivos estáticos](static-files.md) y [WebSocket](websocket.md).
-- **Para ir más allá**: [Pruebas](testing.md), [Configuración del servidor](server.md) (direcciones, hilos, apagado ordenado), [HTTP/3 y QUIC](http3.md), [Rendimiento](performance.md) y [Viniendo de Express](from-express.md).
+- **Para ir más allá**: [Pruebas](testing.md), [Configuración del servidor](server.md) (direcciones, hilos, tiempos de espera, apagado ordenado), [HTTPS y HTTP/2](https.md), [HTTP/3 y QUIC](http3.md), [Rendimiento](performance.md), [Viniendo de Express](from-express.md) y [Viniendo de axum o actix-web](from-axum-actix.md).
 - **Despliegue**: [Desplegar en Heroku desde el móvil](heroku-mobile.md), [Docker](docker.md) y [Puesta en producción](production.md).
 - **Referencia**: la [chuleta](cheatsheet.md) y las [preguntas frecuentes](faq.md).
 

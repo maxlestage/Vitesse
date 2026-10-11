@@ -64,7 +64,7 @@ Para una petición, el orden es: middlewares globales (`app.middleware`), luego 
 
 ### Peticiones a las que no responde ninguna ruta
 
-Los middlewares de un router también se ejecutan para las peticiones bajo su prefijo a las que no responde ninguna de sus rutas: el `404` (o tu `app.fallback`), el `405 Method Not Allowed` y la respuesta automática a `OPTIONS` (`204` con `Allow`). En el ejemplo anterior, `GET /admin/desconocido` también pasa por `require_token`: sin token, el visitante recibe un `401` y ni siquiera sabe si la página existe.
+Los middlewares de un router también se ejecutan para las peticiones bajo su prefijo a las que no responde ninguna de sus rutas: el `404` (el [fallback](#el-fallback-de-un-router) propio del router si lo tiene, o si no el de la aplicación), el `405 Method Not Allowed` y la respuesta automática a `OPTIONS` (`204` con `Allow`). En el ejemplo anterior, `GET /admin/desconocido` también pasa por `require_token`: sin token, el visitante recibe un `401` y ni siquiera sabe si la página existe.
 
 Gracias a esto, un logger o CORS en un router funcionan como cabe esperar:
 
@@ -85,6 +85,33 @@ Algunos detalles:
 - Los middlewares globales (`app.middleware`) siguen ejecutándose primero, para todas las peticiones. Con routers anidados, vienen después los middlewares del router exterior y luego los del interior.
 - Si un middleware del router reescribe la ruta de una de estas peticiones con `req.set_uri(...)`, el enrutamiento se repite con la nueva ruta.
 - Un prefijo puede contener parámetros: un router montado en `/users/:user_id/posts` cubre `/users/42/posts/...`, sea cual sea el valor de `:user_id`.
+
+## El fallback de un router
+
+Por defecto, una ruta desconocida bajo el prefijo de un router recibe el `404` de la aplicación: tu `app.fallback`, o el `{"error":"Cannot GET /nope"}` por defecto. `router.fallback(handler)` responde a esas peticiones en su lugar. Así, una API puede mantener sus errores en JSON mientras el resto del sitio muestra una página HTML:
+
+```rust
+let mut api = Router::new();
+api.get("/users", |_| async { Json(vec!["ada", "grace"]) });
+api.fallback(|req: Request| async move {
+    (404, Json(json!({ "error": format!("ninguna ruta de la API para {}", req.path()) })))
+});
+
+let mut app = App::new();
+app.mount("/api", api);
+app.fallback(|_| async { (404, Html("<h1>Página no encontrada</h1>")) });
+```
+
+| Petición | Respuesta |
+|---|---|
+| `GET /api/users` | la ruta |
+| `GET /api/nope` | el fallback del router: `404 {"error":"ninguna ruta de la API para /api/nope"}` |
+| `POST /api/users` | `405 Method Not Allowed`: la ruta existe, así que no se llama a ningún fallback |
+| `GET /nope` | el fallback de la aplicación: la página HTML |
+
+- El fallback se ejecuta después de los middlewares del router, como una de sus rutas: un router protegido por autenticación protege también su fallback, y las cabeceras que añaden sus middlewares aparecen en las respuestas del fallback.
+- Con routers anidados, gana el router más profundo que tenga fallback: un fallback en el router montado en `/api/admin` responde a `/api/admin/nope`, y el de `/api`, al resto de `/api`. Un router sin fallback usa el de su padre y, en último término, el de la aplicación.
+- Como `app.fallback`, puede responder cualquier cosa, no solo un `404`: una redirección, una página HTML o el `index.html` de una aplicación de una sola página que vive bajo el prefijo.
 
 ## Anidar routers
 
@@ -140,7 +167,7 @@ app.mount("/live", live); // ws://example.com/live/feed
 - **`mount` consume el router**. Para montar dos veces las mismas rutas (`/api/v1` y `/api/latest`, por ejemplo), construye el router en una función y llámala dos veces.
 - **Los conflictos se detectan al arrancar**: si el mismo método y la misma ruta se definen dos veces, incluso en routers distintos, el programa entra en pánico nada más iniciarse, con un mensaje como `duplicate route: GET /api/x is already defined`.
 - **La prioridad de las rutas** es global: un segmento estático gana a un parámetro, que gana a un comodín (`/users/new` antes que `/users/:id`), venga del router que venga.
-- El handler de respaldo (`app.fallback`), el manejador de errores (`app.on_error`) y el estado (`app.state`) pertenecen a la aplicación, no a los routers.
+- El manejador de errores (`app.on_error`) y el estado (`app.state`) pertenecen a la aplicación, no a los routers. Un router sí puede tener su propio [fallback](#el-fallback-de-un-router), que responde antes que `app.fallback`.
 
 ## Organizar un proyecto
 

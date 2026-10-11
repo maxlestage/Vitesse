@@ -11,6 +11,8 @@ use crate::tree::parse_pattern;
 pub(crate) struct Route {
     pub(crate) handler: Arc<dyn Handler>,
     pub(crate) names: Box<[Box<str>]>,
+    /// The full pattern, mount prefix included (`/api/users/:id`).
+    pub(crate) pattern: Box<str>,
 }
 
 /// The handlers of a single path, by HTTP method.
@@ -262,16 +264,16 @@ macro_rules! routing_methods {
         /// Its middlewares run for its own routes, and, as in Express, for
         /// every other request under the prefix that no route answers (the
         /// `404`, `405` and automatic `OPTIONS` responses): a CORS or logging
-        /// middleware on the router covers its whole prefix.
+        /// middleware on the router covers its whole prefix. So does its
+        /// [`fallback`](crate::Router::fallback), if it has one.
         #[track_caller]
         pub fn mount(&mut self, prefix: &str, router: $crate::Router) -> &mut Self {
             let (routes, scopes) = router.into_parts();
             for (method, path, handler) in routes {
                 self.add_route(method, &$crate::router::join_paths(prefix, &path), handler);
             }
-            for (path, middlewares) in scopes {
-                self.scopes
-                    .push(($crate::router::join_paths(prefix, &path), middlewares));
+            for scope in scopes {
+                self.scopes.push(scope.under(prefix));
             }
             self
         }
@@ -325,13 +327,26 @@ pub(crate) use routing_methods;
 pub struct Router {
     routes: Vec<(Option<Method>, String, Arc<dyn Handler>)>,
     middlewares: Vec<Arc<dyn Middleware>>,
+    fallback: Option<Arc<dyn Handler>>,
     /// Middlewares of the routers mounted inside this one, by prefix.
     pub(crate) scopes: Vec<Scope>,
 }
 
-/// The middlewares of a mounted router, with its prefix: they also run for
-/// the requests under that prefix that no route answers.
-pub(crate) type Scope = (String, Vec<Arc<dyn Middleware>>);
+/// The middlewares and the fallback of a mounted router, with its prefix:
+/// they also apply to the requests under that prefix that no route answers.
+pub(crate) struct Scope {
+    pub(crate) prefix: String,
+    pub(crate) middlewares: Vec<Arc<dyn Middleware>>,
+    pub(crate) fallback: Option<Arc<dyn Handler>>,
+}
+
+impl Scope {
+    /// The same scope, mounted under `prefix`.
+    pub(crate) fn under(mut self, prefix: &str) -> Scope {
+        self.prefix = join_paths(prefix, &self.prefix);
+        self
+    }
+}
 
 impl Router {
     /// Creates an empty router.
@@ -344,6 +359,28 @@ impl Router {
     /// Adds a middleware to every route of this router.
     pub fn middleware<M: Middleware>(&mut self, middleware: M) -> &mut Self {
         self.middlewares.push(Arc::new(middleware));
+        self
+    }
+
+    /// Sets the handler called when no route of this router matches a path
+    /// under its prefix (the application's [`fallback`](crate::App::fallback)
+    /// otherwise), after the router's middlewares. A path that exists with
+    /// another method still gets `405`.
+    ///
+    /// ```
+    /// use vitesse::prelude::*;
+    ///
+    /// let mut api = Router::new();
+    /// api.get("/users", |_| async { Json(vec!["ada"]) });
+    /// api.fallback(|req: Request| async move {
+    ///     (404, Json(json!({ "error": format!("no API route for {}", req.path()) })))
+    /// });
+    ///
+    /// let mut app = App::new();
+    /// app.mount("/api", api); // /api/nope: JSON 404; /nope: the app's 404
+    /// ```
+    pub fn fallback<H: Handler>(&mut self, handler: H) -> &mut Self {
+        self.fallback = Some(Arc::new(handler));
         self
     }
 
@@ -364,20 +401,29 @@ impl Router {
         let Router {
             routes,
             middlewares,
+            fallback,
             scopes: inner,
         } = self;
-        if middlewares.is_empty() {
+        if middlewares.is_empty() && fallback.is_none() {
             return (routes, inner);
         }
-        let routes = routes
-            .into_iter()
-            .map(|(method, path, handler)| {
-                let chained: Arc<dyn Handler> =
-                    Arc::new(Chained::new(middlewares.clone(), handler));
-                (method, path, chained)
-            })
-            .collect();
-        let mut scopes = vec![("/".to_owned(), middlewares)];
+        let routes = if middlewares.is_empty() {
+            routes
+        } else {
+            routes
+                .into_iter()
+                .map(|(method, path, handler)| {
+                    let chained: Arc<dyn Handler> =
+                        Arc::new(Chained::new(middlewares.clone(), handler));
+                    (method, path, chained)
+                })
+                .collect()
+        };
+        let mut scopes = vec![Scope {
+            prefix: "/".to_owned(),
+            middlewares,
+            fallback,
+        }];
         scopes.extend(inner);
         (routes, scopes)
     }

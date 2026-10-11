@@ -1155,3 +1155,82 @@ async fn trust_proxy_reads_forwarded_headers_like_express() {
         "127.0.0.1 http internal internal:8080"
     );
 }
+
+#[tokio::test]
+async fn matched_route_pattern() {
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let log = seen.clone();
+    let mut app = App::new();
+    // Avant le routage, la route est cherchée à la demande.
+    app.middleware(move |req: Request, next: Next| {
+        let log = log.clone();
+        async move {
+            log.lock()
+                .unwrap()
+                .push(req.route().unwrap_or("-").to_owned());
+            next.run(req).await
+        }
+    });
+    let route = |req: Request| async move { req.route().unwrap_or("-").to_owned() };
+    app.get("/users/:id", route);
+    let mut api = Router::new();
+    api.get("/items/*path", route);
+    api.middleware(|req: Request, next: Next| async move {
+        let route = req.route().unwrap_or("-").to_owned();
+        next.run(req).await.header("x-route", route)
+    });
+    app.mount("/api/:version", api);
+
+    let c = TestClient::new(app);
+    assert_eq!(c.get("/users/42").await.text(), "/users/:id");
+    let r = c.get("/api/v1/items/a/b").await;
+    assert_eq!(r.text(), "/api/:version/items/*path");
+    assert_eq!(r.header("x-route"), Some("/api/:version/items/*path"));
+    assert_eq!(c.get("/nope").await.status(), 404);
+    assert_eq!(
+        *seen.lock().unwrap(),
+        ["/users/:id", "/api/:version/items/*path", "-"]
+    );
+}
+
+#[tokio::test]
+async fn router_fallbacks_cover_their_prefix() {
+    let mut api = Router::new();
+    api.get("/users", |_| async { "users" });
+    api.middleware(
+        |req: Request, next: Next| async move { next.run(req).await.header("x-api", "1") },
+    );
+    api.fallback(|req: Request| async move {
+        (
+            404,
+            Json(json!({ "error": format!("no API route {}", req.path()) })),
+        )
+    });
+    let mut admin = Router::new();
+    admin.get("/", |_| async { "admin" });
+    admin.fallback(|_| async { (404, "admin 404") });
+    api.mount("/admin", admin);
+    let mut docs = Router::new();
+    docs.get("/", |_| async { "docs" });
+
+    let mut app = App::new();
+    app.mount("/api", api);
+    app.mount("/docs", docs);
+    app.fallback(|_| async { (404, Html("<h1>404</h1>")) });
+    let c = TestClient::new(app);
+
+    let r = c.get("/api/nope").await;
+    assert_eq!(r.status(), 404);
+    assert_eq!(r.text(), r#"{"error":"no API route /api/nope"}"#);
+    assert_eq!(r.header("x-api"), Some("1"));
+    // Le chemin existe avec une autre méthode : 405, pas le fallback.
+    assert_eq!(c.post("/api/users").await.status(), 405);
+    // Le routeur le plus profond l'emporte.
+    let r = c.get("/api/admin/x").await;
+    assert_eq!(r.text(), "admin 404");
+    assert_eq!(r.header("x-api"), Some("1"));
+    assert_eq!(c.get("/api/admin").await.text(), "admin");
+    // Sans fallback, le routeur laisse celui de l'application.
+    assert_eq!(c.get("/docs/nope").await.text(), "<h1>404</h1>");
+    assert_eq!(c.get("/elsewhere").await.text(), "<h1>404</h1>");
+}

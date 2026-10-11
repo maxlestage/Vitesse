@@ -1,5 +1,5 @@
 //! Le benchmark de Vitesse contre actix-web, axum et Drogon (C++), avec
-//! [wrk](https://github.com/wg/wrk).
+//! wrk.
 //!
 //! ```sh
 //! cargo run --release --manifest-path bench/runner/Cargo.toml -- [durée] [connexions]

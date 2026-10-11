@@ -8,9 +8,7 @@ use super::Site;
 use super::docs::Doc;
 use super::{csp, pwa};
 use crate::catalog::{self, CATEGORIES};
-use crate::data::{
-    AUTHOR, AUTHOR_URL, CRATES, ECOSYSTEM, FEATURES, GITHUB, HEROKU_DEPLOY, INSTALL, LICENSE,
-};
+use crate::data::{AUTHOR, CRATES, DOCS_RS, ECOSYSTEM, FEATURES, INSTALL, LICENSE_PATH};
 use crate::highlight::{to_html, tokenize};
 use crate::i18n::{Lang, Texts, number};
 use crate::icons::{icon, logo};
@@ -345,15 +343,6 @@ fn site_header(ctx: &Ctx<'_>) -> Element {
         )
         .child(lang_switch(ctx))
         .child(
-            magnetic(
-                GITHUB,
-                "btn btn--ghost nav__cta",
-                true,
-                vec![icon("github").into(), span().text("GitHub").into()],
-            )
-            .attr("data-strength", "0.25"),
-        )
-        .child(
             button()
                 .class("nav__burger")
                 .attr("type", "button")
@@ -390,12 +379,7 @@ fn site_menu(ctx: &Ctx<'_>) -> Element {
                         .enumerate()
                         .map(|(i, (id, text))| item(i, home_href(lang, id), text)),
                 )
-                .child(item(4, docs_href(lang), t.docs_title))
-                .child(
-                    item(5, GITHUB.to_owned(), "GitHub")
-                        .attr("target", "_blank")
-                        .attr("rel", "noopener"),
-                ),
+                .child(item(4, docs_href(lang), t.docs_title)),
         )
 }
 
@@ -406,29 +390,16 @@ fn site_footer(ctx: &Ctx<'_>) -> Element {
     let t = ctx.t();
     let lang = ctx.lang();
     let external = |link: Element| link.attr("target", "_blank").attr("rel", "noopener");
-    let project = vec![
-        GITHUB.to_owned(),
-        format!("{GITHUB}/tree/master/bench"),
-        format!("{GITHUB}/tree/master/examples"),
-        format!("{GITHUB}/tree/master/site"),
-        LICENSE.to_owned(),
-    ];
+    let project = vec![CRATES.to_owned(), DOCS_RS.to_owned(), link(LICENSE_PATH)];
     let docs = vec![
         docs_href(lang),
         doc_href(lang, "from-express", None),
         doc_href(lang, "performance", None),
         doc_href(lang, "heroku-mobile", None),
     ];
-    let community = vec![
-        format!("{GITHUB}/issues/new"),
-        format!("{GITHUB}/issues"),
-        format!("{GITHUB}/pulls"),
-        format!("{GITHUB}/commits/master"),
-    ];
-    let columns: [(&str, &[&str], Vec<String>, bool); 3] = [
+    let columns: [(&str, &[&str], Vec<String>, bool); 2] = [
         (t.footer_cols[0], &t.footer_project, project, true),
         (t.footer_cols[1], &t.footer_docs, docs, false),
-        (t.footer_cols[2], &t.footer_community, community, true),
     ];
     let pitch = div()
         .class("footer__pitch")
@@ -526,14 +497,14 @@ fn site_footer(ctx: &Ctx<'_>) -> Element {
         .class("footer__credits")
         .attr("data-reveal", "")
         .child(p().class("footer__by").text(t.footer_by))
-        .child(external(
-            a().class("footer__name").href(AUTHOR_URL).children(
+        .child(
+            p().class("footer__name").children(
                 AUTHOR
                     .split(' ')
                     .enumerate()
                     .map(|(i, word)| span().style(format!("--i:{i}")).text(word.to_owned())),
             ),
-        ))
+        )
         .child(p().class("footer__crafted").text(t.footer_crafted));
     footer()
         .class("footer")
@@ -557,7 +528,9 @@ fn site_footer(ctx: &Ctx<'_>) -> Element {
             div()
                 .class("footer__bottom")
                 .child(span().text(t.footer_rights))
-                .child(external(a().href(LICENSE).text(t.footer_proprietary)))
+                .child(external(
+                    a().href(link(LICENSE_PATH)).text(t.footer_proprietary),
+                ))
                 .child(span().text(t.footer_built))
                 .child(island("clock", lang.code(), crate::islands::clock))
                 .child(
@@ -1000,12 +973,6 @@ fn start(lang: Lang, t: &Texts) -> Element {
                     "btn btn--primary",
                     false,
                     vec![icon("book").into(), span().text(t.start_docs).into()],
-                ))
-                .child(magnetic(
-                    HEROKU_DEPLOY,
-                    "btn btn--ghost",
-                    true,
-                    vec![icon("phone").into(), span().text(t.start_heroku).into()],
                 )),
         )
 }
@@ -1038,13 +1005,7 @@ fn cta(lang: Lang, t: &Texts) -> Element {
                         label_arrow(t.cta_start),
                     )
                     .attr("data-cursor", "Go"),
-                )
-                .child(magnetic(
-                    GITHUB,
-                    "btn btn--ghost btn--lg",
-                    true,
-                    vec![icon("github").into(), span().text(t.cta_star).into()],
-                )),
+                ),
         )
 }
 
@@ -1059,8 +1020,9 @@ fn home(ctx: &Ctx<'_>) -> String {
         ctx.route,
     )
     .json_ld(format!(
-        r#"{{"@context":"https://schema.org","@type":"SoftwareSourceCode","name":"Vitesse","description":"{}","codeRepository":"{GITHUB}","programmingLanguage":"Rust","license":"{LICENSE}","author":{{"@type":"Person","name":"{AUTHOR}","url":"{AUTHOR_URL}"}},"url":"{}/{}/"}}"#,
+        r#"{{"@context":"https://schema.org","@type":"SoftwareSourceCode","name":"Vitesse","description":"{}","programmingLanguage":"Rust","license":"{}{LICENSE_PATH}","author":{{"@type":"Person","name":"{AUTHOR}"}},"url":"{}/{}/"}}"#,
         json(t.meta_description),
+        ctx.origin,
         ctx.origin,
         lang.code()
     ))
@@ -1301,19 +1263,6 @@ fn doc_page(ctx: &Ctx<'_>, slug: &'static str) -> String {
         }))
         .child(div().class("doc-body").html(doc.html.clone()))
         .child(
-            div().class("doc-foot").child(
-                a().class("doc-edit")
-                    .attr("target", "_blank")
-                    .attr("rel", "noopener")
-                    .href(format!(
-                        "{GITHUB}/edit/master/docs/{}/{slug}.md",
-                        lang.code()
-                    ))
-                    .child(icon("edit"))
-                    .child(span().text(t.docs_edit)),
-            ),
-        )
-        .child(
             nav()
                 .class("doc-pager")
                 .child(pager(prev, t.docs_prev, "doc-pager__link--prev", "prev"))
@@ -1430,15 +1379,77 @@ pub fn offline(site: &Site, origin: &str) -> String {
 
 /// `/` d'un hébergement statique : le choix de la langue (l'îlot `root` emmène
 /// aussitôt le visiteur vers la sienne).
-pub fn root(site: &Site, origin: &str) -> String {
+/// Une chaîne JavaScript qui ne peut pas fermer l'élément `<script>`.
+fn js_string(s: &str) -> String {
+    let mut out = String::from("\"");
+    for c in s.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '<' => out.push_str("\\u003c"),
+            '\n' => out.push_str("\\n"),
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
+}
+
+/// Le script des pages qu'un hébergeur statique sert sans connaître la langue du visiteur :
+/// va dans `/{langue}/{target}` pour la langue de l'adresse (`/fr/…` sur une page
+/// introuvable), sinon celle du cookie, sinon celle du navigateur, sinon l'anglais. Sans
+/// JavaScript, un `<meta>` envoie vers l'anglais. Une ancienne adresse `#/…` est laissée à
+/// l'îlot de la racine, qui la traduit.
+fn language_redirect(target: &str) -> String {
+    let codes: Vec<String> = Lang::ALL.iter().map(|l| js_string(l.code())).collect();
+    format!(
+        concat!(
+            "<script>(function(){{if({root}&&/^#\\//.test(location.hash))return;",
+            "var b={base},L=[{codes}],c=null;",
+            "var s=location.pathname.slice(b.length).split('/').filter(Boolean)[0];",
+            "if(L.indexOf(s)>=0)c=s;",
+            "var m=document.cookie.match(/(?:^|; ){cookie}=([a-z]{{2}})/);",
+            "if(!c&&m&&L.indexOf(m[1])>=0)c=m[1];",
+            "var l=navigator.languages||[navigator.language||''];",
+            "for(var i=0;i<l.length&&!c;i++){{var x=String(l[i]).slice(0,2).toLowerCase();",
+            "if(L.indexOf(x)>=0)c=x}}",
+            "location.replace(b+'/'+(c||'en')+'/'+{target}+location.search+location.hash)}})()</script>",
+            r#"<noscript><meta http-equiv="refresh" content="0; url={fallback}"/></noscript>"#,
+        ),
+        root = if target.is_empty() { "true" } else { "false" },
+        base = js_string(base()),
+        codes = codes.join(","),
+        cookie = super::LANG_COOKIE,
+        target = js_string(target),
+        fallback = link(&format!("/en/{target}")),
+    )
+}
+
+/// La page qu'un hébergeur statique sert à la racine (`target` vide) et pour une adresse
+/// introuvable (`target` = `404/`) : elle va d'elle-même dans la langue du visiteur et lie
+/// les langues.
+pub fn root(site: &Site, origin: &str, target: &str) -> String {
     let en = Lang::En.texts();
     let choose: Vec<&str> = Lang::ALL.iter().map(|l| l.texts().lang_choose).collect();
-    let body = div()
+    let mut body = div()
         .class("standalone__card card")
+        .child(div().html(language_redirect(target)))
         .child(span().class("standalone__logo").child(logo()))
         .child(h1().text("Vitesse"))
-        .child(p().text(choose.join(" · ")))
-        .child(island("root", "", crate::islands::root));
+        .child(p().text(choose.join(" · ")));
+    body = if target.is_empty() {
+        body.child(island("root", "", crate::islands::root))
+    } else {
+        body.child(ul().class("root__langs").children(Lang::ALL.map(|l| {
+            li().child(
+                a().href(link(&format!("/{}/{target}", l.code())))
+                    .attr("hreflang", l.code())
+                    .attr("lang", l.code())
+                    .child(span().class("root__code").text(l.code().to_uppercase()))
+                    .child(span().text(l.name())),
+            )
+        })))
+    };
     standalone(site, origin, en.meta_title, en.meta_description, body)
 }
 

@@ -375,7 +375,7 @@ See [Server configuration](server.md) and [Performance](performance.md) for more
 - **Error messages**: details of `5xx` errors are never sent to clients, but the messages of the errors you create (`Error::bad_request("…")`) are: don't put anything sensitive in them.
 - **Static files**: `ServeDir` rejects `../` and hidden files (`.env`, `.git`) by default; still, serve a dedicated folder, never the project root.
 - **Secrets** live in environment variables or a secret manager, never in the repository or the image.
-- **Dependencies**: update them regularly (`cargo update`) and check security advisories with [cargo-audit](https://github.com/rustsec/rustsec/tree/main/cargo-audit).
+- **Dependencies**: update them regularly (`cargo update`) and check security advisories with cargo-audit.
 
 ### CORS and cookies
 

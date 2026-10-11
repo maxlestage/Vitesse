@@ -4,7 +4,7 @@ Un WebSocket mantiene una conexión abierta en los dos sentidos, así que el ser
 
 ## Preparación
 
-El soporte de WebSocket es la feature de Cargo `ws`, **activada por defecto**: con `vitesse = "0.1"` no necesitas nada más. Se apoya en [tokio-tungstenite](https://github.com/snapview/tokio-tungstenite), la implementación en Rust validada con la batería de pruebas Autobahn. El handshake (RFC 6455) y la entrega de la conexión TCP tras la respuesta `101 Switching Protocols` los realiza el propio motor HTTP/1.1 de Vitesse.
+El soporte de WebSocket es la feature de Cargo `ws`, **activada por defecto**: con `vitesse = "0.1"` no necesitas nada más. Se apoya en tokio-tungstenite, la implementación en Rust validada con la batería de pruebas Autobahn. El handshake (RFC 6455) y la entrega de la conexión TCP tras la respuesta `101 Switching Protocols` los realiza el propio motor HTTP/1.1 de Vitesse.
 
 Si no necesitas WebSocket, desactiva las features por defecto para compilar un poco menos:
 
@@ -38,7 +38,7 @@ fn main() -> std::io::Result<()> {
 }
 ```
 
-El handler recibe la petición y el socket abierto, y la conexión vive mientras el handler se ejecute. `ws` está en el preludio, de ahí `ws::Message`. Para probarlo, usa [websocat](https://github.com/vi/websocat), un cliente WebSocket para la terminal escrito en Rust (`cargo install websocat`):
+El handler recibe la petición y el socket abierto, y la conexión vive mientras el handler se ejecute. `ws` está en el preludio, de ahí `ws::Message`. Para probarlo, usa [websocat](https://crates.io/crates/websocat), un cliente WebSocket para la terminal escrito en Rust (`cargo install websocat`):
 
 ```sh
 websocat ws://localhost:3000/echo
@@ -246,7 +246,7 @@ app.ws("/countdown", |_req, socket| async move {
 
 ## Una sala de chat
 
-El ejemplo [`examples/chat.rs`](https://github.com/maxlestage/Vitesse/blob/master/examples/chat.rs) del repositorio es una sala de chat completa: cada mensaje que envía un cliente se difunde a todos los demás. Esta es su ruta WebSocket:
+El ejemplo `examples/chat.rs` del repositorio es una sala de chat completa: cada mensaje que envía un cliente se difunde a todos los demás. Esta es su ruta WebSocket:
 
 ```rust
 use tokio::sync::broadcast;
@@ -378,7 +378,7 @@ Los proxies y las plataformas cierran las conexiones que pasan demasiado tiempo 
 
 ## Viniendo de Express
 
-Con [express-ws](https://github.com/HenningM/express-ws):
+Con express-ws:
 
 ```js
 const expressWs = require('express-ws');

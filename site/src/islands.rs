@@ -4,7 +4,7 @@
 
 use active::prelude::*;
 
-use crate::data::{GITHUB, SCENARIOS, SERVERS};
+use crate::data::{SCENARIOS, SERVERS};
 use crate::highlight::{to_html, tokenize, truncate};
 use crate::i18n::{Lang, number};
 use crate::icons::icon;
@@ -155,14 +155,7 @@ pub fn bench(props: &str) -> Node {
                             }))
                     })),
             )
-            .child(
-                p().class("bench__note").text(l.bench_note).child(
-                    a().href(format!("{GITHUB}/tree/master/bench"))
-                        .attr("target", "_blank")
-                        .attr("rel", "noopener")
-                        .text(l.bench_reproduce),
-                ),
-            )
+            .child(p().class("bench__note").text(l.bench_note))
             .into(),
     ])
 }

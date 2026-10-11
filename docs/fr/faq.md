@@ -1,6 +1,6 @@
 # FAQ et limites
 
-Les réponses aux questions les plus fréquentes sur Vitesse, suivies d'une liste honnête de ce qu'il ne fait pas (encore). Si votre question n'y figure pas, ouvrez une issue sur [GitHub](https://github.com/maxlestage/Vitesse/issues).
+Les réponses aux questions les plus fréquentes sur Vitesse, suivies d'une liste honnête de ce qu'il ne fait pas (encore). Si votre question n'y figure pas, ouvrez une issue sur GitHub.
 
 ## Généralités
 
@@ -8,11 +8,11 @@ Les réponses aux questions les plus fréquentes sur Vitesse, suivies d'une list
 
 Vitesse est jeune (version 0.1), mais son moteur a été pensé pour la production dès le départ : la suite de tests couvre le moteur HTTP en détail (pipelining, corps `chunked`, `Expect: 100-continue`, limites de taille, arrêt propre) et tourne sous Linux, macOS et Windows à chaque modification. Les paniques deviennent des réponses `500` au lieu de faire tomber le serveur, les requêtes malformées sont rejetées, et `SIGTERM` laisse finir les requêtes en cours.
 
-D'ici la version 1.0, l'API peut encore évoluer d'une version mineure à l'autre. Dépendez de `vitesse = "0.1"` (Cargo n'installe alors que les mises à jour compatibles `0.1.x`), lisez le [journal des modifications](https://github.com/maxlestage/Vitesse/blob/master/CHANGELOG.md) avant de mettre à jour, placez un reverse proxy devant pour le HTTPS (voir [Production](production.md)), et faites des tests de charge avec votre propre trafic.
+D'ici la version 1.0, l'API peut encore évoluer d'une version mineure à l'autre. Dépendez de `vitesse = "0.1"` (Cargo n'installe alors que les mises à jour compatibles `0.1.x`), lisez le journal des modifications avant de mettre à jour, placez un reverse proxy devant pour le HTTPS (voir [Production](production.md)), et faites des tests de charge avec votre propre trafic.
 
 ### Le projet est-il vraiment 100 % Rust ?
 
-Oui : le framework, les exemples, l'outil de benchmark (`bench/runner`) et le site (servi par Vitesse lui-même, avec des pages et des îlots WebAssembly écrits avec [active](https://github.com/maxlestage/Active)) sont en Rust, et le dépôt ne contient ni JavaScript ni TypeScript. Deux nuances, pour être précis :
+Oui : le framework, les exemples, l'outil de benchmark (`bench/runner`) et le site (servi par Vitesse lui-même, avec des pages et des îlots WebAssembly écrits avec [active](https://maxlestage.github.io/Active/)) sont en Rust, et le dépôt ne contient ni JavaScript ni TypeScript. Deux nuances, pour être précis :
 
 - un navigateur ne peut pas démarrer du WebAssembly sans quelques lignes de JavaScript, et il n'exécute un service worker (ce qui fait marcher le site hors ligne) que sous forme de script : la compilation du site (wasm-bindgen) génère donc un petit fichier de chargement, et le serveur du site génère son service worker ; aucun des deux n'est écrit à la main ni stocké dans le dépôt ;
 - la documentation montre des extraits Express (JavaScript), mais uniquement en guise de comparaison avant/après pour les personnes qui viennent d'Express.
@@ -26,7 +26,7 @@ Ce sont deux excellents frameworks, matures. Vitesse est un bon choix si :
 - vous venez d'Express et voulez garder la même façon de penser : une seule `Request`, des middlewares avec `next`, des routeurs, et des handlers qui renvoient simplement leur réponse, sans extracteurs ni couches de services à apprendre ;
 - vous voulez les meilleures performances : dans le [benchmark](performance.md), Vitesse traite plus de requêtes par seconde que les deux, avec moins de CPU par requête.
 
-Préférez actix-web ou axum si vous avez besoin de ce que Vitesse ne fait pas (encore) : HTTP/2 ou TLS sur TCP intégrés, l'écosystème de middlewares [tower](https://github.com/tower-rs/tower), ou une API 1.x stable.
+Préférez actix-web ou axum si vous avez besoin de ce que Vitesse ne fait pas (encore) : HTTP/2 ou TLS sur TCP intégrés, l'écosystème de middlewares [tower](https://crates.io/crates/tower), ou une API 1.x stable.
 
 ### En quoi est-il différent d'Express ?
 
@@ -111,7 +111,7 @@ Compilez un binaire en mode release (`cargo build --release`), écoutez sur le p
 
 ### Comment signaler un bug ou contribuer ?
 
-Ouvrez une issue sur [GitHub](https://github.com/maxlestage/Vitesse/issues), avec votre version de Vitesse, votre système et, idéalement, un exemple minimal qui reproduit le problème. Les pull requests sont aussi les bienvenues ; pour un changement important, ouvrez d'abord une issue pour en discuter. Avant de proposer vos modifications, lancez les mêmes vérifications que la CI :
+Ouvrez une issue sur GitHub, avec votre version de Vitesse, votre système et, idéalement, un exemple minimal qui reproduit le problème. Les pull requests sont aussi les bienvenues ; pour un changement important, ouvrez d'abord une issue pour en discuter. Avant de proposer vos modifications, lancez les mêmes vérifications que la CI :
 
 ```sh
 cargo fmt --check
@@ -119,11 +119,11 @@ cargo clippy --all-targets -- -D warnings
 cargo test
 ```
 
-La documentation se trouve dans [`docs/`](https://github.com/maxlestage/Vitesse/tree/master/docs), en anglais, en français et en espagnol : quand vous modifiez une page, mettez aussi à jour les autres langues, ou signalez-le dans votre pull request.
+La documentation se trouve dans `docs/`, en anglais, en français et en espagnol : quand vous modifiez une page, mettez aussi à jour les autres langues, ou signalez-le dans votre pull request.
 
 ### Quelle est la licence ?
 
-Vitesse est un logiciel propriétaire : © Maxime Nathan Lestage, tous droits réservés. Son code source est publié sur crates.io et GitHub pour que vous puissiez le lire, l'auditer et le compiler, et vous pouvez l'utiliser librement comme dépendance de vos propres programmes, y compris commerciaux. Le modifier ou redistribuer son code source demande l'accord écrit de l'auteur. Les conditions complètes sont dans le fichier [LICENSE](https://github.com/maxlestage/Vitesse/blob/master/LICENSE) du dépôt.
+Vitesse est un logiciel propriétaire : © Maxime Nathan Lestage, tous droits réservés. Son code source est publié sur crates.io et GitHub pour que vous puissiez le lire, l'auditer et le compiler, et vous pouvez l'utiliser librement comme dépendance de vos propres programmes, y compris commerciaux. Le modifier ou redistribuer son code source demande l'accord écrit de l'auteur. Les conditions complètes sont dans le fichier [LICENSE](https://maxlestage.github.io/Vitesse/LICENSE.txt) du dépôt.
 
 ## Limites actuelles
 

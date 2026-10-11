@@ -82,7 +82,7 @@ En resumen:
 - **Frente a Drogon (C++)**: entre 1,4 y 3,8 veces más rápido.
 - **Frente a Express**: unas 50 veces más rápido.
 
-Todas estas mediciones se hicieron en una VM de 4 vCPU: el servidor fijado en 2 núcleos, [wrk](https://github.com/wg/wrk) en los otros 2, 128 conexiones keep-alive y 10 s por escenario. El servidor Express usado para estas cifras se retiró después del repositorio para que siga siendo 100 % Rust (sigue en el historial de git), y el benchmark compara ahora Drogon, axum, actix-web y Vitesse. La página de [Rendimiento](performance.md) explica la metodología, cómo reproducir las cifras (con la herramienta en Rust de `bench/runner`) y por qué Vitesse es tan rápido. Los resultados en bruto también están en el [README](https://github.com/maxlestage/Vitesse#benchmark).
+Todas estas mediciones se hicieron en una VM de 4 vCPU: el servidor fijado en 2 núcleos, wrk en los otros 2, 128 conexiones keep-alive y 10 s por escenario. El servidor Express usado para estas cifras se retiró después del repositorio para que siga siendo 100 % Rust (sigue en el historial de git), y el benchmark compara ahora Drogon, axum, actix-web y Vitesse. La página de [Rendimiento](performance.md) explica la metodología, cómo reproducir las cifras (con la herramienta en Rust de `bench/runner`) y por qué Vitesse es tan rápido. Los resultados en bruto también están en el README.
 
 ## Limitaciones actuales
 
@@ -105,4 +105,4 @@ Como Express, Vitesse hace pocas cosas a propósito. Todavía no incluye:
 > [!TIP]
 > Si ya conoces bien Express, haz [Tu primera aplicación](first-app.md) y luego ten a mano [Viniendo de Express](from-express.md) mientras escribes tus propias rutas.
 
-La referencia completa de la API se genera a partir del código fuente. Ejecuta `cargo doc --open` en un proyecto que dependa de Vitesse, o explora el código en [GitHub](https://github.com/maxlestage/Vitesse).
+La referencia completa de la API se genera a partir del código fuente. Ejecuta `cargo doc --open` en un proyecto que dependa de Vitesse, o explora el código en [GitHub](https://maxlestage.github.io/Vitesse/).

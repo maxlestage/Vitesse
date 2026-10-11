@@ -30,8 +30,6 @@ Heroku builds the Docker image on its own servers, then starts it and tells the 
 
 ### Deploy the demo app
 
-[![Deploy to Heroku](https://www.herokucdn.com/deploy/button.svg)](https://www.heroku.com/deploy?template=https://github.com/maxlestage/Vitesse)
-
 1. Tap the button above (it is also on the project's README). Log in to Heroku if asked.
 2. Heroku shows a form to create a new app:
    - **App name**: for example `my-vitesse-demo`. Names are unique across all of Heroku and use lowercase letters, digits and dashes. You can also leave it empty and let Heroku pick one.
@@ -54,7 +52,7 @@ Then try these addresses, by adding them after your app's address in the browser
 
 To change the code, you need your own copy of the repository on GitHub:
 
-1. Open https://github.com/maxlestage/Vitesse, tap **Fork**, then **Create fork**.
+1. Open https://maxlestage.github.io/Vitesse/, tap **Fork**, then **Create fork**.
 2. Open the Deploy link with your GitHub username instead of `maxlestage`, by typing it in the address bar:
 
    ```text
@@ -69,7 +67,7 @@ To change the code, you need your own copy of the repository on GitHub:
 
 ## 2. Continuous deployment with GitHub Actions
 
-Goal: every commit to the `master` branch of your fork rebuilds and redeploys the app, without you doing anything. The repository includes a workflow called **Deploy to Heroku** ([`.github/workflows/heroku.yml`](https://github.com/maxlestage/Vitesse/blob/master/.github/workflows/heroku.yml)) that talks directly to the Heroku Platform API: no Heroku CLI and no computer needed.
+Goal: every commit to the `master` branch of your fork rebuilds and redeploys the app, without you doing anything. The repository includes a workflow called **Deploy to Heroku** (`.github/workflows/heroku.yml`) that talks directly to the Heroku Platform API: no Heroku CLI and no computer needed.
 
 On each run, it:
 

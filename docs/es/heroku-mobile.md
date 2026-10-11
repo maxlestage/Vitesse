@@ -30,8 +30,6 @@ Heroku construye la imagen Docker en sus propios servidores, la arranca y le ind
 
 ### Desplegar la aplicación de demostración
 
-[![Deploy to Heroku](https://www.herokucdn.com/deploy/button.svg)](https://www.heroku.com/deploy?template=https://github.com/maxlestage/Vitesse)
-
 1. Toca el botón de arriba (también está en el README del proyecto). Inicia sesión en Heroku si te lo pide.
 2. Heroku muestra un formulario para crear una aplicación nueva:
    - **App name**: por ejemplo `mi-demo-vitesse`. Los nombres son únicos en todo Heroku y solo admiten minúsculas, números y guiones. También puedes dejarlo vacío y Heroku elegirá uno.
@@ -54,7 +52,7 @@ Prueba luego estas rutas, añadiéndolas después de la dirección de tu aplicac
 
 Para modificar el código necesitas tu propia copia del repositorio en GitHub:
 
-1. Abre https://github.com/maxlestage/Vitesse, toca **Fork** y luego **Create fork**.
+1. Abre https://maxlestage.github.io/Vitesse/, toca **Fork** y luego **Create fork**.
 2. Abre el enlace de despliegue con tu nombre de usuario de GitHub en lugar de `maxlestage`, escribiéndolo en la barra de direcciones:
 
    ```text
@@ -69,7 +67,7 @@ Para modificar el código necesitas tu propia copia del repositorio en GitHub:
 
 ## 2. Despliegue continuo con GitHub Actions
 
-Objetivo: cada commit en la rama `master` de tu fork reconstruye y redespliega la aplicación sin que tengas que hacer nada más. El repositorio incluye un workflow llamado **Deploy to Heroku** ([`.github/workflows/heroku.yml`](https://github.com/maxlestage/Vitesse/blob/master/.github/workflows/heroku.yml)) que habla directamente con la Platform API de Heroku: sin la CLI de Heroku y sin computadora.
+Objetivo: cada commit en la rama `master` de tu fork reconstruye y redespliega la aplicación sin que tengas que hacer nada más. El repositorio incluye un workflow llamado **Deploy to Heroku** (`.github/workflows/heroku.yml`) que habla directamente con la Platform API de Heroku: sin la CLI de Heroku y sin computadora.
 
 En cada ejecución:
 

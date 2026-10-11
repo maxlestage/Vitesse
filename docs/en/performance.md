@@ -29,7 +29,7 @@ On the simplest possible request, every fast server hits the same floor: about 4
 
 ## Methodology
 
-- **Machine**: a 4-vCPU VM. The server is pinned to 2 cores and [wrk](https://github.com/wg/wrk) to the other 2, so the load generator never competes with the server.
+- **Machine**: a 4-vCPU VM. The server is pinned to 2 cores and wrk to the other 2, so the load generator never competes with the server.
 - **Load**: 128 keep-alive connections, 10 seconds per scenario, after a 2-second warm-up, on the same machine and in the same session for every server.
 - **Versions**: Node 22.22 / Express 5.3.0, Drogon 1.9.13 (GCC 13, `-O3`), axum 0.8, actix-web 4.15, Rust 1.97, and the system allocator everywhere.
 - **Scenarios**: the "browser" scenario sends the 12 headers of a real Chrome request (about 650 bytes); `POST /echo` sends a small JSON document that the server parses and sends back; the pipelined scenario sends 16 requests at once on each connection.
@@ -39,7 +39,7 @@ Results vary by a few percent from one run to the next.
 
 ## Reproducing the benchmark
 
-The benchmark runner is a small Rust program, [`bench/runner`](https://github.com/maxlestage/Vitesse/blob/master/bench/runner/src/main.rs), and the code of every server is in [`bench/`](https://github.com/maxlestage/Vitesse/tree/master/bench) (the Vitesse server is [`examples/bench.rs`](https://github.com/maxlestage/Vitesse/blob/master/examples/bench.rs)). You need Linux (the runner uses `taskset` and reads `/proc`), Rust and [wrk](https://github.com/wg/wrk). Drogon is optional: if it is installed, the runner builds its server from `bench/drogon` with CMake (set `DROGON_PREFIX` to its install path if needed); otherwise it is skipped.
+The benchmark runner is a small Rust program, `bench/runner`, and the code of every server is in `bench/` (the Vitesse server is `examples/bench.rs`). You need Linux (the runner uses `taskset` and reads `/proc`), Rust and wrk. Drogon is optional: if it is installed, the runner builds its server from `bench/drogon` with CMake (set `DROGON_PREFIX` to its install path if needed); otherwise it is skipped.
 
 ```sh
 cargo run --release --manifest-path bench/runner/Cargo.toml              # 10 s per scenario, 128 connections
@@ -62,8 +62,8 @@ The bench server also reads `PORT`, `WORKERS`, and `VITESSE_MODE=mt` to use toki
 
 Almost all the time spent on a simple request goes into the kernel (reading from and writing to the socket): a fast server is one that adds as little as possible around it. Vitesse does exactly **one `read` and one `write` per request**, and only one of each for a whole batch of pipelined requests.
 
-- **Its own HTTP/1.1 engine** ([`src/http1.rs`](https://github.com/maxlestage/Vitesse/blob/master/src/http1.rs)):
-  - the request head is parsed by [httparse](https://github.com/seanmonstar/httparse) (SIMD), and headers are only recorded by their position. The `HeaderMap` and the `Uri` are only built if a handler asks for them: a browser request and its twelve headers cost almost as little as a bare request;
+- **Its own HTTP/1.1 engine** (`src/http1.rs`):
+  - the request head is parsed by httparse (SIMD), and headers are only recorded by their position. The `HeaderMap` and the `Uri` are only built if a handler asks for them: a browser request and its twelve headers cost almost as little as a bare request;
   - responses are serialised straight into a reused write buffer: common status lines and content types are precomputed, the `Date` header is cached per thread, and a `HeaderMap` is only created if you add other headers;
   - a handler that answers without waiting follows a fully synchronous path, with no intermediate `Future` and no copy of large structures;
   - a single timer per connection (not per request) handles idle connections.
@@ -170,4 +170,4 @@ wrk -t2 -c128 -d10s http://127.0.0.1:3000/
 oha -z 10s -c 128 http://127.0.0.1:3000/
 ```
 
-[wrk](https://github.com/wg/wrk) and [oha](https://github.com/hatoo/oha) both report throughput and latency. Look at latency percentiles as well as requests per second, and measure on production-like data: an application is usually limited by its database long before it is limited by Vitesse.
+wrk and [oha](https://crates.io/crates/oha) both report throughput and latency. Look at latency percentiles as well as requests per second, and measure on production-like data: an application is usually limited by its database long before it is limited by Vitesse.

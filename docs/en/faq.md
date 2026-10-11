@@ -1,6 +1,6 @@
 # FAQ & limitations
 
-Answers to the questions people ask most often about Vitesse, followed by an honest list of what it does not do (yet). If your question is not here, open an issue on [GitHub](https://github.com/maxlestage/Vitesse/issues).
+Answers to the questions people ask most often about Vitesse, followed by an honest list of what it does not do (yet). If your question is not here, open an issue on GitHub.
 
 ## General
 
@@ -8,11 +8,11 @@ Answers to the questions people ask most often about Vitesse, followed by an hon
 
 Vitesse is young (version 0.1), but its engine was built for production from the start: the test suite covers the HTTP engine in detail (pipelining, `chunked` bodies, `Expect: 100-continue`, size limits, graceful shutdown) and runs on Linux, macOS and Windows for every change. Panics become `500` responses instead of crashing the server, malformed requests are rejected, and `SIGTERM` lets in-flight requests finish.
 
-Until version 1.0, the API may still change between minor versions. Depend on `vitesse = "0.1"` (Cargo then only installs compatible `0.1.x` updates), read the [changelog](https://github.com/maxlestage/Vitesse/blob/master/CHANGELOG.md) before upgrading, put a reverse proxy in front for HTTPS (see [Production](production.md)), and load-test with your own workload.
+Until version 1.0, the API may still change between minor versions. Depend on `vitesse = "0.1"` (Cargo then only installs compatible `0.1.x` updates), read the changelog before upgrading, put a reverse proxy in front for HTTPS (see [Production](production.md)), and load-test with your own workload.
 
 ### Is the project really 100% Rust?
 
-Yes: the framework, the examples, the benchmark runner (`bench/runner`) and the website (served by Vitesse itself, with pages and WebAssembly islands written with [active](https://github.com/maxlestage/Active)) are all Rust, and the repository contains no JavaScript or TypeScript. Two caveats, to be precise:
+Yes: the framework, the examples, the benchmark runner (`bench/runner`) and the website (served by Vitesse itself, with pages and WebAssembly islands written with [active](https://maxlestage.github.io/Active/)) are all Rust, and the repository contains no JavaScript or TypeScript. Two caveats, to be precise:
 
 - browsers cannot start WebAssembly without a few lines of JavaScript, and they only run service workers (what makes the website work offline) as scripts: the website build (wasm-bindgen) generates a small loader file, and the website's server generates its service worker; neither is written by hand nor stored in the repository;
 - the documentation shows Express (JavaScript) snippets, but only as before/after comparisons for people coming from Express.
@@ -26,7 +26,7 @@ Both are excellent and mature frameworks. Vitesse is a good fit if:
 - you come from Express and want the same mental model: one `Request`, middleware with `next`, routers, and handlers that simply return their response, with no extractors or service layers to learn;
 - you want top performance: in the [benchmark](performance.md), Vitesse handles more requests per second than both, with less CPU per request.
 
-Prefer actix-web or axum if you need what Vitesse does not do (yet): HTTP/2 or TLS over TCP built in, the [tower](https://github.com/tower-rs/tower) middleware ecosystem, or a stable 1.x API.
+Prefer actix-web or axum if you need what Vitesse does not do (yet): HTTP/2 or TLS over TCP built in, the [tower](https://crates.io/crates/tower) middleware ecosystem, or a stable 1.x API.
 
 ### How is it different from Express?
 
@@ -111,7 +111,7 @@ Build a release binary (`cargo build --release`), listen on the port given by th
 
 ### How do I report a bug or contribute?
 
-Open an issue on [GitHub](https://github.com/maxlestage/Vitesse/issues), with your Vitesse version, your system and, ideally, a minimal example that reproduces the problem. Pull requests are welcome too; for a large change, open an issue first to discuss it. Before submitting, run the same checks as the CI:
+Open an issue on GitHub, with your Vitesse version, your system and, ideally, a minimal example that reproduces the problem. Pull requests are welcome too; for a large change, open an issue first to discuss it. Before submitting, run the same checks as the CI:
 
 ```sh
 cargo fmt --check
@@ -119,11 +119,11 @@ cargo clippy --all-targets -- -D warnings
 cargo test
 ```
 
-The documentation lives in [`docs/`](https://github.com/maxlestage/Vitesse/tree/master/docs) in English, French and Spanish: when you change a page, update the other languages too, or mention it in your pull request.
+The documentation lives in `docs/` in English, French and Spanish: when you change a page, update the other languages too, or mention it in your pull request.
 
 ### What is the license?
 
-Vitesse is proprietary software: © Maxime Nathan Lestage, all rights reserved. Its source is published on crates.io and GitHub so that you can read, audit and build it, and you may use it freely as a dependency of your own programs, commercial ones included. Modifying it or redistributing its source needs the author's written permission. The full terms are in the repository's [LICENSE](https://github.com/maxlestage/Vitesse/blob/master/LICENSE).
+Vitesse is proprietary software: © Maxime Nathan Lestage, all rights reserved. Its source is published on crates.io and GitHub so that you can read, audit and build it, and you may use it freely as a dependency of your own programs, commercial ones included. Modifying it or redistributing its source needs the author's written permission. The full terms are in the repository's [LICENSE](https://maxlestage.github.io/Vitesse/LICENSE.txt).
 
 ## Current limitations
 

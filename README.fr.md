@@ -4,7 +4,6 @@
 
 **Le confort d'Express.js, la vitesse de Rust.**
 
-[![CI](https://github.com/maxlestage/Vitesse/actions/workflows/ci.yml/badge.svg)](https://github.com/maxlestage/Vitesse/actions/workflows/ci.yml)
 [![crates.io](https://img.shields.io/crates/v/vitesse.svg)](https://crates.io/crates/vitesse)
 [![docs.rs](https://img.shields.io/docsrs/vitesse)](https://docs.rs/vitesse)
 [![Licence : propriétaire](https://img.shields.io/badge/license-proprietary-2a2a2e.svg)](#licence)
@@ -70,7 +69,7 @@ différence, et l'écart se creuse. En production, à travers un vrai réseau,
 la part du noyau côté serveur est plus faible : l'avantage de Vitesse n'en est
 que plus visible.
 
-<sub>VM 4 vCPU : serveur épinglé sur 2 cœurs, [wrk](https://github.com/wg/wrk)
+<sub>VM 4 vCPU : serveur épinglé sur 2 cœurs, wrk
 sur les 2 autres, 128 connexions keep-alive, 10 s par scénario, même machine
 et même session pour tous. Node 22.22 / Express 5.3.0, Drogon 1.9.13 (GCC 13,
 `-O3`), axum 0.8, actix-web 4.15, Rust 1.97, allocateur système partout. Sans
@@ -95,7 +94,7 @@ Ou, pour suivre la version en développement sur GitHub :
 
 ```toml
 [dependencies]
-vitesse = { git = "https://github.com/maxlestage/Vitesse" }
+vitesse = { git = "https://maxlestage.github.io/Vitesse/" }
 serde = { version = "1", features = ["derive"] }
 ```
 
@@ -192,7 +191,7 @@ app.ws("/echo/:name", |req, mut socket| async move {
 });
 ```
 
-Essayez-la avec [websocat](https://github.com/vi/websocat) :
+Essayez-la avec [websocat](https://crates.io/crates/websocat) :
 `websocat ws://localhost:3000/echo/ada`. Sous-protocoles, limites de taille,
 `split` et un salon de discussion complet : [WebSocket](docs/fr/websocket.md).
 
@@ -223,8 +222,6 @@ La documentation existe aussi en [anglais](docs/en/README.md) et en
 [espagnol](docs/es/README.md).
 
 ## Déployer sur Heroku
-
-[![Deploy to Heroku](https://www.herokucdn.com/deploy/button.svg)](https://www.heroku.com/deploy?template=https://github.com/maxlestage/Vitesse)
 
 Un geste suffit pour déployer l'application de démonstration
 (`examples/demo.rs`) sur votre compte Heroku : Heroku construit lui-même
@@ -263,7 +260,7 @@ moins possible autour. Vitesse fait exactement **un `read` et un `write` par
 requête**, et un seul de chaque pour tout un lot de requêtes pipelinées.
 
 - **Un moteur HTTP/1.1 maison** : la tête des requêtes est analysée par
-  [httparse](https://github.com/seanmonstar/httparse) (SIMD) sans copie, les
+  httparse (SIMD) sans copie, les
   en-têtes et l'URI ne sont construits que si un handler les demande, et les
   réponses sont écrites directement dans un tampon réutilisé.
 - **Presque aucune allocation** : les requêtes, les tampons et les tables
@@ -306,7 +303,7 @@ docker build -t vitesse-demo . && docker run --rm -p 8080:8080 vitesse-demo
 Le dossier [`site/`](site) contient le site du projet, en français, en
 anglais et en espagnol, avec la documentation de [`docs/`](docs). Il est
 servi par Vitesse lui-même : le serveur est une application Vitesse dont les
-pages sont écrites avec [active](https://github.com/maxlestage/Active)
+pages sont écrites avec [active](https://maxlestage.github.io/Active/)
 (rendues sur le serveur, avec toutes les balises SEO), et les parties
 interactives sont des îlots active compilés en WebAssembly. C'est une
 Progressive Web App : il s'installe sur l'écran d'accueil d'un téléphone et
@@ -381,5 +378,5 @@ les droits à l'auteur, comme l'indique la licence.
 
 ## Crédits
 
-Conçu et développé par [Maxime Nathan Lestage](https://github.com/maxlestage),
+Conçu et développé par Maxime Nathan Lestage,
 au sein d'une même famille de projets Rust : [Active](https://maxlestage.github.io/Active/), [Vitesse](https://maxlestage.github.io/Vitesse/), [Securite](https://maxlestage.github.io/Securite/), [Memoire](https://maxlestage.github.io/Memoire/), [Paquets](https://maxlestage.github.io/Paquets/) et [FerroSwift](https://maxlestage.github.io/FerroSwift/).

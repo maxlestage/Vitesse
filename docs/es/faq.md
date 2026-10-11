@@ -1,6 +1,6 @@
 # Preguntas frecuentes y límites
 
-Las respuestas a las preguntas más habituales sobre Vitesse, seguidas de una lista honesta de lo que (todavía) no hace. Si tu pregunta no está aquí, abre una issue en [GitHub](https://github.com/maxlestage/Vitesse/issues).
+Las respuestas a las preguntas más habituales sobre Vitesse, seguidas de una lista honesta de lo que (todavía) no hace. Si tu pregunta no está aquí, abre una issue en GitHub.
 
 ## General
 
@@ -8,11 +8,11 @@ Las respuestas a las preguntas más habituales sobre Vitesse, seguidas de una li
 
 Vitesse es joven (versión 0.1), pero su motor se pensó para producción desde el principio: la batería de pruebas cubre a fondo el motor HTTP (pipelining, cuerpos `chunked`, `Expect: 100-continue`, límites de tamaño, apagado ordenado) y se ejecuta en Linux, macOS y Windows con cada cambio. Los pánicos se convierten en respuestas `500` en lugar de tumbar el servidor, las peticiones mal formadas se rechazan y `SIGTERM` deja terminar las peticiones en curso.
 
-Hasta la versión 1.0, la API todavía puede cambiar entre versiones menores. Depende de `vitesse = "0.1"` (así Cargo solo instala actualizaciones compatibles `0.1.x`), lee el [registro de cambios](https://github.com/maxlestage/Vitesse/blob/master/CHANGELOG.md) antes de actualizar, pon un proxy inverso delante para HTTPS (consulta [Producción](production.md)) y haz pruebas de carga con tu propio tráfico.
+Hasta la versión 1.0, la API todavía puede cambiar entre versiones menores. Depende de `vitesse = "0.1"` (así Cargo solo instala actualizaciones compatibles `0.1.x`), lee el registro de cambios antes de actualizar, pon un proxy inverso delante para HTTPS (consulta [Producción](production.md)) y haz pruebas de carga con tu propio tráfico.
 
 ### ¿El proyecto es realmente 100 % Rust?
 
-Sí: el framework, los ejemplos, la herramienta de benchmark (`bench/runner`) y el sitio web (servido por el propio Vitesse, con páginas e islas WebAssembly escritas con [active](https://github.com/maxlestage/Active)) están en Rust, y el repositorio no contiene JavaScript ni TypeScript. Dos matices, para ser precisos:
+Sí: el framework, los ejemplos, la herramienta de benchmark (`bench/runner`) y el sitio web (servido por el propio Vitesse, con páginas e islas WebAssembly escritas con [active](https://maxlestage.github.io/Active/)) están en Rust, y el repositorio no contiene JavaScript ni TypeScript. Dos matices, para ser precisos:
 
 - los navegadores no pueden arrancar WebAssembly sin unas pocas líneas de JavaScript, y solo ejecutan un service worker (lo que hace que el sitio funcione sin conexión) en forma de script: la compilación del sitio (wasm-bindgen) genera un pequeño archivo de carga, y el servidor del sitio genera su service worker; ninguno de los dos se escribe a mano ni se guarda en el repositorio;
 - la documentación muestra fragmentos de Express (JavaScript), pero solo como comparaciones de antes y después para quienes vienen de Express.
@@ -26,7 +26,7 @@ Los dos son frameworks excelentes y maduros. Vitesse encaja bien si:
 - vienes de Express y quieres mantener la misma forma de pensar: una sola `Request`, middlewares con `next`, routers y handlers que simplemente devuelven su respuesta, sin extractores ni capas de servicios que aprender;
 - buscas el máximo rendimiento: en el [benchmark](performance.md), Vitesse atiende más peticiones por segundo que ambos, con menos CPU por petición.
 
-Elige actix-web o axum si necesitas lo que Vitesse (todavía) no hace: HTTP/2 o TLS sobre TCP integrados, el ecosistema de middlewares de [tower](https://github.com/tower-rs/tower) o una API 1.x estable.
+Elige actix-web o axum si necesitas lo que Vitesse (todavía) no hace: HTTP/2 o TLS sobre TCP integrados, el ecosistema de middlewares de [tower](https://crates.io/crates/tower) o una API 1.x estable.
 
 ### ¿En qué se diferencia de Express?
 
@@ -111,7 +111,7 @@ Compila un binario en modo release (`cargo build --release`), escucha en el puer
 
 ### ¿Cómo informo de un error o contribuyo?
 
-Abre una issue en [GitHub](https://github.com/maxlestage/Vitesse/issues) con tu versión de Vitesse, tu sistema y, a ser posible, un ejemplo mínimo que reproduzca el problema. Las pull requests también son bienvenidas; para un cambio grande, abre antes una issue para comentarlo. Antes de enviar tus cambios, ejecuta las mismas comprobaciones que la CI:
+Abre una issue en GitHub con tu versión de Vitesse, tu sistema y, a ser posible, un ejemplo mínimo que reproduzca el problema. Las pull requests también son bienvenidas; para un cambio grande, abre antes una issue para comentarlo. Antes de enviar tus cambios, ejecuta las mismas comprobaciones que la CI:
 
 ```sh
 cargo fmt --check
@@ -119,11 +119,11 @@ cargo clippy --all-targets -- -D warnings
 cargo test
 ```
 
-La documentación está en [`docs/`](https://github.com/maxlestage/Vitesse/tree/master/docs), en inglés, francés y español: cuando cambies una página, actualiza también los otros idiomas o menciónalo en tu pull request.
+La documentación está en `docs/`, en inglés, francés y español: cuando cambies una página, actualiza también los otros idiomas o menciónalo en tu pull request.
 
 ### ¿Cuál es la licencia?
 
-Vitesse es software propietario: © Maxime Nathan Lestage, todos los derechos reservados. Su código fuente se publica en crates.io y GitHub para que puedas leerlo, auditarlo y compilarlo, y puedes usarlo libremente como dependencia de tus propios programas, también comerciales. Modificarlo o redistribuir su código fuente requiere el permiso escrito del autor. Las condiciones completas están en el archivo [LICENSE](https://github.com/maxlestage/Vitesse/blob/master/LICENSE) del repositorio.
+Vitesse es software propietario: © Maxime Nathan Lestage, todos los derechos reservados. Su código fuente se publica en crates.io y GitHub para que puedas leerlo, auditarlo y compilarlo, y puedes usarlo libremente como dependencia de tus propios programas, también comerciales. Modificarlo o redistribuir su código fuente requiere el permiso escrito del autor. Las condiciones completas están en el archivo [LICENSE](https://maxlestage.github.io/Vitesse/LICENSE.txt) del repositorio.
 
 ## Límites actuales
 

@@ -68,8 +68,15 @@ pub async fn export(out: &Path, base_path: &str, site_url: Option<String>) -> io
         let html = get(route.path(), 200).await?;
         write(&format!("{}index.html", route.path()), &html)?;
     }
-    write("index.html", pages::root(&site, &origin).as_bytes())?;
-    write("404.html", &get("/en/404/".into(), 404).await?)?;
+    // La langue du visiteur, choisie dans le navigateur : à la racine et pour une adresse
+    // introuvable (l'hébergeur statique sert `404.html`), puis la page « introuvable » de
+    // chaque langue.
+    write("index.html", pages::root(&site, &origin, "").as_bytes())?;
+    write("404.html", pages::root(&site, &origin, "404/").as_bytes())?;
+    for lang in Lang::ALL {
+        let path = format!("/{}/404/", lang.code());
+        write(&format!("{path}index.html"), &get(path.clone(), 404).await?)?;
+    }
     write("offline/index.html", &get("/offline/".into(), 200).await?)?;
     let mut files: Vec<String> = Lang::ALL
         .iter()

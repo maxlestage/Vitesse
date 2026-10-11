@@ -4,7 +4,6 @@
 
 **La comodidad de Express.js, la velocidad de Rust.**
 
-[![CI](https://github.com/maxlestage/Vitesse/actions/workflows/ci.yml/badge.svg)](https://github.com/maxlestage/Vitesse/actions/workflows/ci.yml)
 [![crates.io](https://img.shields.io/crates/v/vitesse.svg)](https://crates.io/crates/vitesse)
 [![docs.rs](https://img.shields.io/docsrs/vitesse)](https://docs.rs/vitesse)
 [![Licencia: propietaria](https://img.shields.io/badge/license-proprietary-2a2a2e.svg)](#licencia)
@@ -72,7 +71,7 @@ marca la diferencia y la brecha se amplía. En producción, a través de una
 red real, la parte del trabajo del kernel del lado del servidor es menor,
 así que la ventaja de Vitesse se nota todavía más.
 
-<sub>VM de 4 vCPU: servidor fijado en 2 núcleos, [wrk](https://github.com/wg/wrk)
+<sub>VM de 4 vCPU: servidor fijado en 2 núcleos, wrk
 en los otros 2, 128 conexiones keep-alive, 10 s por escenario, misma máquina
 y misma sesión para todos. Node 22.22 / Express 5.3.0, Drogon 1.9.13 (GCC 13,
 `-O3`), axum 0.8, actix-web 4.15, Rust 1.97, asignador del sistema en todos.
@@ -98,7 +97,7 @@ O, para seguir la versión en desarrollo en GitHub:
 
 ```toml
 [dependencies]
-vitesse = { git = "https://github.com/maxlestage/Vitesse" }
+vitesse = { git = "https://maxlestage.github.io/Vitesse/" }
 serde = { version = "1", features = ["derive"] }
 ```
 
@@ -195,7 +194,7 @@ app.ws("/echo/:name", |req, mut socket| async move {
 });
 ```
 
-Pruébala con [websocat](https://github.com/vi/websocat):
+Pruébala con [websocat](https://crates.io/crates/websocat):
 `websocat ws://localhost:3000/echo/ada`. Subprotocolos, límites de tamaño,
 `split` y una sala de chat completa: [WebSocket](docs/es/websocket.md).
 
@@ -226,8 +225,6 @@ La documentación también está disponible en [inglés](docs/en/README.md) y en
 [francés](docs/fr/README.md).
 
 ## Desplegar en Heroku
-
-[![Deploy to Heroku](https://www.herokucdn.com/deploy/button.svg)](https://www.heroku.com/deploy?template=https://github.com/maxlestage/Vitesse)
 
 Un solo toque despliega la aplicación de demostración (`examples/demo.rs`)
 en tu cuenta de Heroku: Heroku construye la imagen Docker por sí mismo, así
@@ -266,7 +263,7 @@ alrededor. Vitesse hace exactamente **un `read` y un `write` por petición**,
 y uno solo de cada para todo un lote de peticiones con pipelining.
 
 - **Su propio motor HTTP/1.1**: la cabecera de las peticiones se analiza con
-  [httparse](https://github.com/seanmonstar/httparse) (SIMD) sin copias, las
+  httparse (SIMD) sin copias, las
   cabeceras y la URI solo se construyen si un handler las pide, y las
   respuestas se escriben directamente en un búfer reutilizado.
 - **Casi ninguna asignación de memoria**: las peticiones, los búferes y las
@@ -310,7 +307,7 @@ docker build -t vitesse-demo . && docker run --rm -p 8080:8080 vitesse-demo
 La carpeta [`site/`](site) contiene el sitio web del proyecto, en español,
 inglés y francés, con la documentación de [`docs/`](docs). Lo sirve el
 propio Vitesse: el servidor es una aplicación Vitesse cuyas páginas están
-escritas con [active](https://github.com/maxlestage/Active) (renderizadas en
+escritas con [active](https://maxlestage.github.io/Active/) (renderizadas en
 el servidor, con todas las etiquetas SEO), y las partes interactivas son
 islas de active compiladas a WebAssembly. Es una Progressive Web App: se
 instala en la pantalla de inicio de un móvil y sigue funcionando sin
@@ -385,5 +382,5 @@ derechos al autor, como indica la licencia.
 
 ## Créditos
 
-Diseñado y desarrollado por [Maxime Nathan Lestage](https://github.com/maxlestage),
+Diseñado y desarrollado por Maxime Nathan Lestage,
 dentro de una misma familia de proyectos Rust: [Active](https://maxlestage.github.io/Active/), [Vitesse](https://maxlestage.github.io/Vitesse/), [Securite](https://maxlestage.github.io/Securite/), [Memoire](https://maxlestage.github.io/Memoire/), [Paquets](https://maxlestage.github.io/Paquets/) y [FerroSwift](https://maxlestage.github.io/FerroSwift/).

@@ -54,7 +54,7 @@ cargo add vitesse
 > [!NOTE]
 > Vitesse is about to be published on [crates.io](https://crates.io). Until it is (or if you want the latest unreleased changes), install it from GitHub instead:
 >
-> `cargo add vitesse --git https://github.com/maxlestage/Vitesse`
+> `cargo add vitesse --git https://maxlestage.github.io/Vitesse/`
 
 `cargo add` writes the dependency into `Cargo.toml`. You can also add it by hand:
 
@@ -62,7 +62,7 @@ cargo add vitesse
 [dependencies]
 vitesse = "0.1"
 # or, straight from GitHub:
-# vitesse = { git = "https://github.com/maxlestage/Vitesse" }
+# vitesse = { git = "https://maxlestage.github.io/Vitesse/" }
 ```
 
 Vitesse pulls in `tokio`, `serde_json`, `http` and `bytes` and re-exports them, so for a simple app it is the only dependency you need.

@@ -42,5 +42,5 @@ Todo lo que necesitas para crear aplicaciones web rápidas con Vitesse, el frame
 ## Más recursos
 
 - Referencia de la API generada a partir del código fuente: https://docs.rs/vitesse
-- Código fuente, issues y ejemplos: https://github.com/maxlestage/Vitesse
-- También disponible en [inglés](https://github.com/maxlestage/Vitesse/blob/master/docs/en/README.md) y en [francés](https://github.com/maxlestage/Vitesse/blob/master/docs/fr/README.md).
+- Código fuente, issues y ejemplos: https://maxlestage.github.io/Vitesse/
+- También disponible en [inglés](https://maxlestage.github.io/Vitesse/en/docs/README/) y en [francés](https://maxlestage.github.io/Vitesse/fr/docs/README/).

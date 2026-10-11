@@ -29,7 +29,7 @@ Con la petición más simple, todos los servidores rápidos chocan con el mismo 
 
 ## Metodología
 
-- **Máquina**: una VM con 4 vCPU. El servidor está fijado a 2 núcleos y [wrk](https://github.com/wg/wrk) a los otros 2, así el generador de carga nunca le quita CPU al servidor.
+- **Máquina**: una VM con 4 vCPU. El servidor está fijado a 2 núcleos y wrk a los otros 2, así el generador de carga nunca le quita CPU al servidor.
 - **Carga**: 128 conexiones keep-alive, 10 segundos por escenario tras 2 segundos de calentamiento, en la misma máquina y en la misma sesión para todos los servidores.
 - **Versiones**: Node 22.22 / Express 5.3.0, Drogon 1.9.13 (GCC 13, `-O3`), axum 0.8, actix-web 4.15, Rust 1.97, y el asignador de memoria del sistema en todos.
 - **Escenarios**: el escenario «navegador» envía las 12 cabeceras de una petición real de Chrome (unos 650 bytes); `POST /echo` envía un pequeño documento JSON que el servidor analiza y devuelve; el escenario en pipeline envía 16 peticiones de golpe por cada conexión.
@@ -39,7 +39,7 @@ Los resultados varían unos pocos puntos porcentuales de una ejecución a otra.
 
 ## Reproducir el benchmark
 
-La herramienta de benchmark es un pequeño programa en Rust, [`bench/runner`](https://github.com/maxlestage/Vitesse/blob/master/bench/runner/src/main.rs), y el código de cada servidor está en [`bench/`](https://github.com/maxlestage/Vitesse/tree/master/bench) (el servidor de Vitesse es [`examples/bench.rs`](https://github.com/maxlestage/Vitesse/blob/master/examples/bench.rs)). Necesitas Linux (la herramienta usa `taskset` y lee `/proc`), Rust y [wrk](https://github.com/wg/wrk). Drogon es opcional: si está instalado, la herramienta compila su servidor desde `bench/drogon` con CMake (indica su ruta de instalación con `DROGON_PREFIX` si hace falta); si no, se omite.
+La herramienta de benchmark es un pequeño programa en Rust, `bench/runner`, y el código de cada servidor está en `bench/` (el servidor de Vitesse es `examples/bench.rs`). Necesitas Linux (la herramienta usa `taskset` y lee `/proc`), Rust y wrk. Drogon es opcional: si está instalado, la herramienta compila su servidor desde `bench/drogon` con CMake (indica su ruta de instalación con `DROGON_PREFIX` si hace falta); si no, se omite.
 
 ```sh
 cargo run --release --manifest-path bench/runner/Cargo.toml              # 10 s por escenario, 128 conexiones
@@ -62,8 +62,8 @@ El servidor del benchmark también lee `PORT`, `WORKERS` y `VITESSE_MODE=mt` par
 
 Casi todo el tiempo de una petición sencilla se pasa en el kernel (leyendo y escribiendo en el socket): un servidor rápido es el que añade lo menos posible alrededor. Vitesse hace exactamente **un `read` y un `write` por petición**, y solo uno de cada para todo un lote de peticiones en pipeline.
 
-- **Un motor HTTP/1.1 propio** ([`src/http1.rs`](https://github.com/maxlestage/Vitesse/blob/master/src/http1.rs)):
-  - la cabecera de la petición se analiza con [httparse](https://github.com/seanmonstar/httparse) (SIMD) y de las cabeceras solo se anota su posición. El `HeaderMap` y la `Uri` solo se construyen si un handler los pide: una petición de navegador con sus doce cabeceras cuesta casi lo mismo que una petición desnuda;
+- **Un motor HTTP/1.1 propio** (`src/http1.rs`):
+  - la cabecera de la petición se analiza con httparse (SIMD) y de las cabeceras solo se anota su posición. El `HeaderMap` y la `Uri` solo se construyen si un handler los pide: una petición de navegador con sus doce cabeceras cuesta casi lo mismo que una petición desnuda;
   - las respuestas se serializan directamente en un búfer de escritura reutilizado: las líneas de estado y los tipos de contenido habituales están precalculados, la cabecera `Date` se guarda en caché por hilo y solo se crea un `HeaderMap` si añades otras cabeceras;
   - un handler que responde sin esperar sigue un camino totalmente síncrono, sin `Future` intermedio ni copias de estructuras grandes;
   - un solo temporizador por conexión (no por petición) gestiona la inactividad.
@@ -170,4 +170,4 @@ wrk -t2 -c128 -d10s http://127.0.0.1:3000/
 oha -z 10s -c 128 http://127.0.0.1:3000/
 ```
 
-[wrk](https://github.com/wg/wrk) y [oha](https://github.com/hatoo/oha) muestran el rendimiento y la latencia. Fíjate en los percentiles de latencia además de en las peticiones por segundo, y mide con datos parecidos a los de producción: lo normal es que una aplicación se vea limitada por su base de datos mucho antes que por Vitesse.
+wrk y [oha](https://crates.io/crates/oha) muestran el rendimiento y la latencia. Fíjate en los percentiles de latencia además de en las peticiones por segundo, y mide con datos parecidos a los de producción: lo normal es que una aplicación se vea limitada por su base de datos mucho antes que por Vitesse.

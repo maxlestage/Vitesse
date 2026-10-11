@@ -11,7 +11,7 @@ HTTP/3 is an opt-in Cargo feature:
 vitesse = { version = "0.1", features = ["http3"] }
 ```
 
-It brings in [quinn](https://github.com/quinn-rs/quinn) (QUIC), [h3](https://github.com/hyperium/h3) (HTTP/3) and [rustls](https://github.com/rustls/rustls) (TLS 1.3, with the ring cryptography library): all Rust, no OpenSSL to install. The feature is off by default because it adds compilation time that most applications behind a proxy don't need.
+It brings in [quinn](https://crates.io/crates/quinn) (QUIC), [h3](https://crates.io/crates/h3) (HTTP/3) and rustls (TLS 1.3, with the ring cryptography library): all Rust, no OpenSSL to install. The feature is off by default because it adds compilation time that most applications behind a proxy don't need.
 
 ## A complete example
 
@@ -88,7 +88,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 To try HTTP/3 on your machine, generate a self-signed certificate for `localhost`:
 
 - in Rust, with the [rcgen](https://crates.io/crates/rcgen) crate, at startup (as a dev-dependency or in an example);
-- or with [mkcert](https://github.com/FiloSottile/mkcert), which creates a certificate trusted by your own machine: `mkcert -install`, then `mkcert localhost` writes `localhost.pem` and `localhost-key.pem`.
+- or with mkcert, which creates a certificate trusted by your own machine: `mkcert -install`, then `mkcert localhost` writes `localhost.pem` and `localhost-key.pem`.
 
 ```rust
 // Cargo.toml: rcgen = "0.14"
@@ -100,7 +100,7 @@ app.http3(Http3::from_pem(
 )?);
 ```
 
-The repository's [`examples/http3.rs`](https://github.com/maxlestage/Vitesse/blob/master/examples/http3.rs) does exactly this, and listens on port 4433. Try it with a curl built with HTTP/3 support (`curl --version` lists `HTTP3` among its features):
+The repository's `examples/http3.rs` does exactly this, and listens on port 4433. Try it with a curl built with HTTP/3 support (`curl --version` lists `HTTP3` among its features):
 
 ```sh
 cargo run --example http3 --features http3

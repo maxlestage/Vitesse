@@ -434,6 +434,6 @@ Les requêtes sont traitées en parallèle sur plusieurs threads : pas de variab
 - **Les erreurs sont en JSON par défaut** (`{"error": "..."}`), et les détails internes n'atteignent jamais le client, même en développement. Utilisez `app.on_error` pour un autre format.
 - **`req.set(valeur)` exige `Clone`.** Ajoutez `#[derive(Clone)]` aux types que vous attachez à une requête.
 - **Le corps est lu à la demande, et une seule fois depuis le réseau.** Le résultat est mis en cache : appeler `req.text()` puis `req.bytes()` fonctionne.
-- **Recharger à chaque modification.** `cargo run` recompile ce qui a changé ; pour une boucle à la `nodemon`, utilisez un outil comme [cargo-watch](https://github.com/watchexec/cargo-watch) (`cargo watch -x run`). Compilez avec `cargo build --release` pour la production.
+- **Recharger à chaque modification.** `cargo run` recompile ce qui a changé ; pour une boucle à la `nodemon`, utilisez un outil comme [cargo-watch](https://crates.io/crates/cargo-watch) (`cargo watch -x run`). Compilez avec `cargo build --release` pour la production.
 
 Pour aller plus loin, l'[aide-mémoire](cheatsheet.md) liste toute l'API sur une seule page.

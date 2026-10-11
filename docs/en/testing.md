@@ -1,6 +1,6 @@
 # Testing
 
-Vitesse ships with an in-memory test client, `vitesse::test::TestClient`, that sends requests straight to your application without opening a port. It plays the role of [supertest](https://github.com/ladjs/supertest) in the Express world: tests are fast, run in parallel and need no running server.
+Vitesse ships with an in-memory test client, `vitesse::test::TestClient`, that sends requests straight to your application without opening a port. It plays the role of supertest in the Express world: tests are fast, run in parallel and need no running server.
 
 ## Setup
 

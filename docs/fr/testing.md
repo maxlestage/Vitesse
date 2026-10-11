@@ -1,6 +1,6 @@
 # Tests
 
-Vitesse fournit un client de test en mémoire, `vitesse::test::TestClient`, qui envoie les requêtes directement à votre application, sans ouvrir de port. Il joue le rôle de [supertest](https://github.com/ladjs/supertest) dans le monde Express : les tests sont rapides, s'exécutent en parallèle et n'ont besoin d'aucun serveur lancé.
+Vitesse fournit un client de test en mémoire, `vitesse::test::TestClient`, qui envoie les requêtes directement à votre application, sans ouvrir de port. Il joue le rôle de supertest dans le monde Express : les tests sont rapides, s'exécutent en parallèle et n'ont besoin d'aucun serveur lancé.
 
 ## Mise en place
 

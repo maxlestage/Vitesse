@@ -11,7 +11,7 @@ HTTP/3 es una feature de Cargo que se activa explícitamente:
 vitesse = { version = "0.1", features = ["http3"] }
 ```
 
-Incorpora [quinn](https://github.com/quinn-rs/quinn) (QUIC), [h3](https://github.com/hyperium/h3) (HTTP/3) y [rustls](https://github.com/rustls/rustls) (TLS 1.3, con la biblioteca criptográfica ring): todo en Rust, sin OpenSSL que instalar. La feature está desactivada por defecto porque añade un tiempo de compilación que la mayoría de las aplicaciones detrás de un proxy no necesitan.
+Incorpora [quinn](https://crates.io/crates/quinn) (QUIC), [h3](https://crates.io/crates/h3) (HTTP/3) y rustls (TLS 1.3, con la biblioteca criptográfica ring): todo en Rust, sin OpenSSL que instalar. La feature está desactivada por defecto porque añade un tiempo de compilación que la mayoría de las aplicaciones detrás de un proxy no necesitan.
 
 ## Un ejemplo completo
 
@@ -88,7 +88,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 Para probar HTTP/3 en tu máquina, genera un certificado autofirmado para `localhost`:
 
 - en Rust, con el crate [rcgen](https://crates.io/crates/rcgen), al arrancar (como dependencia de desarrollo o en un ejemplo);
-- o con [mkcert](https://github.com/FiloSottile/mkcert), que crea un certificado en el que confía tu propia máquina: `mkcert -install` y después `mkcert localhost`, que escribe `localhost.pem` y `localhost-key.pem`.
+- o con mkcert, que crea un certificado en el que confía tu propia máquina: `mkcert -install` y después `mkcert localhost`, que escribe `localhost.pem` y `localhost-key.pem`.
 
 ```rust
 // Cargo.toml: rcgen = "0.14"
@@ -100,7 +100,7 @@ app.http3(Http3::from_pem(
 )?);
 ```
 
-El ejemplo [`examples/http3.rs`](https://github.com/maxlestage/Vitesse/blob/master/examples/http3.rs) del repositorio hace exactamente esto, y escucha en el puerto 4433. Pruébalo con un curl compilado con soporte de HTTP/3 (`curl --version` incluye `HTTP3` entre sus funcionalidades):
+El ejemplo `examples/http3.rs` del repositorio hace exactamente esto, y escucha en el puerto 4433. Pruébalo con un curl compilado con soporte de HTTP/3 (`curl --version` incluye `HTTP3` entre sus funcionalidades):
 
 ```sh
 cargo run --example http3 --features http3

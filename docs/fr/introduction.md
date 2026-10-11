@@ -82,7 +82,7 @@ En résumé :
 - **Contre Drogon (C++)** : de 1,4 à 3,8 fois plus rapide.
 - **Contre Express** : environ 50 fois plus rapide.
 
-Toutes ces mesures ont été faites sur une VM de 4 vCPU : le serveur épinglé sur 2 cœurs, [wrk](https://github.com/wg/wrk) sur les 2 autres, 128 connexions keep-alive et 10 s par scénario. Le serveur Express utilisé pour ces chiffres a depuis été retiré du dépôt pour qu'il reste 100 % Rust (il figure toujours dans l'historique git), et le benchmark compare désormais Drogon, axum, actix-web et Vitesse. La page [Performances](performance.md) détaille la méthode, explique comment reproduire les chiffres (avec l'outil Rust de `bench/runner`) et pourquoi Vitesse est rapide. Les résultats bruts figurent aussi dans le [README](https://github.com/maxlestage/Vitesse#benchmark).
+Toutes ces mesures ont été faites sur une VM de 4 vCPU : le serveur épinglé sur 2 cœurs, wrk sur les 2 autres, 128 connexions keep-alive et 10 s par scénario. Le serveur Express utilisé pour ces chiffres a depuis été retiré du dépôt pour qu'il reste 100 % Rust (il figure toujours dans l'historique git), et le benchmark compare désormais Drogon, axum, actix-web et Vitesse. La page [Performances](performance.md) détaille la méthode, explique comment reproduire les chiffres (avec l'outil Rust de `bench/runner`) et pourquoi Vitesse est rapide. Les résultats bruts figurent aussi dans le README.
 
 ## Limites actuelles
 
@@ -105,4 +105,4 @@ Comme Express, Vitesse fait volontairement peu de choses. Ne sont pas (encore) i
 > [!TIP]
 > Si vous connaissez bien Express, faites [Votre première application](first-app.md), puis gardez [Venir d'Express](from-express.md) ouvert pendant que vous écrivez vos propres routes.
 
-La référence complète de l'API est générée à partir du code source. Lancez `cargo doc --open` dans un projet qui dépend de Vitesse, ou parcourez le code sur [GitHub](https://github.com/maxlestage/Vitesse).
+La référence complète de l'API est générée à partir du code source. Lancez `cargo doc --open` dans un projet qui dépend de Vitesse, ou parcourez le code sur [GitHub](https://maxlestage.github.io/Vitesse/).

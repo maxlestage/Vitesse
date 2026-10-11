@@ -271,7 +271,9 @@ Les routes [WebSocket](websocket.md) fonctionnent en HTTPS sans aucun changement
 const socket = new WebSocket("wss://example.com/chat");
 ```
 
-La connexion WebSocket elle-même utilise HTTP/1.1 à l'intérieur de TLS : les navigateurs ouvrent pour elle une connexion HTTP/1.1 séparée. WebSocket sur HTTP/2 (RFC 8441) n'est pas pris en charge : une réponse `101 Switching Protocols` sur une connexion HTTP/2 devient `505 HTTP Version Not Supported`.
+Avec la feature `http2`, les navigateurs qui en sont capables (Chrome et Firefox, par exemple) ouvrent le WebSocket sur un flux de la connexion HTTP/2 qu'ils ont déjà avec le site (RFC 8441), au lieu d'une connexion HTTP/1.1 séparée. Vos handlers ne changent pas : la poignée de main est routée comme un `GET`, reçoit une `200` au lieu d'une `101`, et `req.version()` vaut `HTTP/2.0` dans le handler. Sans la feature `http2`, ou avec un navigateur qui ne le fait pas, le WebSocket utilise sa propre connexion HTTP/1.1 à l'intérieur de TLS. Voir [WebSocket sur HTTP/2](websocket.md#websocket-sur-http2).
+
+Tout autre changement de protocole (une réponse `101 Switching Protocols` à une requête qui n'est pas une poignée de main WebSocket) est impossible en HTTP/2 et devient `505 HTTP Version Not Supported`.
 
 ## HTTPS et HTTP/3 ensemble
 
@@ -318,9 +320,10 @@ Ouvrez le port TCP 443 **et** le port UDP 443 dans le pare-feu (`sudo ufw allow 
 
 Non pris en charge :
 
-- **`Upgrade: h2c`** : ces requêtes reçoivent une réponse en HTTP/1.1 ; utilisez le « prior knowledge », ou TLS ;
-- **le server push** : les navigateurs l'ont de toute façon abandonné ;
-- **WebSocket sur HTTP/2** : WebSocket utilise HTTP/1.1, avec ou sans TLS.
+- **`Upgrade: h2c`** : la RFC 9113, la spécification actuelle de HTTP/2, a retiré ce mécanisme, et ces requêtes reçoivent simplement une réponse en HTTP/1.1 ; utilisez le « prior knowledge », ou TLS ;
+- **le server push** : Chrome l'a retiré en 2022 et Firefox en 2024, et axum et actix-web ne le proposent pas non plus.
+
+[WebSocket](websocket.md#websocket-sur-http2) fonctionne en HTTP/2, avec la feature `http2`, aussi bien qu'en HTTP/1.1.
 
 ## Essayer en local
 

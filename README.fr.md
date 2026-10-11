@@ -34,8 +34,11 @@ fn main() -> std::io::Result<()> {
   sur QUIC en une ligne (feature `http3`).
 - **Batteries incluses** : CORS, compression, identifiants de requête,
   authentification Basic et Bearer, limites de débit et de concurrence,
-  proxies de confiance, et n'importe quelle couche
+  proxies de confiance, cookies signés et sessions (feature `session`),
+  gabarits HTML (feature `templates`), et n'importe quelle couche
   [tower](https://crates.io/crates/tower) (feature `tower`).
+- **Des routes expressives** : `/flights/:from-:to`, `/users/:id(\d+)`,
+  `/archive/:year?`, routes nommées et génération d'URL.
 - **Rapide** : plus rapide qu'actix-web, axum et Drogon dans le benchmark
   ci-dessous.
 - **Solide** : les paniques deviennent des réponses `500`, les limites de
@@ -111,6 +114,8 @@ utilisez plutôt `app.listen(port).await`.
 | `http3` | Désactivée | HTTP/3 sur QUIC : `app.http3(...)` et `vitesse::http3` ([guide](docs/fr/http3.md)) |
 | `multipart` | Désactivée | Envois de fichiers : `req.multipart()` et `vitesse::multipart` ([guide](docs/fr/requests.md)) |
 | `compress` | Désactivée | `middleware::compress()` et `middleware::decompress()` : Brotli, gzip ([guide](docs/fr/middleware.md#compress)) |
+| `session` | Désactivée | Cookies signés et sessions : `app.cookie_secret(...)`, `middleware::session(...)` ([guide](docs/fr/sessions.md)) |
+| `templates` | Désactivée | Gabarits HTML avec minijinja : `app.views(...)`, `req.render(...)` ([guide](docs/fr/templates.md)) |
 | `tower` | Désactivée | Les couches tower comme middlewares, l'application comme `Service` tower ([guide](docs/fr/middleware.md)) |
 
 ```toml
@@ -308,8 +313,9 @@ requête**, et un seul de chaque pour tout un lot de requêtes pipelinées.
 - **Un thread par cœur** (Linux) : chaque cœur a sa propre boucle
   d'événements et son propre socket `SO_REUSEPORT`, et une requête ne change
   jamais de thread.
-- **Un routeur sans regex** : un arbre de segments, sans allocation pour les
-  routes statiques.
+- **Un routeur en arbre** : un arbre de segments, sans allocation pour les
+  routes statiques ; les expressions régulières ne s'exécutent que pour les
+  paramètres qui déclarent une contrainte.
 - **Zéro compteur atomique partagé par requête** : l'application est figée
   au démarrage (`&'static`), handlers, middlewares et état sont lus sans
   `Arc`.
@@ -318,13 +324,11 @@ Les détails sont dans [Performances](docs/fr/performance.md).
 
 ## Limites actuelles
 
-Ne sont pas (encore) inclus : WebSocket sur HTTP/2 ou HTTP/3, un stockage de
-sessions (utilisez
-[tower-sessions](docs/fr/from-axum-actix.md#sessions-avec-tower-sessions)
-avec la feature `tower`), les routes nommées et la génération d'URL, les
-expressions régulières dans les routes, les paramètres partiels dans un
-segment (`/vols/:de-:vers`) et les moteurs de templates (utilisez n'importe
-quel crate de templates et renvoyez `Html(...)`). La liste complète se trouve
+Volontairement non inclus : WebSocket sur HTTP/3 (aucun navigateur ne s'en
+sert), le server push HTTP/2 (retiré des navigateurs), le mécanisme
+`Upgrade: h2c` (retiré du standard HTTP/2 ; h2c en « prior knowledge »
+fonctionne) et le 0-RTT en HTTP/3 (requêtes rejouables). tokio est le seul
+runtime, et l'API peut changer jusqu'à la 1.0. La liste complète se trouve
 dans la [FAQ](docs/fr/faq.md).
 
 ## Lancer le projet

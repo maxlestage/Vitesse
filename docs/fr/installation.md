@@ -72,6 +72,8 @@ Certaines parties de Vitesse sont des features Cargo, que vous activez ou désac
 | `http3` | Désactivée | `app.http3(...)` et le module `vitesse::http3` : HTTP/3 sur QUIC, voir [HTTP/3 et QUIC](http3.md) |
 | `multipart` | Désactivée | `req.multipart()` et le module `vitesse::multipart` : envois de fichiers (`multipart/form-data`), voir [Envois de fichiers](requests.md#envois-de-fichiers-multipart) |
 | `compress` | Désactivée | `middleware::compress()` (réponses en Brotli ou gzip) et `middleware::decompress()` (corps de requête compressés), voir [`compress`](middleware.md#compress) |
+| `session` | Désactivée | `app.cookie_secret(...)`, les cookies signés (`req.sign_cookie`, `req.signed_cookie`), `middleware::session(...)` et le module `vitesse::session`, avec les crates hmac, sha2 et getrandom : voir [Cookies signés et sessions](sessions.md) |
+| `templates` | Désactivée | `app.views(...)`, `app.templates(...)`, `req.render(...)` et le module `vitesse::templates`, avec [minijinja](https://crates.io/crates/minijinja) : voir [Gabarits HTML](templates.md) |
 | `tower` | Désactivée | `middleware::layer(...)`, `app.into_service()` et le module `vitesse::tower` : les middlewares de tower et de tower-http, voir [Couches tower](middleware.md#couches-tower) |
 
 Tout le reste, y compris les Server-Sent Events (`vitesse::sse`) et les autres middlewares fournis, est toujours disponible.
@@ -82,6 +84,8 @@ Tout le reste, y compris les Server-Sent Events (`vitesse::sse`) et les autres m
 vitesse = { git = "https://github.com/maxlestage/Vitesse", features = ["tls", "http2"] }
 # Un site avec envois de fichiers et compression, derrière un reverse proxy :
 # vitesse = { git = "https://github.com/maxlestage/Vitesse", features = ["multipart", "compress"] }
+# Des pages rendues sur le serveur, avec connexion des utilisateurs :
+# vitesse = { git = "https://github.com/maxlestage/Vitesse", features = ["templates", "session"] }
 # Sans WebSocket, pour compiler un peu moins :
 # vitesse = { git = "https://github.com/maxlestage/Vitesse", default-features = false }
 ```

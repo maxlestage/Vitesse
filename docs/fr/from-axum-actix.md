@@ -71,6 +71,10 @@ Voir [Configuration du serveur](server.md) et [HTTPS et HTTP/2](https.md).
 |---|---|---|
 | `.route("/u/{id}", get(h).post(h2))` | `.route("/u/{id}", web::get().to(h))`, `#[get("/u/{id}")]` | `app.get("/u/:id", h).post("/u/:id", h2)` |
 | `/{*rest}` | `/{tail:.*}` | `/*rest` |
+| — | `/{id:\d+}` | `/:id(\d+)` |
+| `/{flight}`, découpé à la main | `/{from}-{to}` | `/:from-:to` |
+| deux routes | deux ressources | `/archive/:year?` (paramètre optionnel) |
+| — | `.name("user")`, puis `req.url_for("user", ["42"])` | `.name("user")`, puis `req.path_for("user", &[&42])` ou `req.url_for(…)` |
 | `.nest("/api", router)` | `web::scope("/api")` | `app.mount("/api", router)` |
 | `.merge(other)` | `.configure(f)` | `app.mount("/", router)` |
 | `.fallback(h)` | `.default_service(h)` | `app.fallback(h)` |
@@ -78,7 +82,7 @@ Voir [Configuration du serveur](server.md) et [HTTPS et HTTP/2](https.md).
 | `MatchedPath` | `req.match_pattern()` | `req.route()` |
 | `405` automatique | `405` automatique | `405`, `HEAD` et `OPTIONS` automatiques |
 
-Les paramètres de route s'écrivent `:id` (comme en Express), et non `{id}`. Voir [Routage](routing.md) et [Routeurs et sous-applications](routers.md).
+Les paramètres de route s'écrivent `:id` (comme en Express), et non `{id}`, et une contrainte suit le nom entre parenthèses : `r"/users/:id(\d+)"`. Quel que soit l'ordre de déclaration (actix-web essaie ses routes dans l'ordre), un segment statique l'emporte sur un segment contraint, qui l'emporte lui-même sur un simple paramètre : `/users/:id(\d+)` et `/users/:name` peuvent coexister. `path_for` renvoie le chemin (`/users/42`) et `url_for` l'URL absolue ; tous deux encodent les valeurs pour l'URL et renvoient une erreur `500` si le nom ou une valeur est incorrect. Voir [Routage](routing.md#routes-nommées-et-génération-durl) et [Routeurs et sous-applications](routers.md).
 
 ## Lire la requête
 
@@ -118,9 +122,33 @@ Comme ces méthodes prennent `&self`, vous pouvez lire un paramètre, puis le co
 | `Sse::new(stream)` | un flux `text/event-stream` | `Sse::new(stream)`, ou `sse::channel(n)` |
 | `ServeFile`, `ServeDir` (tower-http) | `NamedFile`, `Files` (actix-files) | `res::file(path).await`, `ServeDir`, `app.static_dir(…)` |
 | `AppendHeaders`, `[(name, value)]` | `.insert_header(…)` | `.header(name, value)` |
-| `WebSocketUpgrade` | `actix-ws` | `app.ws(path, …)`, `ws::Upgrade` |
+| `WebSocketUpgrade` | `actix-ws` | `app.ws(path, …)`, `ws::Upgrade`, en HTTP/1.1 et en HTTP/2 |
+| askama, minijinja ou tera, à la main | askama ou tera, à la main | `app.views("templates")`, puis `req.render("page.html", json!({…}))` (feature `templates`) |
 
-Voir [Répondre](responses.md) et [WebSocket](websocket.md).
+Voir [Répondre](responses.md), [Gabarits HTML](templates.md) et [WebSocket](websocket.md).
+
+## Cookies et sessions
+
+| axum | actix-web | Vitesse (feature `session`) |
+|---|---|---|
+| `SignedCookieJar` (axum-extra) et une `Key` | `CookieJar::signed` (feature `secure-cookies`) | `app.cookie_secret(…)`, puis `req.sign_cookie(cookie)` et `req.signed_cookie("name")` |
+| tower-sessions | actix-session | `middleware::session(store)`, puis `req.session()` |
+| les stockages de tower-sessions | `CookieSessionStore`, `RedisSessionStore` | `session::MemoryStore`, ou votre propre `SessionStore` |
+
+```rust
+use vitesse::session::MemoryStore;
+
+app.cookie_secret(std::env::var("COOKIE_SECRET").expect("COOKIE_SECRET is not set"));
+app.middleware(middleware::session(MemoryStore::new()));
+app.get("/visits", |req: Request| async move {
+    let session = req.session();
+    let visits = session.get::<u32>("visits").unwrap_or(0) + 1;
+    session.insert("visits", visits)?;
+    Ok::<_, Error>(format!("visit #{visits}"))
+});
+```
+
+La session n'est enregistrée, et son cookie envoyé, que lorsqu'un handler la modifie. `session.regenerate()` après une connexion et `session.destroy()` à la déconnexion fonctionnent comme `renew` et `purge` dans actix-session. Voir [Cookies signés et sessions](sessions.md) ; tower-sessions fonctionne aussi, [avec la feature `tower`](#sessions-avec-tower-sessions).
 
 ## Erreurs
 
@@ -185,7 +213,7 @@ api.middleware(middleware::layer(CorsLayer::permissive()));
 
 ### Sessions avec tower-sessions
 
-Vitesse n'a pas de stockage de sessions à lui, mais [tower-sessions](https://crates.io/crates/tower-sessions), le choix habituel avec axum, fonctionne grâce à `middleware::layer` : la couche place une `Session` dans les extensions de la requête et pose le cookie sur la réponse.
+Vitesse a [ses propres sessions](#cookies-et-sessions), mais [tower-sessions](https://crates.io/crates/tower-sessions), le choix habituel avec axum, fonctionne aussi, grâce à `middleware::layer` : pratique pour garder ses stockages tout prêts, ou du code partagé avec une application axum. La couche place une `Session` dans les extensions de la requête et pose le cookie sur la réponse.
 
 ```rust
 use tower_sessions::{MemoryStore, Session, SessionManagerLayer};
@@ -221,10 +249,10 @@ Le client de test construit les requêtes avec `.header()`, `.json()`, `.form()`
 
 ## Ce que Vitesse ne fait pas (encore)
 
-- **Les routes nommées et la génération d'URL** (le `url_for` d'actix-web).
-- **Les expressions régulières et les guards dans les routes** (`{id:\d+}` et `guard::Host` dans actix-web) : vérifiez le paramètre dans le handler (`req.param_as::<u32>("id")?` répond déjà `400`) ou aiguillez selon l'hôte dans un middleware.
-- **Les sessions et les cookies signés intégrés** : utilisez [tower-sessions](#sessions-avec-tower-sessions) avec la feature `tower`, comme vous le feriez avec axum.
-- **WebSocket sur HTTP/2 ou HTTP/3**, et le server push HTTP/2 : WebSocket fonctionne en HTTP/1.1, que tous les navigateurs utilisent pour cela.
+- **Les guards** (`guard::Host`, `guard::Header` dans actix-web) : aiguillez plutôt selon l'hôte ou un en-tête dans un middleware.
+- **WebSocket sur HTTP/3** : les navigateurs ne s'en servent pas, et ouvrent leurs WebSockets en HTTP/2 ou en HTTP/1.1, que [Vitesse sert](websocket.md#websocket-sur-http2).
+- **Le server push HTTP/2**, que les navigateurs ont supprimé, et le mécanisme **`Upgrade: h2c`**, que la RFC 9113 a retiré de HTTP/2 : h2c en « prior knowledge » fonctionne.
+- **Le 0-RTT en HTTP/3**, volontairement : ces requêtes anticipées peuvent être rejouées.
 - **D'autres runtimes asynchrones** que tokio, comme avec axum.
 - **Une API 1.x stable** : Vitesse en est à la version 0.1.
 

@@ -383,6 +383,65 @@ async fn reads_the_visitor_behind_the_proxy() {
 
 La même astuce permet de tester [`middleware::rate_limit`](middleware.md#rate_limit) avec plusieurs clients : sans `trust_proxy`, toutes les requêtes de test partagent le compteur de `127.0.0.1` ; avec, chaque valeur de `x-forwarded-for` compte comme un visiteur différent.
 
+## Tester les sessions
+
+`TestClient` ne garde pas les cookies d'une requête à l'autre : c'est le test qui joue le rôle du navigateur. Lisez l'en-tête `Set-Cookie` de la réponse qui a ouvert la [session](sessions.md), et renvoyez sa partie `nom=valeur` dans un en-tête `cookie` :
+
+```rust
+use vitesse::test::{TestClient, TestResponse};
+
+/// La partie `nom=valeur` de l'en-tête `Set-Cookie` de la réponse.
+fn cookie_of(res: &TestResponse) -> String {
+    let set_cookie = res.header("set-cookie").expect("pas d'en-tête Set-Cookie");
+    set_cookie.split(';').next().unwrap().to_owned()
+}
+
+#[tokio::test]
+async fn logs_in_and_out() {
+    let client = TestClient::new(my_api::app());
+
+    let res = client
+        .post("/login")
+        .form(&[("email", "ada@example.com"), ("password", "secret")])
+        .await;
+    let cookie = cookie_of(&res); // "vitesse.sid=…"
+
+    let res = client.get("/account").header("cookie", &cookie).await;
+    assert_eq!(res.status(), 200);
+
+    let res = client.post("/logout").header("cookie", &cookie).await;
+    assert!(res.header("set-cookie").unwrap().contains("Max-Age=0")); // supprimé dans le navigateur
+    assert_eq!(client.get("/account").header("cookie", &cookie).await.status(), 401);
+}
+```
+
+- `res.header("set-cookie")` renvoie le premier en-tête `Set-Cookie`. Quand une réponse pose plusieurs cookies, parcourez `res.headers().get_all("set-cookie")`.
+- Les [cookies signés](sessions.md#cookies-signés) se testent de la même façon. Modifiez la valeur pour vérifier qu'un cookie falsifié est refusé : `cookie.replacen("dark", "light", 1)` doit se comporter comme s'il n'y avait pas de cookie.
+- Chaque `TestClient::new(my_api::app())` démarre avec un `MemoryStore` vide : les tests ne partagent donc pas de sessions.
+
+## Tester les gabarits
+
+Avec `app.views`, un gabarit est compilé la première fois qu'il est rendu : une erreur de syntaxe dans une page n'apparaît donc que lorsque quelqu'un l'ouvre. Un test qui rend chaque page la détecte avant un déploiement :
+
+```rust
+use vitesse::test::TestClient;
+
+#[tokio::test]
+async fn every_page_renders() {
+    let client = TestClient::new(my_api::app());
+    for path in ["/", "/users", "/login"] {
+        let res = client.get(path).await;
+        assert_eq!(res.status(), 200, "{path}");
+        assert_eq!(res.header("content-type"), Some("text/html; charset=utf-8"));
+    }
+    assert!(client.get("/users").await.text().contains("<li>Ada</li>"));
+}
+```
+
+- `cargo test` lance les tests depuis la racine du paquet : `app.views("templates")` trouve donc le même dossier qu'avec `cargo run`.
+- Un rendu qui échoue donne une `500`, et sa cause, avec le nom du gabarit et la ligne, est affichée dans la sortie des tests (`[vitesse] error 500: …`).
+- Pour essayer un gabarit isolément, donnez à une petite application de test un environnement qui contient ce gabarit, `env.add_template(nom, source)`, avec [`app.templates(env)`](templates.md#filtres-fonctions-et-gabarits-intégrés--apptemplates).
+
 ## Tester les Server-Sent Events
 
 `TestClient` lit tout le corps avant de rendre la main : un [flux d'événements](responses.md#server-sent-events) est donc facile à tester, du moment qu'il se termine. `res.text()` contient alors tous les événements, exactement comme le navigateur les recevrait.

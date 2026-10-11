@@ -352,6 +352,167 @@ async fn handler_sees_what_the_middleware_attached() {
 
 Built-in middleware is tested the same way, for example `middleware::cors()` by sending an `origin` header and checking `access-control-allow-origin`. More on writing middleware in [Middleware](middleware.md).
 
+## Testing behind a proxy
+
+Every `TestClient` request comes from `127.0.0.1`: `req.ip()` returns `127.0.0.1`, and `req.secure()` is `false`. To test what your app does behind a reverse proxy, configure [`app.trust_proxy`](requests.md#behind-a-proxy-trust_proxy) as in production, and send the headers your proxy would add. Coming from `127.0.0.1`, they are believed with `"loopback"`:
+
+```rust
+use vitesse::prelude::*;
+use vitesse::test::TestClient;
+
+#[tokio::test]
+async fn reads_the_visitor_behind_the_proxy() {
+    let mut app = App::new();
+    app.trust_proxy("loopback");
+    app.get("/whoami", |req: Request| async move {
+        format!("{} {}", req.ip().unwrap(), req.protocol())
+    });
+    let client = TestClient::new(app);
+
+    let res = client
+        .get("/whoami")
+        .header("x-forwarded-for", "203.0.113.9")
+        .header("x-forwarded-proto", "https")
+        .await;
+    assert_eq!(res.text(), "203.0.113.9 https");
+
+    // Without the headers, the visitor is the test client itself.
+    assert_eq!(client.get("/whoami").await.text(), "127.0.0.1 http");
+}
+```
+
+The same trick tests [`middleware::rate_limit`](middleware.md#rate_limit) with several clients: without `trust_proxy`, every test request shares the counter of `127.0.0.1`; with it, each `x-forwarded-for` value counts as a different visitor.
+
+## Testing sessions
+
+`TestClient` doesn't keep cookies from one request to the next: the test plays the browser. Read the `Set-Cookie` header of the response that opened the [session](sessions.md), and send its `name=value` part back in a `cookie` header:
+
+```rust
+use vitesse::test::{TestClient, TestResponse};
+
+/// The `name=value` part of the response's `Set-Cookie` header.
+fn cookie_of(res: &TestResponse) -> String {
+    let set_cookie = res.header("set-cookie").expect("no Set-Cookie header");
+    set_cookie.split(';').next().unwrap().to_owned()
+}
+
+#[tokio::test]
+async fn logs_in_and_out() {
+    let client = TestClient::new(my_api::app());
+
+    let res = client
+        .post("/login")
+        .form(&[("email", "ada@example.com"), ("password", "secret")])
+        .await;
+    let cookie = cookie_of(&res); // "vitesse.sid=…"
+
+    let res = client.get("/account").header("cookie", &cookie).await;
+    assert_eq!(res.status(), 200);
+
+    let res = client.post("/logout").header("cookie", &cookie).await;
+    assert!(res.header("set-cookie").unwrap().contains("Max-Age=0")); // deleted in the browser
+    assert_eq!(client.get("/account").header("cookie", &cookie).await.status(), 401);
+}
+```
+
+- `res.header("set-cookie")` returns the first `Set-Cookie` header. When a response sets several cookies, go through `res.headers().get_all("set-cookie")`.
+- [Signed cookies](sessions.md#signed-cookies) are tested the same way. Change the value to check that a forged cookie is refused: `cookie.replacen("dark", "light", 1)` must behave as if there were no cookie.
+- Each `TestClient::new(my_api::app())` starts with an empty `MemoryStore`, so tests don't share sessions.
+
+## Testing templates
+
+With `app.views`, a template is compiled the first time it's rendered, so a syntax error in a page only shows up when someone opens it. A test that renders each page catches it before a deployment:
+
+```rust
+use vitesse::test::TestClient;
+
+#[tokio::test]
+async fn every_page_renders() {
+    let client = TestClient::new(my_api::app());
+    for path in ["/", "/users", "/login"] {
+        let res = client.get(path).await;
+        assert_eq!(res.status(), 200, "{path}");
+        assert_eq!(res.header("content-type"), Some("text/html; charset=utf-8"));
+    }
+    assert!(client.get("/users").await.text().contains("<li>Ada</li>"));
+}
+```
+
+- `cargo test` runs the tests from the package's root, so `app.views("templates")` finds the same folder as `cargo run`.
+- A failed render is a `500`, and its cause, with the template's name and line, is printed in the test output (`[vitesse] error 500: …`).
+- To try a template on its own, give a small test app an environment with that template, `env.add_template(name, source)`, through [`app.templates(env)`](templates.md#filters-functions-and-embedded-templates-apptemplates).
+
+## Testing Server-Sent Events
+
+`TestClient` reads the whole body before returning, so an [event stream](responses.md#server-sent-events) is easy to test as long as it ends: `res.text()` then holds every event, exactly as the browser would receive them.
+
+```rust
+use vitesse::prelude::*;
+use vitesse::sse::Event;
+use vitesse::test::TestClient;
+
+#[tokio::test]
+async fn sends_a_countdown() {
+    let mut app = App::new();
+    app.get("/countdown", |_| async {
+        let (tx, stream) = sse::channel(8);
+        tokio::spawn(async move {
+            for n in (1..=3).rev() {
+                let _ = tx.send(Event::new().event("count").data(n.to_string())).await;
+            }
+        }); // the task ends and drops `tx`: the response ends too
+        stream
+    });
+    let client = TestClient::new(app);
+
+    let res = client.get("/countdown").await;
+    assert_eq!(res.header("content-type"), Some("text/event-stream"));
+    assert_eq!(
+        res.text(),
+        "event: count\ndata: 3\n\nevent: count\ndata: 2\n\nevent: count\ndata: 1\n\n"
+    );
+}
+```
+
+A stream that never ends (a clock, a notification feed) would make the test wait forever. Make it finite in tests (with a query parameter, for instance), check the events on their own (`Event::new().id("1").data("hi").to_string()` is `"id: 1\ndata: hi\n\n"`), or read the first events [on a real port](#integration-tests-on-a-real-port), with a timeout.
+
+## Testing file uploads
+
+`TestClient` has no helper for [multipart forms](requests.md#file-uploads-multipart): write the body by hand. Each part starts with `--` and the boundary, followed by its headers, an empty line and its content; the last boundary ends with `--`. Every line ends with `\r\n`:
+
+```rust
+// tests/upload.rs
+use vitesse::json;
+use vitesse::test::TestClient;
+
+#[tokio::test]
+async fn uploads_a_file() {
+    let client = TestClient::new(my_api::app());
+    let body = "--XyZ\r\n\
+        content-disposition: form-data; name=\"title\"\r\n\
+        \r\n\
+        Holidays\r\n\
+        --XyZ\r\n\
+        content-disposition: form-data; name=\"photo\"; filename=\"beach.txt\"\r\n\
+        content-type: text/plain\r\n\
+        \r\n\
+        sand and sea\r\n\
+        --XyZ--\r\n";
+
+    let res = client
+        .post("/upload")
+        .header("content-type", "multipart/form-data; boundary=XyZ")
+        .body(body)
+        .await;
+    assert_eq!(res.status(), 200);
+
+    // Not a multipart body: 415.
+    assert_eq!(client.post("/upload").json(&json!({})).await.status(), 415);
+}
+```
+
+A `\` at the end of a line continues the Rust string on the next line, without the line break or the indentation. For binary files or many parts, write a small function that assembles the parts in a `Vec<u8>` and pass it to `.body(...)`. Also check that a body over the route's limit gets a `413`.
+
 ## Integration tests on a real port
 
 `TestClient` skips the HTTP/1.1 engine. For what only happens on a real connection (`content-length`, keep-alive, pipelining, `chunked` bodies, `Expect: 100-continue`, header size limits, [WebSocket](#testing-websockets) conversations), or to use a real HTTP client, start the server on a real port:
@@ -486,6 +647,41 @@ async fn echo_over_a_real_websocket() {
 ```
 
 `connect_async` fails if the server refuses the handshake: to check a refusal's status, use `TestClient` as above.
+
+## Testing as a tower service
+
+With Vitesse's `tower` feature, `app.into_service()` turns the application into a tower `Service`, the abstraction axum and hyper are built on. You can then test it the way axum users do, with `tower::ServiceExt::oneshot`:
+
+```toml
+[dependencies]
+vitesse = { git = "https://github.com/maxlestage/Vitesse", features = ["tower"] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt"] }
+tower = { version = "0.5", features = ["util"] }
+```
+
+```rust
+use tower::ServiceExt; // for oneshot
+use vitesse::prelude::*;
+
+#[tokio::test]
+async fn works_as_a_tower_service() {
+    let service = my_api::app().into_service();
+
+    let req = vitesse::http::Request::get("/hello/Ada").body(Body::empty()).unwrap();
+    let res = service.oneshot(req).await.unwrap(); // the error type is Infallible
+    assert_eq!(res.status(), 200);
+    let body = res.into_body().to_bytes().await.unwrap();
+    assert_eq!(body, "Hello Ada!");
+}
+```
+
+- Requests are `http::Request`s with any body type (`vitesse::Body`, http-body-util's `Full`…), and responses are `http::Response<vitesse::Body>`.
+- The service is `Copy`: `oneshot` takes it by value, but `service` stays usable for the next requests.
+- Unlike `TestClient`, there is no client address unless you put a `SocketAddr` in the request's extensions (`req.ip()` is `None` otherwise), and WebSocket routes answer `501`.
+
+For everyday tests, `TestClient` is shorter. The service shines when the app runs inside a tower stack: served by hyper, or nested in an axum router with `Router::nest_service`.
 
 ## Organising your tests
 

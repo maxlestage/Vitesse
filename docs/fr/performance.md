@@ -69,7 +69,7 @@ La quasi-totalité du temps d'une requête simple est passée dans le noyau (lec
   - un seul minuteur par connexion (et non par requête) gère l'inactivité.
 - **Presque aucune allocation** : les requêtes (et leurs tampons) sont recyclées par thread, les tables d'en-têtes des réponses aussi, et le routeur écrit les paramètres dans des tampons réutilisés. Il ne reste que le `Future` du handler (et le tampon d'un corps JSON).
 - **Un thread par cœur** (Linux) : chaque cœur a sa propre boucle d'événements et son propre socket `SO_REUSEPORT` ; le noyau répartit les connexions et une requête ne change jamais de thread.
-- **Un routeur sans regex** : un arbre de segments parcouru sans aucune allocation pour les routes statiques ; les paramètres pointent dans le chemin.
+- **Un routeur sans regex dans le cas courant** : un arbre de segments parcouru sans aucune allocation pour les routes statiques ; les paramètres pointent dans le chemin. Les expressions régulières ne servent qu'aux segments qui en ont besoin ([contraintes](routing.md#contraintes-avec-des-expressions-régulières), texte autour des paramètres), compilées une fois au démarrage.
 - **Zéro compteur atomique partagé par requête** : l'application est figée au démarrage (`&'static`), handlers, middlewares et état sont lus sans `Arc`.
 - **Peu de copies** : la requête traverse middlewares et handlers en ne déplaçant qu'un pointeur, la réponse ne pèse que 72 octets, et le corps n'est lu que si le handler le demande.
 

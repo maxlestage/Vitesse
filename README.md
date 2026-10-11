@@ -11,8 +11,8 @@
 Vitesse is a minimalist web framework that brings the API of Express
 (`app.get`, `req.params`, `res.status(201).json(...)`, `app.use`, `Router`,
 `express.static`…) to native Rust, with its own HTTP/1.1 engine built on
-[tokio](https://tokio.rs), WebSocket built in and HTTP/3 over QUIC as an
-option.
+[tokio](https://tokio.rs), WebSocket built in, and HTTPS, HTTP/2 and HTTP/3
+over QUIC as options.
 
 ```rust
 use vitesse::prelude::*;
@@ -27,9 +27,18 @@ fn main() -> std::io::Result<()> {
 ```
 
 - **Familiar**: routes and parameters, middleware with `next`, routers,
-  static files, cookies, JSON and forms, and an in-memory test client.
-- **Real time and modern protocols**: WebSocket with `app.ws`, and HTTP/3
-  over QUIC with a single line (`http3` feature).
+  static files, cookies, JSON, forms and file uploads, and an in-memory test
+  client.
+- **Real time and modern protocols**: WebSocket with `app.ws`, Server-Sent
+  Events, HTTPS and HTTP/2 (`tls` and `http2` features), and HTTP/3 over
+  QUIC with a single line (`http3` feature).
+- **Batteries included**: CORS, compression, request ids, Basic and Bearer
+  authentication, rate and concurrency limits, trusted proxies, signed
+  cookies and sessions (`session` feature), HTML templates (`templates`
+  feature), and any [tower](https://crates.io/crates/tower) layer (`tower`
+  feature).
+- **Expressive routes**: `/flights/:from-:to`, `/users/:id(\d+)`,
+  `/archive/:year?`, named routes and URL generation.
 - **Fast**: faster than actix-web, axum and Drogon in the benchmark below.
 - **Sturdy**: panics become `500` responses, size limits and timeouts are
   built in, and the server shuts down gracefully.
@@ -98,12 +107,18 @@ gracefully on `Ctrl+C` / `SIGTERM`. If you already run a tokio runtime, use
 | Feature | Default | Adds |
 |---|---|---|
 | `ws` | Enabled | WebSocket: `app.ws(...)` and `vitesse::ws` ([guide](docs/en/websocket.md)) |
+| `tls` | Disabled | HTTPS: `app.tls(...)` and `vitesse::tls`, with rustls ([guide](docs/en/https.md)) |
+| `http2` | Disabled | HTTP/2: through ALPN with `tls`, and h2c in clear text ([guide](docs/en/https.md)) |
 | `http3` | Disabled | HTTP/3 over QUIC: `app.http3(...)` and `vitesse::http3` ([guide](docs/en/http3.md)) |
-| `compress` | Disabled | `middleware::compress()`: responses in Brotli or gzip ([guide](docs/en/middleware.md#compress)) |
+| `multipart` | Disabled | File uploads: `req.multipart()` and `vitesse::multipart` ([guide](docs/en/requests.md)) |
+| `compress` | Disabled | `middleware::compress()` and `middleware::decompress()`: Brotli, gzip ([guide](docs/en/middleware.md#compress)) |
+| `session` | Disabled | Signed cookies and sessions: `app.cookie_secret(...)`, `middleware::session(...)` ([guide](docs/en/sessions.md)) |
+| `templates` | Disabled | HTML templates with minijinja: `app.views(...)`, `req.render(...)` ([guide](docs/en/templates.md)) |
+| `tower` | Disabled | tower layers as middleware, the app as a tower `Service` ([guide](docs/en/middleware.md)) |
 
 ```toml
 [dependencies]
-vitesse = { git = "https://github.com/maxlestage/Vitesse", features = ["http3"] }
+vitesse = { git = "https://github.com/maxlestage/Vitesse", features = ["tls", "http2"] }
 ```
 
 ## Quick tour
@@ -199,6 +214,39 @@ app.run(443) // HTTP/1.1 on TCP 443, HTTP/3 on UDP 443
 Certificates, `Alt-Svc` and deployment behind Caddy or Nginx:
 [HTTP/3 and QUIC](docs/en/http3.md).
 
+### HTTPS and HTTP/2
+
+```rust
+use vitesse::tls::Tls;
+
+// With the `tls` and `http2` features: TLS with rustls, HTTP/2 for browsers.
+app.tls(Tls::from_pem_files("fullchain.pem", "privkey.pem")?);
+app.run(443)
+```
+
+Without TLS, the `http2` feature also answers clients that speak HTTP/2 in
+clear text (h2c). See [HTTPS and HTTP/2](docs/en/https.md).
+
+### Server-Sent Events
+
+```rust
+use vitesse::sse::Event;
+
+app.get("/clock", |_| async {
+    let (tx, events) = sse::channel(16);
+    tokio::spawn(async move {
+        for tick in 0.. {
+            // Fails once the browser has gone away.
+            if tx.send(Event::new().data(tick.to_string())).await.is_err() {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        }
+    });
+    events
+});
+```
+
 ## Documentation
 
 - **Website**: https://maxlestage.github.io/Vitesse/en/docs/
@@ -242,6 +290,9 @@ guide also covers automatic deployments with GitHub Actions:
 | `app.listen(3000)` | `app.run(3000)` |
 
 The complete table is in [Coming from Express](docs/en/from-express.md).
+Coming from Rust's own frameworks? [Coming from axum or
+actix-web](docs/en/from-axum-actix.md) maps their features, extractor by
+extractor and layer by layer.
 
 ## Why it's fast
 
@@ -258,8 +309,9 @@ and a single one of each for a whole batch of pipelined requests.
   recycled per thread.
 - **One thread per core** (Linux): each core has its own event loop and its
   own `SO_REUSEPORT` socket, and a request never changes thread.
-- **A regex-free router**: a tree of segments, with no allocation for static
-  routes.
+- **A tree router**: a tree of segments, with no allocation for static
+  routes; regular expressions only run for the parameters that declare a
+  constraint.
 - **Zero shared atomic counters per request**: the app is frozen at startup
   (`&'static`), so handlers, middleware and state are read without `Arc`.
 
@@ -267,12 +319,11 @@ Details in [Performance](docs/en/performance.md).
 
 ## Current limitations
 
-Like Express, Vitesse deliberately does little. Not included (yet): HTTP/2
-and TLS over TCP (put it behind a reverse proxy such as Nginx or Caddy, as
-is often done with Express: see [Going to production](docs/en/production.md);
-HTTP/3, whose TLS is built in, is supported), WebSocket over HTTP/3,
-compression, template engines, and partial parameters within a segment
-(`/flights/:from-:to`).
+Not included, on purpose: WebSocket over HTTP/3 (no browser uses it),
+HTTP/2 server push (removed from browsers), the `Upgrade: h2c` mechanism
+(removed from the HTTP/2 standard; h2c "prior knowledge" works) and 0-RTT
+over HTTP/3 (replayable requests). tokio is the only runtime, and the API
+may change until 1.0. The full list is in the [FAQ](docs/en/faq.md).
 
 ## Running the project
 
@@ -282,6 +333,8 @@ cargo run --release --example rest_api   # complete CRUD API
 cargo run --release --example demo       # the demo app deployed on Heroku (reads $PORT)
 cargo run --release --example chat       # WebSocket chat room (websocat ws://localhost:3000/chat/ada)
 cargo run --release --example http3 --features http3   # HTTP/1.1 + HTTP/3 on port 4433, self-signed certificate
+cargo run --release --example https --features tls,http2   # HTTPS + HTTP/2 on port 3443, self-signed certificate
+cargo run --release --example live --features multipart    # Server-Sent Events and file uploads
 cargo test                               # unit, integration and doc tests
 cargo run --release --manifest-path bench/runner/Cargo.toml   # benchmark (Linux, wrk, and Drogon if installed)
 docker build -t vitesse-demo . && docker run --rm -p 8080:8080 vitesse-demo

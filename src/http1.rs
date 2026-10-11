@@ -27,8 +27,7 @@ use http::{Method, StatusCode, Version};
 use http_body::{Body as _, Frame, SizeHint};
 use http_body_util::BodyExt;
 use http_body_util::combinators::UnsyncBoxBody;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::TcpStream;
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
 use tokio::sync::mpsc;
 use tokio::time::Instant;
 
@@ -37,7 +36,7 @@ use crate::body::{Body, BoxError, Kind};
 use crate::request::{RawHeaders, ReqBody, Request};
 use crate::response::{Response, header_pool};
 use crate::server::ResponseFuture;
-use crate::upgrade::{OnUpgrade, UpgradeHandle, Upgraded};
+use crate::upgrade::{Io, OnUpgrade, UpgradeHandle, Upgraded};
 use crate::util::http_date;
 
 /// Maximum number of headers per request.
@@ -54,16 +53,13 @@ const INLINE_BODY: usize = 16 * 1024;
 /// Beyond this size, the write buffer is flushed even in the middle of a
 /// batch.
 const WRITE_HIGH_WATER: usize = 64 * 1024;
-/// Period of the inactivity timer.
-const TICK: Duration = Duration::from_secs(15);
-/// The connection is closed after ~60 s without a request…
-const IDLE_TICKS: u32 = 4;
-/// … or ~30 s without a complete head.
-const HEAD_TICKS: u32 = 2;
 
 /// State shared between the accept loop and its connections.
 pub(crate) struct ServerState {
     pub(crate) shutdown: AtomicBool,
+    /// Wakes the connections that wait for the shutdown (HTTP/2 sends its
+    /// `GOAWAY` right away).
+    pub(crate) stopping: tokio::sync::Notify,
     /// Request batches in progress, counted per thread to avoid any
     /// contention between cores (only the sum of the counters is meaningful).
     busy: [Shard; SHARDS],
@@ -79,6 +75,7 @@ impl Default for ServerState {
     fn default() -> Self {
         ServerState {
             shutdown: AtomicBool::new(false),
+            stopping: tokio::sync::Notify::new(),
             busy: std::array::from_fn(|_| Shard::default()),
         }
     }
@@ -88,6 +85,23 @@ impl ServerState {
     /// Number of connections currently processing requests.
     pub(crate) fn busy(&self) -> isize {
         self.busy.iter().map(|s| s.0.load(Relaxed)).sum()
+    }
+
+    /// Starts the graceful shutdown of the connections.
+    pub(crate) fn stop(&self) {
+        self.shutdown.store(true, Relaxed);
+        self.stopping.notify_waiters();
+    }
+
+    /// Completes once the server is stopping.
+    #[cfg_attr(not(feature = "http2"), allow(dead_code))]
+    pub(crate) async fn stopped(&self) {
+        let notified = self.stopping.notified();
+        let mut notified = pin!(notified);
+        notified.as_mut().enable();
+        if !self.shutdown.load(Relaxed) {
+            notified.await;
+        }
     }
 
     #[inline]
@@ -101,11 +115,11 @@ impl ServerState {
 }
 
 /// Marks the connection as busy (for graceful shutdown).
-struct Busy(&'static ServerState);
+pub(crate) struct Busy(&'static ServerState);
 
 impl Busy {
     #[inline]
-    fn new(state: &'static ServerState) -> Self {
+    pub(crate) fn new(state: &'static ServerState) -> Self {
         state.shard().fetch_add(1, Relaxed);
         Busy(state)
     }
@@ -119,9 +133,10 @@ impl Drop for Busy {
 }
 
 /// Serves a connection until it is closed.
-pub(crate) async fn serve_connection(
-    io: TcpStream,
-    peer: SocketAddr,
+pub(crate) async fn serve_connection<IO: Io>(
+    io: IO,
+    peer: Option<SocketAddr>,
+    secure: bool,
     app: &'static AppService,
     state: &'static ServerState,
 ) {
@@ -130,19 +145,31 @@ pub(crate) async fn serve_connection(
         rbuf: BytesMut::with_capacity(READ_SIZE),
         wbuf: Vec::with_capacity(READ_SIZE),
         peer,
+        secure,
         app,
         state,
         linger: false,
         raw: RawHeaders::default(),
         upgrade: None,
+        served: 0,
+        http2: false,
     };
     let result = conn.run().await;
+    #[cfg(feature = "http2")]
+    if conn.http2 {
+        // Préambule HTTP/2 en clair (h2c, « prior knowledge ») : h2 reprend la
+        // connexion avec les octets déjà lus.
+        let Conn { io, rbuf, .. } = conn;
+        let io = crate::http2::Rewind::new(rbuf.freeze(), io);
+        crate::http2::serve(io, peer, secure, app, state).await;
+        return;
+    }
     if let Some(on_upgrade) = conn.upgrade.take() {
         // `101 Switching Protocols` envoyée : la connexion change de protocole.
         if result.is_ok() {
             let Conn { io, rbuf, .. } = conn;
             on_upgrade(Upgraded {
-                io,
+                io: Box::new(io),
                 read: rbuf.to_vec(),
             })
             .await;
@@ -151,14 +178,21 @@ pub(crate) async fn serve_connection(
     }
     if result.is_ok() && conn.linger {
         conn.linger_close().await;
+    } else if result.is_ok() && secure {
+        // TLS : `close_notify` avant de fermer, sinon le client ne sait pas
+        // si la réponse est complète.
+        let _ = tokio::time::timeout(Duration::from_secs(1), conn.io.shutdown()).await;
     }
 }
 
-struct Conn {
-    io: TcpStream,
+struct Conn<IO> {
+    io: IO,
     rbuf: BytesMut,
     wbuf: Vec<u8>,
-    peer: SocketAddr,
+    /// The client's address (`None` on a Unix socket).
+    peer: Option<SocketAddr>,
+    /// The connection is encrypted (TLS).
+    secure: bool,
     app: &'static AppService,
     state: &'static ServerState,
     /// The client is still sending a body that nobody has read.
@@ -167,7 +201,16 @@ struct Conn {
     raw: RawHeaders,
     /// Set by a `101` response: what to do with the connection afterwards.
     upgrade: Option<OnUpgrade>,
+    /// Requests answered on this connection.
+    served: usize,
+    /// The client opened with the HTTP/2 preface (see [`H2_PREFACE`]).
+    #[cfg_attr(not(feature = "http2"), allow(dead_code))]
+    http2: bool,
 }
+
+/// What an HTTP/2 client sends first when it knows the server speaks
+/// HTTP/2 without TLS (h2c "prior knowledge").
+const H2_PREFACE: &[u8] = b"PRI * HTTP/2.0";
 
 /// A request whose response is being prepared.
 struct Job {
@@ -189,9 +232,12 @@ enum Event {
     Tick,
 }
 
-impl Conn {
+impl<IO: Io> Conn<IO> {
     async fn run(&mut self) -> io::Result<()> {
-        let mut tick = pin!(tokio::time::sleep(TICK));
+        // Par défaut : une période de 15 s, fermeture après ~60 s sans requête
+        // ou ~30 s sans tête complète.
+        let (period, idle_ticks, head_ticks) = self.app.config.ticks();
+        let mut tick = pin!(tokio::time::sleep(period));
         let mut quiet_ticks = 0;
         loop {
             date::refresh();
@@ -201,8 +247,17 @@ impl Conn {
                 let head = match parse_head(&self.rbuf, &mut self.raw) {
                     Ok(Some(head)) => head,
                     Ok(None) => break,
+                    Err(_) if cfg!(feature = "http2") && self.is_h2_preface() => {
+                        if self.rbuf.len() < H2_PREFACE.len() {
+                            // Début du préambule seulement : on attend la suite.
+                            break;
+                        }
+                        self.http2 = true;
+                        return Ok(());
+                    }
                     Err(status) => return self.fail(status).await,
                 };
+                self.served += 1;
                 busy.get_or_insert_with(|| Busy::new(self.state));
                 quiet_ticks = 0;
                 let mut req = Request::from_wire(
@@ -211,7 +266,8 @@ impl Conn {
                     head.version,
                     head.target,
                     &self.raw,
-                    Some(self.peer),
+                    self.peer,
+                    self.secure,
                     &self.app.shared,
                 );
                 if head.conditional {
@@ -266,9 +322,9 @@ impl Conn {
                 Event::Tick => {
                     quiet_ticks += 1;
                     let limit = if self.rbuf.is_empty() {
-                        IDLE_TICKS
+                        idle_ticks
                     } else {
-                        HEAD_TICKS
+                        head_ticks
                     };
                     if quiet_ticks >= limit || self.state.shutdown.load(Relaxed) {
                         if !self.rbuf.is_empty() {
@@ -276,10 +332,16 @@ impl Conn {
                         }
                         return Ok(());
                     }
-                    tick.as_mut().reset(Instant::now() + TICK);
+                    tick.as_mut().reset(Instant::now() + period);
                 }
             }
         }
+    }
+
+    /// The connection starts with (the beginning of) the HTTP/2 preface.
+    fn is_h2_preface(&self) -> bool {
+        let n = self.rbuf.len().min(H2_PREFACE.len());
+        self.served == 0 && n > 0 && self.rbuf[..n] == H2_PREFACE[..n]
     }
 
     /// The request body, if it has already been fully received (the common
@@ -433,6 +495,10 @@ impl Conn {
     async fn flush(&mut self) -> io::Result<()> {
         if !self.wbuf.is_empty() {
             self.io.write_all(&self.wbuf).await?;
+            // TLS garde des enregistrements chiffrés en attente : sans `flush`,
+            // la fin d'une réponse peut rester dans son tampon (rien à faire en
+            // TCP).
+            self.io.flush().await?;
             self.wbuf.clear();
             if self.wbuf.capacity() > 1024 * 1024 {
                 self.wbuf.shrink_to(READ_SIZE);
@@ -464,6 +530,7 @@ impl Conn {
                 head = &[];
             }
         }
+        self.io.flush().await?;
         self.wbuf.clear();
         Ok(())
     }
@@ -484,7 +551,9 @@ impl Conn {
         let ctype = res.ctype;
         let headers = res.headers.take();
         let body = std::mem::take(&mut res.body);
-        let mut keep_alive = job.keep_alive && !self.state.shutdown.load(Relaxed);
+        let mut keep_alive = job.keep_alive
+            && !self.state.shutdown.load(Relaxed)
+            && !self.app.config.keep_alive.is_zero();
         let buf = &mut self.wbuf;
 
         write_status(buf, status);
@@ -796,7 +865,7 @@ struct Feeder {
 
 impl Feeder {
     /// Forwards a chunk (or the end) of the body.
-    async fn feed(&mut self, io: &mut TcpStream, rbuf: &mut BytesMut) {
+    async fn feed<IO: AsyncRead + Unpin>(&mut self, io: &mut IO, rbuf: &mut BytesMut) {
         let Some(tx) = &self.tx else { return };
         let msg = loop {
             match self.decoder.decode(rbuf) {

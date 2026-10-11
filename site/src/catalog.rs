@@ -51,7 +51,7 @@ pub const CATEGORIES: [Category; 5] = [
     },
 ];
 
-pub const PAGES: [Page; 22] = [
+pub const PAGES: [Page; 26] = [
     Page {
         slug: "introduction",
         category: 0,
@@ -117,6 +117,16 @@ pub const PAGES: [Page; 22] = [
         ],
     },
     Page {
+        slug: "templates",
+        category: 1,
+        title: ["Gabarits HTML", "HTML templates", "Plantillas HTML"],
+        summary: [
+            "Des pages HTML avec minijinja : héritage, boucles et échappement.",
+            "HTML pages with minijinja: inheritance, loops and escaping.",
+            "Páginas HTML con minijinja: herencia, bucles y escapado.",
+        ],
+    },
+    Page {
         slug: "middleware",
         category: 1,
         title: ["Middlewares", "Middleware", "Middlewares"],
@@ -144,6 +154,20 @@ pub const PAGES: [Page; 22] = [
             "Partager configuration, compteurs ou base de données.",
             "Share configuration, counters or a database.",
             "Comparte configuración, contadores o una base de datos.",
+        ],
+    },
+    Page {
+        slug: "sessions",
+        category: 1,
+        title: [
+            "Cookies signés et sessions",
+            "Signed cookies and sessions",
+            "Cookies firmadas y sesiones",
+        ],
+        summary: [
+            "Des cookies infalsifiables et des données par visiteur.",
+            "Tamper-proof cookies and data per visitor.",
+            "Cookies a prueba de manipulaciones y datos por visitante.",
         ],
     },
     Page {
@@ -201,6 +225,16 @@ pub const PAGES: [Page; 22] = [
         ],
     },
     Page {
+        slug: "https",
+        category: 2,
+        title: ["HTTPS et HTTP/2", "HTTPS and HTTP/2", "HTTPS y HTTP/2"],
+        summary: [
+            "TLS sur TCP avec rustls, et HTTP/2 avec ou sans TLS.",
+            "TLS over TCP with rustls, and HTTP/2 with or without TLS.",
+            "TLS sobre TCP con rustls, y HTTP/2 con o sin TLS.",
+        ],
+    },
+    Page {
         slug: "http3",
         category: 2,
         title: ["HTTP/3 et QUIC", "HTTP/3 and QUIC", "HTTP/3 y QUIC"],
@@ -232,6 +266,20 @@ pub const PAGES: [Page; 22] = [
             "Le guide de migration, concept par concept.",
             "The migration guide, concept by concept.",
             "La guía de migración, concepto a concepto.",
+        ],
+    },
+    Page {
+        slug: "from-axum-actix",
+        category: 2,
+        title: [
+            "Venir d'axum ou d'actix-web",
+            "Coming from axum or actix-web",
+            "Viniendo de axum o actix-web",
+        ],
+        summary: [
+            "Les équivalences, fonctionnalité par fonctionnalité.",
+            "The equivalents, feature by feature.",
+            "Las equivalencias, funcionalidad por funcionalidad.",
         ],
     },
     Page {

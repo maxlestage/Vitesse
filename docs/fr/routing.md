@@ -34,6 +34,9 @@ app.route(purge, "/cache", |_| async { "cache vidé" });
 > [!WARNING]
 > `app.route` n'est pas le `app.route(chemin)` d'Express. Dans Vitesse, il enregistre une seule route pour la `Method` passée. Pour mettre plusieurs méthodes sur le même chemin, enchaînez plutôt les appels (voir plus bas).
 
+> [!TIP]
+> Les formulaires HTML ne savent envoyer que `GET` et `POST`. Pour atteindre une route `PUT` ou `DELETE` depuis un formulaire, changez la méthode dans un middleware global avec `req.set_method(...)`, comme le `method-override` d'Express : voir [Surcharger la méthode](requests.md#surcharger-la-méthode).
+
 ### Handlers
 
 Un handler est une fonction ou une closure `async` qui prend une `Request` et renvoie n'importe quoi qui implémente `IntoResponse` : du texte, `Json(...)`, un tuple `(statut, corps)`, un `Result`, etc. (voir [Envoyer la réponse](responses.md)).
@@ -83,8 +86,94 @@ app.get("/users/:id/posts/:post", |req: Request| async move {
 
 - `req.params()` parcourt toutes les paires `(nom, valeur)`, dans l'ordre.
 - Les valeurs sont décodées : `/users/Fran%C3%A7ois` donne `François`. Un `+` reste un `+`, car il ne signifie « espace » que dans la query string. `req.path()` renvoie toujours le chemin brut.
-- Un paramètre occupe un segment entier. Il ne correspond jamais à un segment vide ni à quoi que ce soit contenant un `/`.
-- Un nom ne peut contenir que des lettres, des chiffres et `_`. Les segments partiels comme `/vols/:de-:vers` et les expressions régulières ne sont pas pris en charge. Capturez le segment entier et découpez-le vous-même.
+- Un paramètre ne correspond jamais à une valeur vide ni à quoi que ce soit contenant un `/`.
+- Un nom ne peut contenir que des lettres, des chiffres et `_`.
+
+La syntaxe est celle d'Express (version 4) : quelques formes de plus fonctionnent donc, plusieurs paramètres dans un même segment, les contraintes et les paramètres optionnels.
+
+### Plusieurs paramètres dans un segment
+
+Un segment peut mélanger du texte et des paramètres, du moment qu'un peu de texte les sépare :
+
+```rust
+app.get("/flights/:from-:to", |req: Request| async move {
+    let from = req.param("from").unwrap();
+    let to = req.param("to").unwrap();
+    format!("de {from} à {to}")
+});
+app.get("/files/:name.:ext", show_file);
+app.get("/api/v:version/status", api_status);
+app.get("/img/:id.png", show_png);
+```
+
+| Requête | Route | Paramètres |
+|---|---|---|
+| `/flights/LAX-SFO` | `/flights/:from-:to` | `from = "LAX"`, `to = "SFO"` |
+| `/files/report.pdf` | `/files/:name.:ext` | `name = "report"`, `ext = "pdf"` |
+| `/files/archive.tar.gz` | `/files/:name.:ext` | `name = "archive"`, `ext = "tar.gz"` |
+| `/api/v2/status` | `/api/v:version/status` | `version = "2"` |
+| `/img/42.png` | `/img/:id.png` | `id = "42"` |
+| `/files/README` ou `/api/2/status` | aucune : `404` | |
+
+- Chaque paramètre prend au moins un caractère, et tous sauf le dernier en prennent le moins possible, comme dans Express : voilà pourquoi `archive.tar.gz` donne `archive` et `tar.gz`.
+- Deux paramètres doivent être séparés par du texte : `/:from:to` est refusé au démarrage, puisque rien n'indique où `from` se termine.
+
+### Contraintes avec des expressions régulières
+
+Une expression régulière entre parenthèses, juste après le nom, restreint les valeurs qu'un paramètre accepte. Une requête dont la valeur ne correspond pas ne correspond tout simplement pas à la route : une autre route peut la prendre, ou elle reçoit une `404`.
+
+```rust
+app.get(r"/users/:id(\d+)", |req: Request| async move {
+    let id: u64 = req.param_as("id")?;
+    Ok::<_, Error>(format!("utilisateur n°{id}"))
+});
+app.get("/docs/:lang(en|fr|es)/:page", show_doc);
+app.get(r"/posts/:year(\d{4})-:slug", show_post);
+```
+
+| Requête | Réponse |
+|---|---|
+| `/users/42` | `utilisateur n°42` |
+| `/users/ada` | `404` (ou une autre route, voir [plus bas](#la-route-la-plus-précise-lemporte)) |
+| `/docs/fr/routing` | `show_doc`, avec `lang = "fr"` |
+| `/docs/de/routing` | `404` |
+| `/posts/2024-hello-world` | `show_post`, avec `year = "2024"` et `slug = "hello-world"` |
+
+- En Rust, écrivez le chemin sous forme de chaîne brute, `r"/users/:id(\d+)"`, pour que les barres obliques inverses restent telles quelles. Dans une chaîne ordinaire, doublez-les : `"/users/:id(\\d+)"`.
+- L'expression doit correspondre à la valeur entière : `:lang(en|fr)` accepte `fr`, pas `fra`. Inutile d'ajouter `^` et `$`.
+- Elle ne peut pas contenir de `/`, puisqu'un paramètre n'en contient jamais.
+- Elle est testée sur la valeur telle qu'elle apparaît dans l'URL, avant décodage : pour elle, `%20` fait trois caractères.
+- Vitesse utilise [regex-lite](https://crates.io/crates/regex-lite) : la syntaxe habituelle (classes, `\d`, `\w`, `|`, répétitions, `(?i)` pour ignorer la casse) fonctionne, mais `\d` et `\w` ne couvrent que l'ASCII, et les classes Unicode comme `\p{L}` ne sont pas disponibles. Les expressions sont compilées une seule fois, au démarrage, et ne s'exécutent que pour les paramètres qui ont une contrainte.
+- Une expression invalide arrête le programme au démarrage : `invalid route: invalid regular expression…`.
+
+Une contrainte choisit la route, et `req.param_as` convertit toujours la valeur : ici, un `u64` trop grand pour tenir reçoit quand même une `400`.
+
+> [!NOTE]
+> Express 5 a retiré les expressions régulières des chemins, et actix-web les écrit `{id:\d+}`. Vitesse garde la syntaxe d'Express 4, `:id(\d+)`.
+
+### Paramètres optionnels
+
+Un `?` après un paramètre le rend optionnel. Une seule route répond alors à plusieurs chemins :
+
+```rust
+app.get("/archive/:year?/:month?", |req: Request| async move {
+    match (req.param("year"), req.param("month")) {
+        (Some(year), Some(month)) => format!("archives de {month}/{year}"),
+        (Some(year), None) => format!("archives de {year}"),
+        _ => "toutes les archives".to_owned(),
+    }
+});
+```
+
+| Requête | `req.param("year")` | `req.param("month")` |
+|---|---|---|
+| `/archive` | `None` | `None` |
+| `/archive/2024` | `Some("2024")` | `None` |
+| `/archive/2024/05` | `Some("2024")` | `Some("05")` |
+
+- Seuls les derniers segments d'un chemin peuvent être optionnels (`/:lang?/about` est refusé), et seulement un paramètre qui occupe un segment entier (`/files/:name.:ext?` est refusé aussi).
+- Une contrainte peut aussi être optionnelle : `r"/users/:id(\d+)?"` correspond à `/users` et à `/users/7`, pas à `/users/ada`.
+- La route compte comme une route par chemin possible : `/archive/:year?` et une route `/archive` distincte pour la même méthode sont [en double](#routes-invalides-ou-en-double).
 
 ## Paramètres typés
 
@@ -104,6 +193,8 @@ GET /users/42   → 200 utilisateur n°42
 GET /users/abc  → 400 {"error":"invalid parameter 'id': 'abc'"}
 GET /users/-1   → 400 (un u64 ne peut pas être négatif)
 ```
+
+Pour répondre `404` au lieu de `400` à `/users/abc`, ou pour laisser une autre route la prendre, ajoutez une [contrainte](#contraintes-avec-des-expressions-régulières) à la route : `r"/users/:id(\d+)"`.
 
 Pour vos propres types, implémentez `FromStr` :
 
@@ -162,28 +253,47 @@ app.get("/files/*path", |req: Request| async move {
 
 ### La route la plus précise l'emporte
 
-Quand plusieurs routes pourraient correspondre, Vitesse les compare segment par segment : **statique > paramètre > joker**. L'ordre de déclaration n'a pas d'importance. Dans Express, c'est la première route enregistrée qui gagne.
+Quand plusieurs routes pourraient correspondre, Vitesse les compare segment par segment, du type de segment le plus précis au moins précis :
+
+1. un segment statique (`/users/new`) ;
+2. un segment avec une contrainte ou avec du texte autour de ses paramètres (`/users/:id(\d+)`, `/img/:id.png`) ;
+3. un simple paramètre (`/users/:name`) ;
+4. un joker (`/users/*rest`).
+
+L'ordre dans lequel vous déclarez les routes n'a pas d'importance, alors que dans Express, c'est la première route enregistrée qui gagne. Une route avec une contrainte et une route avec un simple paramètre peuvent donc occuper la même position :
 
 ```rust
 app.get("/users/new", |_| async { "formulaire de création" });
-app.get("/users/:id", |_| async { "un utilisateur" });
+app.get(r"/users/:id(\d+)", |_| async { "un utilisateur, par identifiant" });
+app.get("/users/:name", |_| async { "un utilisateur, par nom" });
 app.get("/users/*rest", |_| async { "tout le reste sous /users" });
 ```
 
 | Requête | Route utilisée |
 |---|---|
-| `/users/new` | `/users/new` (le statique bat le paramètre) |
-| `/users/42` | `/users/:id` |
+| `/users/new` | `/users/new` (le statique bat tout le reste) |
+| `/users/42` | `/users/:id(\d+)` (la contrainte correspond) |
+| `/users/ada` | `/users/:name` (la contrainte ne correspond pas) |
 | `/users/42/settings` | `/users/*rest` |
 | `/users` | `/users/*rest` (joker vide) |
 
 Si une branche ne mène nulle part, le routeur revient en arrière et essaie l'option suivante. Avec `/a/:x/c` et `/a/b/d`, une requête vers `/a/b/c` correspond à `/a/:x/c` avec `x = "b"`.
 
+L'ordre de déclaration ne compte qu'entre deux segments du deuxième type à la même position, par exemple `/:id(\d+)` et `/:slug([a-z-]+)` : ils sont essayés dans l'ordre où vous les avez déclarés.
+
 ### Barre oblique finale, casse et query string
 
 - La barre oblique finale est ignorée : `/users/` correspond à `/users`. Express fait de même par défaut.
-- Les chemins sont **sensibles à la casse** : `/Users` ne correspond pas à `/users`. Express, lui, ignore la casse par défaut.
+- Les chemins sont **sensibles à la casse** par défaut : `/Users` ne correspond pas à `/users`. Express, lui, ignore la casse par défaut ; pour faire de même, appelez `app.case_sensitive(false)`.
 - La query string ne joue aucun rôle : `/search?q=rust` correspond à `/search`.
+
+```rust
+let mut app = App::new();
+app.case_sensitive(false);
+app.get("/users/:id", show_user); // répond aussi à /Users/Ada et à /USERS/Ada
+```
+
+Avec `app.case_sensitive(false)`, les segments statiques et le texte autour des paramètres (`.png` dans `/img/:id.png`) correspondent quelle que soit leur casse, préfixes de montage compris. Les paramètres gardent la casse de la requête (`req.param("id")` vaut `"Ada"`), et les contraintes ne sont pas modifiées : ajoutez `(?i)` à l'expression si elle doit ignorer la casse elle aussi. Seules les lettres ASCII sont concernées.
 
 ### Routes invalides ou en double
 
@@ -191,7 +301,9 @@ Vitesse détecte les erreurs de déclaration au démarrage de l'application, pas
 
 - le chemin ne commence pas par `/` ;
 - il contient un segment vide (`/a//b`) ;
-- un nom de paramètre est invalide ;
+- un nom de paramètre est invalide, ou deux paramètres se suivent sans texte entre eux (`/:a:b`) ;
+- une contrainte n'est pas une expression régulière valide, ou sa parenthèse n'est pas fermée ;
+- un paramètre optionnel n'est pas à la fin du chemin, ou n'occupe pas un segment entier ;
 - un joker n'est pas le dernier segment ;
 - la même méthode est enregistrée deux fois sur le même chemin.
 
@@ -201,6 +313,87 @@ Deux motifs qui ne diffèrent que par le nom de leurs paramètres sont la même 
 thread 'main' panicked at src/main.rs:12:9:
 duplicate route: GET /users/:name is already defined
 ```
+
+`/users/:id(\d+)` et `/users/:name` n'entrent pas en conflit, puisqu'un seul des deux a une contrainte.
+
+## La route correspondante : `req.route()`
+
+`req.route()` renvoie le motif de la route qui a correspondu, préfixe de montage compris, comme le `req.route.path` d'Express (ou le `MatchedPath` d'axum) :
+
+```rust
+app.get("/users/:id", |req: Request| async move {
+    format!("route : {}", req.route().unwrap_or("?")) // "route : /users/:id"
+});
+```
+
+| Requête | `req.path()` | `req.route()` |
+|---|---|---|
+| `GET /users/42` | `/users/42` | `Some("/users/:id")` |
+| `GET /api/v1/items/a/b`, routeur monté sur `/api/:version` avec une route `/items/*path` | `/api/v1/items/a/b` | `Some("/api/:version/items/*path")` |
+| `GET /archive/2024`, route `/archive/:year?/:month?` | `/archive/2024` | `Some("/archive/:year?/:month?")` |
+| `DELETE /users/42`, sans route `DELETE` (`405`) | `/users/42` | `None` |
+| `GET /nope` (`404`) | `/nope` | `None` |
+
+Le motif est celui que vous avez déclaré, contraintes et `?` compris : `r"/users/:id(\d+)"` donne `/users/:id(\d+)`.
+
+C'est ce qu'il vous faut dans les journaux et les métriques : `/users/:id` donne une seule ligne dans un tableau de bord, là où le chemin brut en donnerait une par utilisateur. Les middlewares globaux s'exécutent avant le routage : à cet endroit, `req.route()` cherche donc la route à la demande. Appelez-la avant `next.run(req)`, qui prend la requête ; le résultat est une `&'static str`, vous pouvez donc le garder ensuite :
+
+```rust
+use std::time::Instant;
+
+app.middleware(|req: Request, next: Next| async move {
+    let route = req.route().unwrap_or("aucune route");
+    let start = Instant::now();
+    let res = next.run(req).await;
+    println!("{route} {} {:?}", res.status_code(), start.elapsed());
+    res
+});
+```
+
+Dans les middlewares de routeur, les middlewares de route et les handlers, la route est déjà connue et `req.route()` ne coûte rien.
+
+## Routes nommées et génération d'URL
+
+Écrire `/users/42` à la main dans chaque lien et chaque redirection fonctionne, jusqu'au jour où la route change. Donnez plutôt un nom à la route, avec `.name(...)` juste après elle, et laissez Vitesse construire ses chemins, comme le `url_for` d'actix-web :
+
+```rust
+async fn show_user(req: Request) -> String {
+    format!("utilisateur {}", req.param("id").unwrap_or("?"))
+}
+
+async fn create_user(req: Request) -> vitesse::Result<Redirect> {
+    let id = 42; // l'identifiant du nouvel utilisateur
+    let link = req.path_for("user", &[&id])?; // "/users/42"
+    Ok(Redirect::see_other(link))
+}
+
+app.get("/users/:id", show_user).name("user");
+app.post("/users", create_user);
+```
+
+- `req.path_for(nom, &[valeurs])` renvoie le chemin de la route nommée, avec ses paramètres remplis **dans l'ordre**. Les valeurs peuvent être n'importe quoi qui implémente `Display` : `&[&42]`, `&[&"LAX", &"SFO"]`, `&[]` pour une route sans paramètres.
+- `req.url_for(nom, &[valeurs])` renvoie l'URL absolue, `https://example.com/users/42` : le même chemin, précédé de `req.protocol()` et de `req.host()`. Derrière un proxy, déclarez-le avec [`app.trust_proxy`](production.md#connaître-ladresse-ip-du-client) pour qu'ils reflètent ce que voit le client.
+
+| Route | Appel | Résultat |
+|---|---|---|
+| `/users/:id` | `path_for("user", &[&42])` | `/users/42` |
+| `/users/:id` | `path_for("user", &[&"ada lovelace"])` | `/users/ada%20lovelace` |
+| `/flights/:from-:to` | `path_for("flight", &[&"LAX", &"SFO"])` | `/flights/LAX-SFO` |
+| `/files/*path` | `path_for("file", &[&"docs/report 2024.pdf"])` | `/files/docs/report%202024.pdf` |
+| `/archive/:year?/:month?` | `path_for("archive", &[&2024])` | `/archive/2024` |
+| `/users/:id` | `url_for("user", &[&42])` | `https://example.com/users/42` |
+
+- Les valeurs sont encodées pour l'URL : une espace devient `%20` et un `/` devient `%2F`. Seul un joker garde ses `/`, puisqu'il représente plusieurs segments.
+- Les paramètres optionnels de la fin peuvent être omis, tout comme un joker : `path_for("archive", &[])` donne `/archive`.
+- Les contraintes sont vérifiées : `path_for` refuse `"ada"` pour `r"/users/:id(\d+)"`.
+- Le chemin est construit au moment de l'appel : il peut donc aller n'importe où, dans un en-tête `Location`, un lien dans `Html(...)`, un champ JSON.
+
+Les noms sont vérifiés à deux moments :
+
+- **Au démarrage**, `name` panique si aucune route ne vient juste avant (un `mount`, par exemple), ou si le nom est déjà pris : les noms sont uniques dans toute l'application.
+- **À l'appel**, `path_for` et `url_for` renvoient une erreur `500` si le nom est inconnu, si une valeur manque ou est en trop, si une valeur ne respecte pas sa contrainte, ou (`url_for` seulement) si la requête n'a pas d'hôte. Le client ne voit que `{"error":"Internal Server Error"}` ; la cause (`cannot build the URL of 'user': missing a value for ':id'`) est affichée sur la sortie d'erreur, comme pour les autres erreurs serveur.
+
+Les routes déclarées dans un [routeur](routers.md#routes-nommées-dans-les-routeurs) peuvent aussi être nommées. Le nom appartient à toute l'application, et le chemin inclut le préfixe de montage : ses paramètres viennent en premier dans la liste des valeurs.
 
 ## HEAD, OPTIONS et 405
 
@@ -250,6 +443,7 @@ app.fallback(|_| async { res::file("dist/index.html").await });
 
 - Le fallback s'exécute après les middlewares globaux, comme n'importe quelle route.
 - Il n'est pas appelé pour une `405`, puisque le chemin existe, simplement pas pour cette méthode.
+- Un [routeur](routers.md#le-fallback-dun-routeur) peut avoir son propre fallback pour les chemins sous son préfixe, avec `router.fallback(handler)` : des `404` en JSON sous `/api`, par exemple, et une page HTML partout ailleurs.
 - Pour changer d'un coup le format de *toutes* les réponses d'erreur (404, 405, 400, 500, etc.), utilisez plutôt `app.on_error`. Voir [Gestion des erreurs](errors.md).
 
 ## Organiser ses routes

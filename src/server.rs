@@ -5,7 +5,6 @@ use std::io;
 use std::net::{IpAddr, SocketAddr, ToSocketAddrs};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::pin::{Pin, pin};
-use std::sync::atomic::Ordering;
 use std::task::{Context, Poll};
 use std::time::Duration;
 
@@ -18,9 +17,49 @@ use crate::handler::{BoxFuture, panic_response};
 use crate::http1::{ServerState, serve_connection};
 use crate::request::Request;
 use crate::response::Response;
+use crate::upgrade::Io;
 
-/// Time given to in-flight requests during a graceful shutdown.
-pub(crate) const SHUTDOWN_GRACE: Duration = Duration::from_secs(10);
+/// The engine's timeouts and limits (see [`App::keep_alive`](crate::App::keep_alive)
+/// and the following methods).
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct ServerConfig {
+    /// How long an idle connection is kept open; zero: no keep-alive.
+    pub(crate) keep_alive: Duration,
+    /// Time given to a client to send a complete request head.
+    pub(crate) header_timeout: Duration,
+    /// Time given to in-flight requests during a graceful shutdown.
+    pub(crate) shutdown_timeout: Duration,
+    /// Open connections per accept loop (per thread with `thread_per_core`).
+    pub(crate) max_connections: usize,
+}
+
+impl Default for ServerConfig {
+    fn default() -> Self {
+        ServerConfig {
+            keep_alive: Duration::from_secs(60),
+            header_timeout: Duration::from_secs(30),
+            shutdown_timeout: Duration::from_secs(10),
+            max_connections: usize::MAX,
+        }
+    }
+}
+
+impl ServerConfig {
+    /// The period of the HTTP/1.1 inactivity timer, and the number of
+    /// periods after which an idle connection, or one whose request head is
+    /// incomplete, is closed. A single timer per connection, which is not
+    /// reset by each request: the delays are respected to within one period.
+    pub(crate) fn ticks(&self) -> (Duration, u32, u32) {
+        let shortest = if self.keep_alive.is_zero() {
+            self.header_timeout
+        } else {
+            self.keep_alive.min(self.header_timeout)
+        };
+        let tick = (shortest / 2).max(Duration::from_millis(10));
+        let count = |d: Duration| (d.as_nanos().div_ceil(tick.as_nanos()) as u32).max(1);
+        (tick, count(self.keep_alive), count(self.header_timeout))
+    }
+}
 
 /// An address to listen on: `3000`, `"127.0.0.1:8080"`, `([0, 0, 0, 0], 80)`…
 ///
@@ -155,7 +194,8 @@ impl Server {
     }
 
     /// Serves requests until `Ctrl+C` or `SIGTERM`, then gives in-flight
-    /// requests time to finish (10 s at most), like [`App::run`](crate::App::run).
+    /// requests time to finish ([`App::shutdown_timeout`](crate::App::shutdown_timeout),
+    /// 10 s by default), like [`App::run`](crate::App::run).
     ///
     /// To stop on another signal, use
     /// [`with_graceful_shutdown`](Self::with_graceful_shutdown).
@@ -164,7 +204,8 @@ impl Server {
     }
 
     /// Serves requests until `signal` completes, then gives in-flight
-    /// requests time to finish (10 s at most).
+    /// requests time to finish ([`App::shutdown_timeout`](crate::App::shutdown_timeout),
+    /// 10 s by default).
     pub async fn with_graceful_shutdown<F>(self, signal: F) -> io::Result<()>
     where
         F: Future<Output = ()>,
@@ -186,9 +227,39 @@ impl Server {
     }
 }
 
+/// A listening socket: TCP, or a Unix socket.
+pub(crate) trait Listener: Send {
+    type Io: Io;
+
+    /// The next connection, and the client's address if there is one.
+    fn next_connection(
+        &self,
+    ) -> impl Future<Output = io::Result<(Self::Io, Option<SocketAddr>)>> + Send;
+}
+
+impl Listener for TcpListener {
+    type Io = tokio::net::TcpStream;
+
+    async fn next_connection(&self) -> io::Result<(Self::Io, Option<SocketAddr>)> {
+        let (stream, peer) = self.accept().await?;
+        let _ = stream.set_nodelay(true);
+        Ok((stream, Some(peer)))
+    }
+}
+
+#[cfg(unix)]
+impl Listener for tokio::net::UnixListener {
+    type Io = tokio::net::UnixStream;
+
+    async fn next_connection(&self) -> io::Result<(Self::Io, Option<SocketAddr>)> {
+        let (stream, _) = self.accept().await?;
+        Ok((stream, None))
+    }
+}
+
 /// The accept loop.
-pub(crate) async fn serve(
-    listener: TcpListener,
+pub(crate) async fn serve<L: Listener>(
+    listener: L,
     app: &'static AppService,
     shutdown: impl Future<Output = ()>,
 ) -> io::Result<()> {
@@ -198,10 +269,18 @@ pub(crate) async fn serve(
     let mut shutdown = pin!(shutdown);
 
     loop {
+        if connections.len() >= app.config.max_connections {
+            // Plein : on attend qu'une connexion se termine avant d'en accepter une autre.
+            tokio::select! {
+                biased;
+                _ = &mut shutdown => break,
+                _ = connections.join_next() => continue,
+            }
+        }
         let (stream, peer) = tokio::select! {
             biased;
             _ = &mut shutdown => break,
-            accepted = listener.accept() => match accepted {
+            accepted = listener.next_connection() => match accepted {
                 Ok(conn) => conn,
                 Err(e) => {
                     if !is_transient(&e) {
@@ -212,8 +291,19 @@ pub(crate) async fn serve(
                 }
             },
         };
-        let _ = stream.set_nodelay(true);
-        connections.spawn(serve_connection(stream, peer, app, state));
+        #[cfg(feature = "tls")]
+        if let Some(acceptor) = &app.tls {
+            connections.spawn(crate::tls::serve(
+                acceptor.clone(),
+                stream,
+                peer,
+                app,
+                state,
+            ));
+            while connections.try_join_next().is_some() {}
+            continue;
+        }
+        connections.spawn(serve_connection(stream, peer, false, app, state));
         // Libère les connexions terminées.
         while connections.try_join_next().is_some() {}
     }
@@ -221,8 +311,8 @@ pub(crate) async fn serve(
     // Arrêt propre : on n'accepte plus rien, on laisse les requêtes en cours
     // se terminer, puis on ferme les connexions inactives.
     drop(listener);
-    state.shutdown.store(true, Ordering::Relaxed);
-    let deadline = tokio::time::Instant::now() + SHUTDOWN_GRACE;
+    state.stop();
+    let deadline = tokio::time::Instant::now() + app.config.shutdown_timeout;
     while state.busy() > 0 && tokio::time::Instant::now() < deadline {
         tokio::time::sleep(Duration::from_millis(5)).await;
     }
@@ -357,6 +447,78 @@ fn run_thread_per_core(
         }
     }
     result
+}
+
+/// A server listening on a Unix domain socket, created by
+/// [`App::bind_unix`](crate::App::bind_unix): the usual way to sit behind
+/// a reverse proxy on the same machine (Nginx's `proxy_pass
+/// http://unix:/run/my-app.sock`), without a TCP port.
+///
+/// Requests on a Unix socket have no client address: [`Request::ip`]
+/// returns `None` unless [`App::trust_proxy`](crate::App::trust_proxy) is
+/// set (the proxy then reports it in `X-Forwarded-For`).
+#[cfg(unix)]
+pub struct UnixServer {
+    app: &'static AppService,
+    listener: tokio::net::UnixListener,
+    path: std::path::PathBuf,
+}
+
+#[cfg(unix)]
+impl UnixServer {
+    pub(crate) fn new(
+        app: &'static AppService,
+        listener: tokio::net::UnixListener,
+        path: std::path::PathBuf,
+    ) -> Self {
+        UnixServer {
+            app,
+            listener,
+            path,
+        }
+    }
+
+    /// The path of the socket (to change its permissions, for example).
+    pub fn path(&self) -> &std::path::Path {
+        &self.path
+    }
+
+    /// Serves requests until `Ctrl+C` or `SIGTERM`, then shuts down
+    /// gracefully and removes the socket file.
+    pub async fn run(self) -> io::Result<()> {
+        self.with_graceful_shutdown(shutdown_signal()).await
+    }
+
+    /// Serves requests until `signal` completes, then shuts down gracefully
+    /// and removes the socket file.
+    pub async fn with_graceful_shutdown<F>(self, signal: F) -> io::Result<()>
+    where
+        F: Future<Output = ()>,
+    {
+        let result = serve(self.listener, self.app, signal).await;
+        let _ = std::fs::remove_file(&self.path);
+        result
+    }
+}
+
+/// Opens a Unix socket at `path`, replacing a socket file left over by a
+/// previous run (but not a live one, nor any other kind of file).
+#[cfg(unix)]
+pub(crate) fn bind_unix(path: &std::path::Path) -> io::Result<tokio::net::UnixListener> {
+    use std::os::unix::fs::FileTypeExt;
+
+    if let Ok(meta) = std::fs::symlink_metadata(path) {
+        if meta.file_type().is_socket() {
+            if std::os::unix::net::UnixStream::connect(path).is_ok() {
+                return Err(io::Error::new(
+                    io::ErrorKind::AddrInUse,
+                    format!("{} is used by a running server", path.display()),
+                ));
+            }
+            std::fs::remove_file(path)?;
+        }
+    }
+    tokio::net::UnixListener::bind(path)
 }
 
 /// The `Future` of a response, which turns a panic into a `500`.

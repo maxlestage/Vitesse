@@ -4,7 +4,7 @@ A WebSocket keeps a connection open in both directions, so the server can push m
 
 ## Setup
 
-WebSocket support is the `ws` Cargo feature, **enabled by default**: `vitesse = { git = "https://github.com/maxlestage/Vitesse" }` is all you need. It is built on tokio-tungstenite, the Rust implementation tested against the Autobahn test suite. The handshake (RFC 6455) and the handover of the TCP connection after the `101 Switching Protocols` response are done by Vitesse's own HTTP/1.1 engine.
+WebSocket support is the `ws` Cargo feature, **enabled by default**: `vitesse = { git = "https://github.com/maxlestage/Vitesse" }` is all you need. It is built on tokio-tungstenite, the Rust implementation tested against the Autobahn test suite. The handshake (RFC 6455) and the handover of the TCP connection after the `101 Switching Protocols` response are done by Vitesse's own HTTP/1.1 engine. With the `http2` feature, WebSocket also runs [over HTTP/2](#websocket-over-http2).
 
 If you don't need WebSocket, turn off the default features to compile a little less:
 
@@ -53,6 +53,7 @@ Type a line, and the server answers `echo: …`.
 | Request | Response |
 |---|---|
 | A WebSocket handshake (`GET` with `Upgrade: websocket`, `Sec-WebSocket-Version: 13` and a valid key) | `101 Switching Protocols`, then the handler takes over the connection |
+| A WebSocket handshake over HTTP/2 (an extended `CONNECT` with `:protocol websocket`, `http2` feature) | `200 OK`, then the handler takes over the HTTP/2 stream (see [WebSocket over HTTP/2](#websocket-over-http2)) |
 | A plain HTTP request (a browser opening the URL, `curl`) | `426 Upgrade Required`: "this route only accepts WebSocket connections" |
 | Another version of the protocol (`Sec-WebSocket-Version` other than `13`) | `426 Upgrade Required` |
 | An invalid `Sec-WebSocket-Key` | `400 Bad Request` |
@@ -134,10 +135,12 @@ app.ws("/rooms/:room", |req, mut socket| async move {
 
 > [!NOTE]
 > Browsers can't add headers such as `Authorization` to a WebSocket connection. They do send the site's cookies with the handshake: authenticate with a session cookie, or with a short-lived token in the query string (`ws://…/live?token=…`).
+>
+> With Vitesse's [sessions](sessions.md), `req.session()` works in the WebSocket handler: it holds the session as it was when the connection was accepted. Changes made there are not saved, because the session middleware has already sent its response (the `101`): to change the session, do it in a regular route.
 
 ## Middleware and authentication
 
-Global middleware and router middleware run on the handshake request, like on any request: logging, authentication, rate limiting… A middleware that answers `401` refuses the connection before it is opened, and the headers a middleware adds appear on the `101` response.
+Global middleware and router middleware run on the handshake request, like on any request: logging, authentication, rate limiting… A middleware that answers `401` refuses the connection before it is opened, and the headers a middleware adds appear on the `101` response (the `200` response over HTTP/2).
 
 ```rust
 async fn require_session(req: Request, next: Next) -> Response {
@@ -347,6 +350,42 @@ async fn echoes_text_messages() {
 
 More examples in [Testing](testing.md#testing-websockets).
 
+## Secure WebSocket: `wss://`
+
+A page served over HTTPS can only open `wss://` connections, WebSocket over TLS. When Vitesse serves HTTPS itself (the `tls` feature and `app.tls(...)`, see [HTTPS and HTTP/2](https.md)), your `app.ws` routes answer `wss://` with no change to their code:
+
+```js
+const socket = new WebSocket(`wss://${location.host}/echo`);
+```
+
+Behind a reverse proxy that terminates TLS, the browser speaks `wss://` to the proxy, and the proxy forwards plain `ws://` to Vitesse.
+
+## WebSocket over HTTP/2
+
+When Vitesse serves HTTPS itself with HTTP/2 (the `tls` and `http2` features, see [HTTPS and HTTP/2](https.md)), browsers don't need a separate connection for a WebSocket: Chrome and Firefox, for example, open it on a stream of the HTTP/2 connection they already have with the site (RFC 8441). Vitesse announces it supports this as soon as the `http2` and `ws` features are both enabled, and there is nothing to change in your code:
+
+- the same `app.ws` routes and `ws::Upgrade` accept these handshakes, which are routed as a `GET`, so global and router middleware run on them as usual;
+- the handshake gets a `200 OK` instead of a `101` (there is no `Sec-WebSocket-Key` over HTTP/2), then the handler receives the same `WebSocket` as over HTTP/1.1;
+- in the handler, `req.version()` is `HTTP/2.0`, and `HTTP/1.1` when the client chose a separate connection.
+
+```rust
+app.ws("/echo", |req, mut socket| async move {
+    // "connected over HTTP/2.0" in a recent browser, on an HTTPS site with HTTP/2
+    let _ = socket.send(format!("connected over {:?}", req.version())).await;
+    while let Some(Ok(message)) = socket.recv().await {
+        if socket.send(message).await.is_err() {
+            break;
+        }
+    }
+});
+```
+
+On the browser side, nothing changes either: `new WebSocket("wss://example.com/echo")` picks HTTP/2 or HTTP/1.1 on its own. It also works in clear text, with h2c "prior knowledge", for the clients that support it; browsers never use h2c.
+
+Behind a reverse proxy, the browser opens the WebSocket to the proxy (over HTTP/2 or HTTP/1.1, as the proxy allows), and the proxy usually talks HTTP/1.1 to Vitesse: the setup in [Behind a reverse proxy](#behind-a-reverse-proxy) stays the same.
+
+WebSocket over HTTP/3 (RFC 9220) is not supported: the h3 crate doesn't implement it, and browsers don't rely on it. When a page came over [HTTP/3](http3.md), browsers open its WebSockets over HTTP/2 or HTTP/1.1, on TCP, which Vitesse serves next to HTTP/3.
+
 ## Behind a reverse proxy
 
 The proxy must let the `Upgrade` through, then keep the connection open:
@@ -371,8 +410,8 @@ Proxies and platforms close connections that stay silent too long. For a connect
 
 ## Limits
 
-- **HTTP/1.1 only.** WebSocket is not available over [HTTP/3](http3.md): clients open their WebSocket connections over a regular TCP connection, even when the rest of the site uses HTTP/3.
-- **Graceful shutdown.** On `Ctrl+C` or `SIGTERM`, open WebSocket connections are not waited for: they are cut as soon as the HTTP requests in progress have finished, and at the latest at the end of the 10-second grace period (see [Server configuration](server.md#graceful-shutdown)). They are cut without a closing handshake, and clients see an abnormal closure (code `1006`). Make your clients reconnect automatically, which they need anyway for network drops.
+- **HTTP/1.1 and HTTP/2, not HTTP/3.** WebSocket works over HTTP/1.1 and, with the `http2` feature, [over HTTP/2](#websocket-over-http2), but not over [HTTP/3](http3.md): browsers then open their WebSockets over TCP, even when the rest of the site uses HTTP/3.
+- **Graceful shutdown.** On `Ctrl+C` or `SIGTERM`, open WebSocket connections are not waited for: they are cut as soon as the HTTP requests in progress have finished, and at the latest at the end of the grace period (10 seconds by default, `app.shutdown_timeout`; see [Server configuration](server.md#graceful-shutdown)). They are cut without a closing handshake, and clients see an abnormal closure (code `1006`). Make your clients reconnect automatically, which they need anyway for network drops.
 - **Message size.** 16 MiB per message by default; lower it with `Upgrade::max_message_size` for public endpoints.
 - **Threads.** In thread-per-core mode, a connection stays on the thread that accepted it: as in any handler, don't block it (see [Performance](performance.md)).
 

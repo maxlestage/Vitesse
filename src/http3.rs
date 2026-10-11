@@ -19,35 +19,38 @@
 //! ```
 //!
 //! Browsers discover HTTP/3 through the `Alt-Svc` header: Vitesse adds
-//! `alt-svc: h3=":PORT"; ma=86400` to its HTTP/1.1 responses. They only
-//! trust it on an HTTPS page: behind a reverse proxy that handles TLS for
-//! TCP (Caddy, Nginx…), set the public port with
+//! `alt-svc: h3=":PORT"; ma=86400` to its HTTP/1.1 and HTTP/2 responses.
+//! They only trust it on an HTTPS page: serve HTTPS with
+//! [`App::tls`](crate::App::tls) (`tls` feature), or, behind a reverse
+//! proxy that handles TLS for TCP (Caddy, Nginx…), set the public port with
 //! [`Http3::alt_svc_port`] and open the UDP port to Vitesse.
 //!
-//! The request body is read in full (up to [`App::body_limit`](crate::App::body_limit),
-//! `413` beyond) before the handler runs.
+//! The request body is streamed to the handler as it arrives, like over
+//! HTTP/1.1 and HTTP/2, within [`Request::body_limit`](crate::Request::body_limit).
 
 use std::io;
 use std::net::SocketAddr;
 use std::path::Path;
+use std::pin::Pin;
 use std::sync::Arc;
+use std::task::{Context, Poll};
 use std::time::SystemTime;
 
-use bytes::{Buf, Bytes, BytesMut};
+use bytes::{Buf, Bytes};
 use h3::server::RequestStream;
 use http::{HeaderValue, Method, StatusCode, header};
-use http_body::Body as _;
+use http_body::{Body as _, Frame, SizeHint};
 use http_body_util::BodyExt;
-use rustls::pki_types::pem::PemObject;
-use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use tokio::sync::watch;
 use tokio::task::JoinSet;
 
 pub use rustls;
 
 use crate::app::AppService;
+use crate::body::{Body, BoxError};
+use crate::pem::invalid;
 use crate::request::{ReqBody, Request};
-use crate::server::{ResponseFuture, SHUTDOWN_GRACE};
+use crate::server::ResponseFuture;
 use crate::util::http_date;
 
 /// How long `Alt-Svc` remains valid in the browser: one day.
@@ -72,23 +75,12 @@ impl std::fmt::Debug for Http3 {
     }
 }
 
-fn invalid(e: impl std::fmt::Display) -> io::Error {
-    io::Error::new(io::ErrorKind::InvalidInput, e.to_string())
-}
-
 impl Http3 {
     /// From a certificate chain and a private key in PEM (the server
     /// certificate first, then the intermediates).
     pub fn from_pem(cert_chain: &[u8], private_key: &[u8]) -> io::Result<Self> {
-        let certs = CertificateDer::pem_slice_iter(cert_chain)
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(invalid)?;
-        if certs.is_empty() {
-            return Err(invalid("no certificate found in the PEM data"));
-        }
-        let key = PrivateKeyDer::from_pem_slice(private_key).map_err(invalid)?;
-        let provider = Arc::new(rustls::crypto::ring::default_provider());
-        let tls = rustls::ServerConfig::builder_with_provider(provider)
+        let (certs, key) = crate::pem::load(cert_chain, private_key)?;
+        let tls = rustls::ServerConfig::builder_with_provider(crate::pem::provider())
             .with_protocol_versions(&[&rustls::version::TLS13])
             .map_err(invalid)?
             .with_no_client_auth()
@@ -186,12 +178,13 @@ pub(crate) async fn serve(
     // Plus de nouvelles connexions ; les connexions ouvertes ont reçu un
     // GOAWAY et se terminent avec leurs requêtes en cours.
     endpoint.set_server_config(None);
-    let _ = tokio::time::timeout(SHUTDOWN_GRACE, async {
+    let grace = app.config.shutdown_timeout;
+    let _ = tokio::time::timeout(grace, async {
         while connections.join_next().await.is_some() {}
     })
     .await;
     endpoint.close(0u32.into(), b"server shutting down");
-    let _ = tokio::time::timeout(SHUTDOWN_GRACE, endpoint.wait_idle()).await;
+    let _ = tokio::time::timeout(grace, endpoint.wait_idle()).await;
 }
 
 /// Waits until the server is stopping (the guard of `watch` is released
@@ -244,64 +237,82 @@ async fn connection(
     while requests.join_next().await.is_some() {}
 }
 
-async fn send_status<S>(stream: &mut RequestStream<S, Bytes>, status: StatusCode)
-where
-    S: h3::quic::BidiStream<Bytes>,
-{
-    let mut res = http::Response::new(());
-    *res.status_mut() = status;
-    if stream.send_response(res).await.is_ok() {
-        let _ = stream.finish().await;
+/// The body of a request, read from the QUIC stream as the handler asks
+/// for it.
+struct IncomingBody<S: h3::quic::RecvStream> {
+    stream: RequestStream<S, Bytes>,
+    remaining: Option<u64>,
+    done: bool,
+}
+
+impl<S: h3::quic::RecvStream> http_body::Body for IncomingBody<S> {
+    type Data = Bytes;
+    type Error = BoxError;
+
+    fn poll_frame(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+    ) -> Poll<Option<Result<Frame<Bytes>, BoxError>>> {
+        if self.done {
+            return Poll::Ready(None);
+        }
+        match std::task::ready!(self.stream.poll_recv_data(cx)) {
+            Ok(Some(mut chunk)) => {
+                let data = chunk.copy_to_bytes(chunk.remaining());
+                if let Some(remaining) = &mut self.remaining {
+                    *remaining = remaining.saturating_sub(data.len() as u64);
+                }
+                Poll::Ready(Some(Ok(Frame::data(data))))
+            }
+            Ok(None) => {
+                self.done = true;
+                Poll::Ready(None)
+            }
+            Err(e) => {
+                self.done = true;
+                Poll::Ready(Some(Err(Box::new(e))))
+            }
+        }
+    }
+
+    fn is_end_stream(&self) -> bool {
+        self.done
+    }
+
+    fn size_hint(&self) -> SizeHint {
+        match self.remaining {
+            Some(n) => SizeHint::with_exact(n),
+            None => SizeHint::default(),
+        }
     }
 }
 
 async fn respond<S>(
     app: &'static AppService,
     req: http::Request<()>,
-    mut stream: RequestStream<S, Bytes>,
+    stream: RequestStream<S, Bytes>,
     peer: SocketAddr,
 ) where
     S: h3::quic::BidiStream<Bytes>,
+    S::RecvStream: Send + 'static,
 {
-    let (mut parts, ()) = req.into_parts();
-    // En HTTP/3, l'hôte est dans `:authority` : on le remet dans `Host` pour
-    // que `req.header("host")` fonctionne comme en HTTP/1.1.
-    let missing_host = !parts.headers.contains_key(header::HOST);
-    if let Some(host) = parts
-        .uri
-        .authority()
-        .filter(|_| missing_host)
-        .and_then(|a| HeaderValue::from_str(a.as_str()).ok())
-    {
-        parts.headers.insert(header::HOST, host);
-    }
+    let (parts, ()) = req.into_parts();
     let is_head = parts.method == Method::HEAD;
 
-    let limit = app.shared.body_limit;
-    let mut body = BytesMut::new();
-    loop {
-        match stream.recv_data().await {
-            Ok(Some(mut chunk)) => {
-                if body.len() + chunk.remaining() > limit {
-                    return send_status(&mut stream, StatusCode::PAYLOAD_TOO_LARGE).await;
-                }
-                while chunk.has_remaining() {
-                    let part = chunk.chunk();
-                    let n = part.len();
-                    body.extend_from_slice(part);
-                    chunk.advance(n);
-                }
-            }
-            Ok(None) => break,
-            Err(_) => return,
-        }
-    }
-    let body = if body.is_empty() {
-        ReqBody::Empty
-    } else {
-        ReqBody::Buffered(body.freeze())
-    };
-    let req = Request::from_parts(parts, body, Some(peer), &app.shared);
+    // Le corps arrive au fil de l'eau : le handler le lit (dans la limite
+    // de sa route) pendant que la réponse part sur l'autre moitié du flux.
+    let (mut stream, recv) = stream.split();
+    let length = parts
+        .headers
+        .get(header::CONTENT_LENGTH)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.parse().ok());
+    let body = ReqBody::Stream(Body::wrap(IncomingBody {
+        stream: recv,
+        remaining: length,
+        done: false,
+    }));
+    let req = Request::from_parts(parts, body, Some(peer), true, &app.shared);
     let res = ResponseFuture::new(app, req).await;
 
     let (mut head, body) = res.into_http().into_parts();

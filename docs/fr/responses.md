@@ -38,6 +38,7 @@ Le compilateur vérifie que chaque branche du code produit une réponse : imposs
 | `Error` | le statut de l'erreur | `application/json` : `{"error": "..."}` |
 | `Redirect` | `301`, `302`, `303` ou `307` | aucun, en-tête `Location` |
 | `Body` | `200` | aucun (voir [Streaming](#streaming)) |
+| `Sse` (venant de `sse::channel` ou de `Sse::new`) | `200` | `text/event-stream` (voir [Server-Sent Events](#server-sent-events)) |
 | `Response` | ce que vous avez construit | |
 | `http::Response<Body>` | inchangée | |
 
@@ -179,10 +180,22 @@ La route de connexion envoie `Set-Cookie: session=abc123; Path=/; Max-Age=604800
 | `.http_only(true)` | `HttpOnly` |
 | `.same_site(SameSite::Strict / Lax / None)` | `SameSite` |
 
-Chaque appel à `.cookie(...)` ajoute son propre en-tête `Set-Cookie` : vous pouvez donc en envoyer plusieurs. `.clear_cookie(nom)` envoie `nom=; Path=/; Max-Age=0` : si le cookie a été créé avec un autre chemin ou domaine, construisez vous-même le cookie de suppression avec les mêmes attributs et `.max_age(Duration::ZERO)`. Pour lire les cookies envoyés par le navigateur, utilisez `req.cookie("session")` (voir [Lire la requête](requests.md)).
+`cookie.name()` et `cookie.value()` relisent un cookie, et `cookie.with_value(valeur)` renvoie le même cookie avec une autre valeur.
+
+Chaque appel à `.cookie(...)` ajoute son propre en-tête `Set-Cookie` : vous pouvez donc en envoyer plusieurs. `.clear_cookie(nom)` envoie `nom=; Path=/; Max-Age=0` : si le cookie a été créé avec un autre chemin ou domaine, construisez vous-même le cookie de suppression avec les mêmes attributs et `.max_age(Duration::ZERO)`. Pour lire les cookies envoyés par le navigateur, utilisez `req.cookie("session")` (voir [Lire la requête](requests.md#cookies)).
 
 > [!IMPORTANT]
-> La valeur est écrite telle quelle : elle n'est ni signée, ni chiffrée, ni encodée. Gardez-la compatible avec une URL (un jeton de session aléatoire, par exemple) et stockez les données sensibles côté serveur. Les navigateurs n'acceptent `SameSite::None` qu'avec `.secure(true)`.
+> La valeur est écrite telle quelle : elle n'est ni chiffrée ni encodée, et pas signée non plus, sauf si vous la signez (voir plus bas). Gardez-la compatible avec une URL (un jeton de session aléatoire, par exemple) et stockez les données sensibles côté serveur. Les navigateurs n'acceptent `SameSite::None` qu'avec `.secure(true)`.
+
+Avec la feature `session` et un secret (`app.cookie_secret(...)`), `req.sign_cookie(cookie)` signe un cookie avant que vous ne l'envoyiez, comme `res.cookie(nom, valeur, { signed: true })` en Express. Le visiteur peut toujours lire la valeur, mais pas la modifier : `req.signed_cookie(nom)` la relit, et renvoie `None` pour un cookie qui a été modifié.
+
+```rust
+app.post("/theme/dark", |req: Request| async move {
+    res::send_status(204).cookie(req.sign_cookie(Cookie::new("theme", "dark")))
+});
+```
+
+Cette route envoie `Set-Cookie: theme=dark.<signature>; Path=/`. Pour des données que le visiteur ne doit pas voir, ou que vous devez pouvoir révoquer (qui est connecté), utilisez une session : le navigateur ne garde alors qu'un identifiant aléatoire. Les deux sont expliqués dans [Cookies signés et sessions](sessions.md).
 
 ### Redirections
 
@@ -200,6 +213,19 @@ app.post("/contact", |_| async { Redirect::see_other("/merci") });
 
 Pour un autre statut, posez l'en-tête vous-même : `res::status(308).header("location", "/v2")`. Une URL contenant des caractères invalides (comme un retour à la ligne) produit un `500`.
 
+## Rendre un gabarit
+
+`Html(...)` envoie du HTML que vous avez construit vous-même. Pour de vraies pages, avec un gabarit de base, des boucles et l'échappement, activez la feature `templates` : `req.render(gabarit, contexte)` rend un gabarit du dossier déclaré avec `app.views(...)`, comme le `res.render` d'Express :
+
+```rust
+app.views("templates");
+app.get("/users", |req: Request| async move {
+    req.render("users.html", json!({ "title": "Utilisateurs", "users": ["Ada", "Grace"] }))
+});
+```
+
+`req.render` renvoie un `Result<Html<String>, Error>` : un `200` avec `content-type: text/html; charset=utf-8`, ou un `500` si le gabarit manque ou si son rendu échoue (la cause est journalisée). Le contexte peut être un `json!` ou n'importe quelle structure `Serialize`. Tout est expliqué dans [Gabarits HTML](templates.md).
+
 ## Fichiers et téléchargements
 
 ```rust
@@ -213,7 +239,7 @@ app.get("/facture", |_| async {
 
 ## Streaming
 
-`Body::from_stream(flux)` envoie chaque élément d'un flux dès qu'il est produit, en `Transfer-Encoding: chunked`. Le flux produit des `Result<D, E>`, où `D` se convertit en octets (`String`, `&'static str`, `Vec<u8>`, `Bytes`) et `E` est un type d'erreur. Les flux viennent en général de crates comme `tokio-stream` ou `futures-util`. Voici des Server-Sent Events alimentés par un canal :
+`Body::from_stream(flux)` envoie chaque élément d'un flux dès qu'il est produit, en `Transfer-Encoding: chunked` en HTTP/1.1. Le flux produit des `Result<D, E>`, où `D` se convertit en octets (`String`, `&'static str`, `Vec<u8>`, `Bytes`) et `E` est un type d'erreur. Les flux viennent en général de crates comme `tokio-stream` ou `futures-util`. Voici un gros export CSV, produit par une tâche et envoyé au fur et à mesure :
 
 ```toml
 [dependencies]
@@ -222,26 +248,28 @@ tokio-stream = "0.1"
 ```
 
 ```rust
-use std::time::Duration;
 use tokio_stream::wrappers::ReceiverStream;
 use vitesse::prelude::*;
 
-app.get("/events", |_| async {
+app.get("/export.csv", |_| async {
     let (tx, rx) = tokio::sync::mpsc::channel::<Result<String, std::io::Error>>(16);
     tokio::spawn(async move {
-        for i in 1..=5 {
-            if tx.send(Ok(format!("data: tic {i}\n\n"))).await.is_err() {
+        let _ = tx.send(Ok("id,nom\n".to_string())).await;
+        for id in 1..=100_000 {
+            // Dans une vraie application : des lignes lues dans la base de données, page par page.
+            if tx.send(Ok(format!("{id},utilisateur {id}\n"))).await.is_err() {
                 break; // le client est parti
             }
-            tokio::time::sleep(Duration::from_secs(1)).await;
         }
     });
     Response::new()
-        .content_type("text/event-stream")
-        .header("cache-control", "no-cache")
+        .content_type("text/csv; charset=utf-8")
+        .attachment("utilisateurs.csv")
         .send(Body::from_stream(ReceiverStream::new(rx)))
 });
 ```
+
+Pour pousser des événements vers une page du navigateur (notifications, progression, données en direct), n'écrivez pas le format `text/event-stream` à la main : utilisez les [Server-Sent Events](#server-sent-events), juste en dessous.
 
 `Body::wrap(corps)` accepte n'importe quel [`http_body::Body`](https://docs.rs/http-body), et `req.take_body()` vous donne le corps de la requête sous forme de `Body`, que vous pouvez renvoyer tel quel :
 
@@ -251,6 +279,157 @@ app.post("/echo", |req: Request| async move { req.take_body() });
 
 > [!TIP]
 > Si vous connaissez à l'avance la taille totale d'un flux, indiquez-la avec `.header("content-length", taille)` : la réponse est alors envoyée avec cette longueur au lieu d'un encodage `chunked`.
+
+## Server-Sent Events
+
+Les Server-Sent Events (SSE) gardent une réponse ouverte et poussent des événements vers le navigateur au moment où ils se produisent : des notifications, une barre de progression, un tableau de bord en direct, les mots de la réponse d'un chatbot. Quand seul le serveur parle, c'est plus simple qu'un [WebSocket](websocket.md) : c'est du HTTP ordinaire, et le navigateur le reçoit avec `EventSource`, qui se reconnecte tout seul. Le module `sse` (dans le prélude, sans feature à activer) s'occupe du format et des en-têtes.
+
+### Avec un canal
+
+Le plus simple est `sse::channel(tampon)` : il renvoie un émetteur et la réponse. Le handler renvoie la réponse tout de suite, et une tâche envoie les événements :
+
+```rust
+use std::time::Duration;
+use vitesse::prelude::*;
+use vitesse::sse::Event;
+
+app.get("/clock", |_| async {
+    let (tx, stream) = sse::channel(16);
+    tokio::spawn(async move {
+        for seconds in 0.. {
+            let event = Event::new().event("tick").data(format!("{seconds} s"));
+            if tx.send(event).await.is_err() {
+                break; // le navigateur est parti
+            }
+            tokio::time::sleep(Duration::from_secs(1)).await;
+        }
+    });
+    stream
+});
+```
+
+La réponse part avec `content-type: text/event-stream` et `cache-control: no-cache`, et chaque événement part dès qu'il est envoyé :
+
+```text
+event: tick
+data: 0 s
+
+event: tick
+data: 1 s
+
+```
+
+- `tampon` est le nombre d'événements qui peuvent attendre pendant que la connexion est lente ; quand il est plein, `send` attend.
+- La réponse se termine quand tous les `Sender` sont abandonnés : ici, quand la tâche se termine. `Sender` est `Clone` : plusieurs tâches peuvent donc alimenter la même réponse.
+- `tx.try_send(event)` envoie sans attendre. Il échoue avec `sse::TrySendError::Full` quand le tampon est plein (une connexion lente : sautez l'événement, ou envoyez-le plus tard) et avec `TrySendError::Closed` une fois le navigateur parti ; dans les deux cas, l'événement vous est rendu. `tx.is_closed()` vous dit si le navigateur est toujours là.
+
+### À partir d'un flux
+
+`Sse::new(flux)` accepte n'importe quel `Stream` de `Result<Event, E>`, venant de tokio-stream, de futures-util ou de votre propre code. La réponse se termine avec le flux :
+
+```rust
+use std::convert::Infallible;
+use vitesse::sse::{Event, Sse};
+
+app.get("/countdown", |_| async {
+    let events = (1..=3).rev().map(|n| Ok::<_, Infallible>(Event::new().data(n.to_string())));
+    Sse::new(futures_util::stream::iter(events))
+});
+```
+
+Une `Err` venant du flux coupe la connexion : le navigateur voit une erreur réseau et se reconnecte.
+
+### Les événements
+
+| Méthode d'`Event` | Ligne envoyée | Dans le navigateur |
+|---|---|---|
+| `Event::new().data(texte)` | `data: …` (une ligne par ligne de `texte`, que le navigateur rassemble) | `e.data` |
+| `.json_data(&valeur)?` | `data: …`, `valeur` sérialisée en JSON | `JSON.parse(e.data)` |
+| `.event("tick")` | `event: tick` | l'écouteur qui le reçoit : `addEventListener("tick", …)` (`message` sans cela) |
+| `.id("42")` | `id: 42` | renvoyé dans `Last-Event-ID` quand le navigateur se reconnecte |
+| `.retry(Duration::from_secs(5))` | `retry: 5000` | le temps que le navigateur attend avant de se reconnecter |
+| `.comment("…")` | `: …` | ignoré |
+
+`json_data` renvoie un `Result`, car la sérialisation peut échouer (une `500` avec `?`). `event` et `id` paniquent s'ils contiennent un retour à la ligne, qui casserait le format. `event.to_string()` renvoie le texte qui sera envoyé, ce qui est pratique dans les tests.
+
+### Keep-alive
+
+Les proxys et les load balancers ferment les connexions qui restent trop longtemps silencieuses, souvent au bout d'une minute. Quand aucun événement n'a été envoyé depuis 15 secondes, `sse::channel` comme `Sse::new` envoient donc un commentaire (`:`), que le navigateur ignore. Pour changer ce comportement, ou le désactiver avec `.no_keep_alive()` :
+
+```rust
+use vitesse::sse::KeepAlive;
+
+let (tx, stream) = sse::channel(16);
+// … lancez la tâche qui utilise `tx`
+stream.keep_alive(KeepAlive::new().interval(Duration::from_secs(30)).text("ping"))
+```
+
+### Quand le navigateur s'en va
+
+Quand l'utilisateur ferme l'onglet, la connexion se ferme et Vitesse abandonne la réponse. À partir de là, `tx.send(...)` renvoie une erreur : arrêtez la tâche à ce moment-là, comme dans l'horloge ci-dessus. Vitesse remarque le départ la prochaine fois qu'il écrit sur la connexion : un événement ou, au plus tard, le commentaire de keep-alive suivant.
+
+Une tâche qui envoie rarement attendrait longtemps avant de s'en apercevoir. Faites-la attendre `tx.closed()` en même temps, avec `tokio::select!`. Ici, chaque page reçoit les nouvelles publiées sur un canal `broadcast` gardé dans l'[état](state.md) :
+
+```rust
+use tokio::sync::broadcast;
+
+let (news, _) = broadcast::channel::<String>(100);
+app.state(news);
+
+app.get("/news", |req: Request| async move {
+    let mut inbox = req.state::<broadcast::Sender<String>>().subscribe();
+    let (tx, stream) = sse::channel(16);
+    tokio::spawn(async move {
+        loop {
+            tokio::select! {
+                _ = tx.closed() => break, // le navigateur est parti
+                message = inbox.recv() => match message {
+                    Ok(text) => { let _ = tx.send(Event::new().data(text)).await; }
+                    Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                    Err(broadcast::error::RecvError::Closed) => break,
+                },
+            }
+        }
+    });
+    stream
+});
+```
+
+### Dans le navigateur
+
+```js
+const source = new EventSource("/clock");
+source.addEventListener("tick", (e) => console.log("tick", e.data));
+source.onmessage = (e) => console.log(e.data); // les événements sans type `event`
+```
+
+`EventSource` se reconnecte tout seul quand la connexion tombe, et aussi quand la réponse se termine. À la reconnexion, il envoie l'`id` du dernier événement reçu dans un en-tête `Last-Event-ID` : lisez-le pour envoyer ce que la page a manqué.
+
+```rust
+app.get("/feed", |req: Request| async move {
+    let last: u64 = req.header("last-event-id").and_then(|id| id.parse().ok()).unwrap_or(0);
+    let (tx, stream) = sse::channel(16);
+    tokio::spawn(async move {
+        for n in last + 1.. {
+            let event = Event::new().id(n.to_string()).data(format!("message {n}"));
+            if tx.send(event).await.is_err() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_secs(1)).await;
+        }
+    });
+    stream
+});
+```
+
+Pour arrêter pour de bon, appelez `source.close()` en JavaScript (après un dernier événement qui indique à la page que c'est fini, par exemple), ou répondez à la reconnexion par `204 No Content`.
+
+### Bon à savoir
+
+- SSE fonctionne de la même façon en HTTP/1.1, en [HTTP/2](https.md) et en [HTTP/3](http3.md). En HTTP/1.1, les navigateurs ouvrent au plus 6 connexions par site, et chaque `EventSource` en occupe une : avec beaucoup d'onglets ouverts, HTTP/2 ou HTTP/3, qui partagent une seule connexion, évitent cette limite.
+- `middleware::compress()` ne touche pas aux flux d'événements, et `middleware::timeout(...)` ne limite que le temps mis à renvoyer la réponse, pas la durée du flux.
+- Nginx met les réponses en mémoire tampon par défaut, ce qui retient les événements : ajoutez `proxy_buffering off;` au bloc `location`, ou envoyez l'en-tête depuis Vitesse avec `stream.into_response().header("x-accel-buffering", "no")`.
+- `examples/live.rs`, dans le dépôt, affiche une horloge en direct dans une page (`cargo run --example live --features multipart`).
 
 ## `HEAD`, `204` et `304`
 

@@ -1103,3 +1103,553 @@ async fn graceful_shutdown_finishes_requests() {
         .unwrap();
     assert!(tokio::net::TcpStream::connect(addr).await.is_err());
 }
+
+#[tokio::test]
+async fn trust_proxy_reads_forwarded_headers_like_express() {
+    fn app(trust: Option<vitesse::TrustProxy>) -> TestClient {
+        let mut app = App::new();
+        if let Some(trust) = trust {
+            app.trust_proxy(trust);
+        }
+        app.get("/", |req: Request| async move {
+            format!(
+                "{} {} {} {}",
+                req.ip().unwrap(),
+                req.protocol(),
+                req.hostname().unwrap_or("-"),
+                req.host().unwrap_or("-"),
+            )
+        });
+        TestClient::new(app)
+    }
+    let forwarded = |c: TestClient| async move {
+        c.get("/")
+            .header("host", "internal:8080")
+            .header("x-forwarded-for", "203.0.113.9, 10.0.0.2")
+            .header("x-forwarded-proto", "https")
+            .header("x-forwarded-host", "example.com")
+            .await
+            .text()
+    };
+
+    // Par défaut : rien n'est cru, l'adresse est celle du pair TCP.
+    assert_eq!(
+        forwarded(app(None)).await,
+        "127.0.0.1 http internal internal:8080"
+    );
+    assert_eq!(
+        forwarded(app(Some(true.into()))).await,
+        "203.0.113.9 https example.com example.com"
+    );
+    assert_eq!(
+        forwarded(app(Some(1.into()))).await,
+        "10.0.0.2 https example.com example.com"
+    );
+    assert_eq!(
+        forwarded(app(Some("loopback, 10.0.0.0/8".into()))).await,
+        "203.0.113.9 https example.com example.com"
+    );
+    // Le pair (127.0.0.1) n'est pas un proxy de confiance.
+    assert_eq!(
+        forwarded(app(Some("10.0.0.0/8".into()))).await,
+        "127.0.0.1 http internal internal:8080"
+    );
+}
+
+#[tokio::test]
+async fn matched_route_pattern() {
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let log = seen.clone();
+    let mut app = App::new();
+    // Avant le routage, la route est cherchée à la demande.
+    app.middleware(move |req: Request, next: Next| {
+        let log = log.clone();
+        async move {
+            log.lock()
+                .unwrap()
+                .push(req.route().unwrap_or("-").to_owned());
+            next.run(req).await
+        }
+    });
+    let route = |req: Request| async move { req.route().unwrap_or("-").to_owned() };
+    app.get("/users/:id", route);
+    let mut api = Router::new();
+    api.get("/items/*path", route);
+    api.middleware(|req: Request, next: Next| async move {
+        let route = req.route().unwrap_or("-").to_owned();
+        next.run(req).await.header("x-route", route)
+    });
+    app.mount("/api/:version", api);
+
+    let c = TestClient::new(app);
+    assert_eq!(c.get("/users/42").await.text(), "/users/:id");
+    let r = c.get("/api/v1/items/a/b").await;
+    assert_eq!(r.text(), "/api/:version/items/*path");
+    assert_eq!(r.header("x-route"), Some("/api/:version/items/*path"));
+    assert_eq!(c.get("/nope").await.status(), 404);
+    assert_eq!(
+        *seen.lock().unwrap(),
+        ["/users/:id", "/api/:version/items/*path", "-"]
+    );
+}
+
+#[tokio::test]
+async fn router_fallbacks_cover_their_prefix() {
+    let mut api = Router::new();
+    api.get("/users", |_| async { "users" });
+    api.middleware(
+        |req: Request, next: Next| async move { next.run(req).await.header("x-api", "1") },
+    );
+    api.fallback(|req: Request| async move {
+        (
+            404,
+            Json(json!({ "error": format!("no API route {}", req.path()) })),
+        )
+    });
+    let mut admin = Router::new();
+    admin.get("/", |_| async { "admin" });
+    admin.fallback(|_| async { (404, "admin 404") });
+    api.mount("/admin", admin);
+    let mut docs = Router::new();
+    docs.get("/", |_| async { "docs" });
+
+    let mut app = App::new();
+    app.mount("/api", api);
+    app.mount("/docs", docs);
+    app.fallback(|_| async { (404, Html("<h1>404</h1>")) });
+    let c = TestClient::new(app);
+
+    let r = c.get("/api/nope").await;
+    assert_eq!(r.status(), 404);
+    assert_eq!(r.text(), r#"{"error":"no API route /api/nope"}"#);
+    assert_eq!(r.header("x-api"), Some("1"));
+    // Le chemin existe avec une autre méthode : 405, pas le fallback.
+    assert_eq!(c.post("/api/users").await.status(), 405);
+    // Le routeur le plus profond l'emporte.
+    let r = c.get("/api/admin/x").await;
+    assert_eq!(r.text(), "admin 404");
+    assert_eq!(r.header("x-api"), Some("1"));
+    assert_eq!(c.get("/api/admin").await.text(), "admin");
+    // Sans fallback, le routeur laisse celui de l'application.
+    assert_eq!(c.get("/docs/nope").await.text(), "<h1>404</h1>");
+    assert_eq!(c.get("/elsewhere").await.text(), "<h1>404</h1>");
+}
+
+#[tokio::test]
+async fn content_negotiation() {
+    let mut app = App::new();
+    app.get("/user", |req: Request| async move {
+        match req.accepts(&["html", "json"]) {
+            Some("html") => res::html("<b>Ada</b>"),
+            Some(_) => res::json(json!({ "name": "Ada" })),
+            None => res::send_status(406),
+        }
+    });
+    app.get("/lang", |req: Request| async move {
+        req.accepts_language(&["en", "fr", "es"])
+            .unwrap_or("en")
+            .to_owned()
+    });
+    let c = TestClient::new(app);
+    let browser = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8";
+    let r = c.get("/user").header("accept", browser).await;
+    assert_eq!(r.text(), "<b>Ada</b>");
+    let r = c.get("/user").header("accept", "application/json").await;
+    assert_eq!(r.text(), r#"{"name":"Ada"}"#);
+    assert_eq!(c.get("/user").await.text(), "<b>Ada</b>");
+    let r = c.get("/user").header("accept", "image/png").await;
+    assert_eq!(r.status(), 406);
+    let r = c
+        .get("/lang")
+        .header("accept-language", "fr-FR,fr;q=0.9,en;q=0.8")
+        .await;
+    assert_eq!(r.text(), "fr");
+    assert_eq!(
+        c.get("/lang").header("accept-language", "de").await.text(),
+        "en"
+    );
+}
+
+#[tokio::test]
+async fn body_limit_per_route() {
+    let echo = |req: Request| async move {
+        let limit = req.body_limit();
+        let bytes = req.bytes().await?;
+        Ok::<_, Error>(format!("{} / {limit}", bytes.len()))
+    };
+    let mut app = App::new();
+    app.body_limit(1000);
+    app.post("/small", echo);
+    app.post("/large", echo.with(middleware::body_limit(10_000)));
+    let mut tiny = Router::new();
+    tiny.middleware(middleware::body_limit(10));
+    tiny.post("/", echo);
+    app.mount("/tiny", tiny);
+    let c = TestClient::new(app);
+
+    assert_eq!(
+        c.post("/small").body(vec![0; 1000]).await.text(),
+        "1000 / 1000"
+    );
+    assert_eq!(c.post("/small").body(vec![0; 5000]).await.status(), 413);
+    assert_eq!(
+        c.post("/large").body(vec![0; 5000]).await.text(),
+        "5000 / 10000"
+    );
+    assert_eq!(c.post("/large").body(vec![0; 20_000]).await.status(), 413);
+    assert_eq!(c.post("/tiny").body(vec![0; 11]).await.status(), 413);
+}
+
+#[tokio::test]
+async fn authentication_middlewares() {
+    use vitesse::middleware::BasicUser;
+
+    let mut app = App::new();
+    let mut admin = Router::new();
+    admin.middleware(
+        middleware::basic_auth([("admin", "s3cret"), ("ada", "lovelace")]).realm("Admin"),
+    );
+    admin.get("/", |req: Request| async move {
+        format!("hello {}", req.get::<BasicUser>().unwrap().0)
+    });
+    app.mount("/admin", admin);
+    let mut api = Router::new();
+    api.middleware(middleware::bearer_auth(["token-1", "token-2"]));
+    api.get("/", |_| async { "api" });
+    app.mount("/api", api);
+    app.get(
+        "/custom",
+        (|_| async { "custom" }).with(middleware::basic_auth(|user: &str, pass: &str| {
+            user.len() == pass.len()
+        })),
+    );
+    let c = TestClient::new(app);
+
+    let r = c.get("/admin").await;
+    assert_eq!(r.status(), 401);
+    assert_eq!(
+        r.header("www-authenticate"),
+        Some(r#"Basic realm="Admin", charset="UTF-8""#)
+    );
+    // admin:s3cret
+    let r = c
+        .get("/admin")
+        .header("authorization", "Basic YWRtaW46czNjcmV0")
+        .await;
+    assert_eq!(r.text(), "hello admin");
+    // ada:lovelace
+    let r = c
+        .get("/admin")
+        .header("authorization", "basic YWRhOmxvdmVsYWNl")
+        .await;
+    assert_eq!(r.text(), "hello ada");
+    // admin:wrong
+    let r = c
+        .get("/admin")
+        .header("authorization", "Basic YWRtaW46d3Jvbmc=")
+        .await;
+    assert_eq!(r.status(), 401);
+    let r = c.get("/admin").header("authorization", "Basic !!!").await;
+    assert_eq!(r.status(), 401);
+
+    let r = c.get("/api").await;
+    assert_eq!(r.status(), 401);
+    assert_eq!(r.header("www-authenticate"), Some("Bearer"));
+    let r = c.get("/api").header("authorization", "Bearer nope").await;
+    assert_eq!(
+        r.header("www-authenticate"),
+        Some(r#"Bearer error="invalid_token""#)
+    );
+    let r = c
+        .get("/api")
+        .header("authorization", "Bearer token-2")
+        .await;
+    assert_eq!(r.text(), "api");
+
+    // abc:xyz
+    let r = c
+        .get("/custom")
+        .header("authorization", "Basic YWJjOnh5eg==")
+        .await;
+    assert_eq!(r.text(), "custom");
+}
+
+#[tokio::test]
+async fn request_ids() {
+    use vitesse::middleware::RequestId;
+
+    let mut app = App::new();
+    app.middleware(middleware::request_id());
+    app.get("/", |req: Request| async move {
+        let id = req.get::<RequestId>().unwrap().to_string();
+        assert_eq!(req.header("x-request-id"), Some(id.as_str()));
+        id
+    });
+    let c = TestClient::new(app);
+    let r = c.get("/").await;
+    let id = r.header("x-request-id").unwrap().to_owned();
+    assert_eq!(id.len(), 36);
+    assert_eq!(r.text(), id);
+    assert_ne!(c.get("/").await.text(), id);
+    let r = c.get("/").header("x-request-id", "from-the-proxy").await;
+    assert_eq!(r.text(), "from-the-proxy");
+    assert_eq!(r.header("x-request-id"), Some("from-the-proxy"));
+    // Les 404 aussi.
+    assert!(c.get("/nope").await.header("x-request-id").is_some());
+
+    let mut app = App::new();
+    app.middleware(
+        middleware::request_id()
+            .header("x-correlation-id")
+            .trust_incoming(false),
+    );
+    app.get("/", |req: Request| async move {
+        req.get::<RequestId>().unwrap().0.clone()
+    });
+    let r = TestClient::new(app)
+        .get("/")
+        .header("x-correlation-id", "client")
+        .await;
+    assert_ne!(r.text(), "client");
+    assert_eq!(r.header("x-correlation-id"), Some(r.text().as_str()));
+}
+
+#[tokio::test]
+async fn concurrency_and_rate_limits() {
+    let mut app = App::new();
+    app.get(
+        "/slow",
+        (|_| async {
+            tokio::time::sleep(Duration::from_millis(200)).await;
+            "done"
+        })
+        .with(middleware::concurrency_limit(2).max_wait(Duration::ZERO)),
+    );
+    app.get(
+        "/limited",
+        (|_| async { "ok" }).with(middleware::rate_limit(2, Duration::from_secs(60))),
+    );
+    app.get(
+        "/per-key",
+        (|_| async { "ok" }).with(
+            middleware::rate_limit(1, Duration::from_secs(60))
+                .key(|req: &Request| req.header("x-api-key").map(str::to_owned)),
+        ),
+    );
+    let c = TestClient::new(app);
+
+    let requests: Vec<_> = (0..4)
+        .map(|_| tokio::spawn(c.get("/slow").send()))
+        .collect();
+    let mut statuses = Vec::new();
+    for r in requests {
+        statuses.push(r.await.unwrap().status().as_u16());
+    }
+    statuses.sort();
+    assert_eq!(statuses, [200, 200, 503, 503]);
+    assert_eq!(c.get("/slow").await.status(), 200);
+
+    let r = c.get("/limited").await;
+    assert_eq!(r.header("x-ratelimit-limit"), Some("2"));
+    assert_eq!(r.header("x-ratelimit-remaining"), Some("1"));
+    assert_eq!(
+        c.get("/limited").await.header("x-ratelimit-remaining"),
+        Some("0")
+    );
+    let r = c.get("/limited").await;
+    assert_eq!(r.status(), 429);
+    assert_eq!(r.header("retry-after"), Some("30"));
+
+    assert_eq!(
+        c.get("/per-key").header("x-api-key", "a").await.status(),
+        200
+    );
+    assert_eq!(
+        c.get("/per-key").header("x-api-key", "a").await.status(),
+        429
+    );
+    assert_eq!(
+        c.get("/per-key").header("x-api-key", "b").await.status(),
+        200
+    );
+    // Sans clé : pas de limite.
+    assert_eq!(c.get("/per-key").await.status(), 200);
+    assert_eq!(c.get("/per-key").await.status(), 200);
+}
+
+#[tokio::test]
+async fn express_style_route_patterns() {
+    let show = |req: Request| async move {
+        let params: Vec<String> = req.params().map(|(k, v)| format!("{k}={v}")).collect();
+        format!("{} {}", req.route().unwrap_or("-"), params.join(","))
+    };
+    let mut app = App::new();
+    app.get("/flights/:from-:to", show)
+        .get("/files/:name.:ext", show)
+        .get(r"/users/:id(\d+)", show)
+        .get("/users/:name", show)
+        .get("/archive/:year?/:month?", show)
+        .get("/api/v:version/status", show);
+    let mut docs = Router::new();
+    docs.get("/:page?", show);
+    app.mount("/docs/:lang(en|fr|es)", docs);
+    let c = TestClient::new(app);
+
+    assert_eq!(
+        c.get("/flights/LAX-SFO").await.text(),
+        "/flights/:from-:to from=LAX,to=SFO"
+    );
+    assert_eq!(
+        c.get("/files/report.final.pdf").await.text(),
+        "/files/:name.:ext name=report,ext=final.pdf"
+    );
+    assert_eq!(c.get("/users/42").await.text(), r"/users/:id(\d+) id=42");
+    assert_eq!(c.get("/users/ada").await.text(), "/users/:name name=ada");
+    assert_eq!(c.get("/archive").await.text(), "/archive/:year?/:month? ");
+    assert_eq!(
+        c.get("/archive/2024/05").await.text(),
+        "/archive/:year?/:month? year=2024,month=05"
+    );
+    assert_eq!(
+        c.get("/api/v2/status").await.text(),
+        "/api/v:version/status version=2"
+    );
+    assert_eq!(c.get("/api/2/status").await.status(), 404);
+    assert_eq!(
+        c.get("/docs/fr").await.text(),
+        "/docs/:lang(en|fr|es)/:page? lang=fr"
+    );
+    assert_eq!(
+        c.get("/docs/es/routing").await.text(),
+        "/docs/:lang(en|fr|es)/:page? lang=es,page=routing"
+    );
+    assert_eq!(c.get("/docs/de/routing").await.status(), 404);
+}
+
+#[tokio::test]
+async fn case_insensitive_routes() {
+    let mut app = App::new();
+    app.case_sensitive(false);
+    app.get("/Users/:id", |req: Request| async move {
+        req.param("id").unwrap_or("").to_owned()
+    });
+    let c = TestClient::new(app);
+    assert_eq!(c.get("/users/Ada").await.text(), "Ada");
+    assert_eq!(c.get("/USERS/Ada").await.text(), "Ada");
+
+    let mut app = App::new();
+    app.get("/Users/:id", |_| async { "ok" });
+    assert_eq!(TestClient::new(app).get("/users/1").await.status(), 404);
+}
+
+#[tokio::test]
+async fn named_routes_and_url_generation() {
+    let mut app = App::new();
+    app.get("/users/:id", |_| async { "user" }).name("user");
+    app.get("/files/*path", |_| async { "file" }).name("file");
+    let mut api = Router::new();
+    api.get("/items/:id(\\d+)", |_| async { "item" })
+        .name("item");
+    app.mount("/api/:version", api);
+    app.get("/links", |req: Request| async move {
+        Ok::<_, Error>(
+            [
+                req.path_for("user", &[&42])?,
+                req.path_for("user", &[&"a b"])?,
+                req.path_for("file", &[&"docs/a b.pdf"])?,
+                req.path_for("item", &[&"v1", &7])?,
+                req.url_for("user", &[&1])?,
+            ]
+            .join(" "),
+        )
+    });
+    app.get("/broken", |req: Request| async move {
+        req.path_for("item", &[&"v1", &"x"])
+    });
+    app.get("/unknown", |req: Request| async move {
+        req.path_for("nope", &[])
+    });
+    let c = TestClient::new(app);
+    assert_eq!(
+        c.get("/links").header("host", "example.com").await.text(),
+        "/users/42 /users/a%20b /files/docs/a%20b.pdf /api/v1/items/7 http://example.com/users/1"
+    );
+    assert_eq!(c.get("/broken").await.status(), 500);
+    assert_eq!(c.get("/unknown").await.status(), 500);
+}
+
+#[test]
+#[should_panic(expected = "duplicate route name")]
+fn duplicate_route_names_panic() {
+    let mut app = App::new();
+    app.get("/a", |_| async { "a" }).name("x");
+    app.get("/b", |_| async { "b" }).name("x");
+}
+
+#[test]
+#[should_panic(expected = "invalid regular expression")]
+fn invalid_constraints_panic() {
+    let mut app = App::new();
+    app.get("/a/:id([)", |_| async { "a" });
+}
+
+#[tokio::test]
+async fn constraints_in_mount_prefixes_also_bound_router_middleware_and_fallback() {
+    let mut docs = Router::new();
+    docs.get("/:page?", |req: Request| async move {
+        format!(
+            "{} {}",
+            req.param("lang").unwrap(),
+            req.param("page").unwrap_or("index")
+        )
+    });
+    docs.middleware(
+        |req: Request, next: Next| async move { next.run(req).await.header("x-docs", "1") },
+    );
+    docs.fallback(|_| async { (404, "docs 404") });
+    let mut app = App::new();
+    app.mount("/docs/:lang(en|fr|es)", docs);
+    app.fallback(|_| async { (404, "app 404") });
+    let c = TestClient::new(app);
+
+    assert_eq!(c.get("/docs/fr").await.text(), "fr index");
+    assert_eq!(c.get("/docs/es/routing").await.text(), "es routing");
+    let r = c.get("/docs/fr/a/b").await;
+    assert_eq!(r.text(), "docs 404");
+    assert_eq!(r.header("x-docs"), Some("1"));
+    // `de` ne satisfait pas la contrainte du préfixe : ni middleware ni fallback du routeur.
+    let r = c.get("/docs/de/routing").await;
+    assert_eq!(r.text(), "app 404");
+    assert_eq!(r.header("x-docs"), None);
+}
+
+#[tokio::test]
+async fn url_generation_errors_are_not_shown_to_clients() {
+    let mut app = App::new();
+    app.get("/users/:id", |_| async { "user" }).name("user");
+    app.get("/", |req: Request| async move { req.path_for("user", &[]) });
+    let r = TestClient::new(app).get("/").await;
+    assert_eq!(r.status(), 500);
+    assert_eq!(r.text(), r#"{"error":"Internal Server Error"}"#);
+}
+
+#[tokio::test]
+async fn each_router_prefix_gets_only_its_own_middlewares() {
+    let mut versioned = Router::new();
+    versioned.middleware(|req: Request, next: Next| async move {
+        next.run(req).await.header("x-v", "1")
+    });
+    versioned.fallback(|_| async { (404, "v-api 404") });
+    let mut admin = Router::new();
+    admin.fallback(|_| async { (404, "admin 404") });
+    let mut app = App::new();
+    app.mount("/api/v:version", versioned);
+    app.mount("/api/admin", admin);
+    let c = TestClient::new(app);
+    let r = c.get("/api/admin/nope").await;
+    assert_eq!(r.text(), "admin 404");
+    assert_eq!(r.header("x-v"), None);
+    let r = c.get("/api/v2/nope").await;
+    assert_eq!(r.text(), "v-api 404");
+    assert_eq!(r.header("x-v"), Some("1"));
+}

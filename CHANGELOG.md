@@ -20,6 +20,50 @@ First public release.
 
 ### Added
 
+Closing the gaps with axum and actix-web (see the new guide "Coming from axum
+or actix-web"):
+
+- HTTPS (feature `tls`): `app.tls(Tls::from_pem_files(…)?)` serves TLS 1.2
+  and 1.3 over TCP with rustls; WebSocket works over it (`wss://`).
+- HTTP/2 (feature `http2`), with the h2 crate: negotiated through ALPN over
+  TLS, and detected from its preface in clear text (h2c "prior knowledge"),
+  on the same port as HTTP/1.1.
+- Unix domain sockets: `app.bind_unix`, `app.listen_unix`, `app.run_unix`.
+- Engine settings: `app.keep_alive`, `app.header_timeout`,
+  `app.shutdown_timeout` and `app.max_connections` (the limits were fixed).
+- Trusted proxies: `app.trust_proxy(…)` (`true`, a number of hops, or
+  networks such as `"loopback, 10.0.0.0/8"`), read by `req.ip()`,
+  `req.protocol()`, `req.secure()`, `req.hostname()` and the new
+  `req.host()`.
+- `req.route()`: the pattern of the matched route (axum's `MatchedPath`).
+- `router.fallback(handler)`: a fallback per router, after its middlewares.
+- `req.accepts(…)` and `req.accepts_language(…)`: content negotiation.
+- Body limit per route: `middleware::body_limit(n)`, `req.set_body_limit(n)`.
+- File uploads (feature `multipart`): `req.multipart()`, streamed with multer.
+- Server-Sent Events: `vitesse::sse` (`Sse`, `Event`, `KeepAlive`, and
+  `sse::channel` to push events from another task).
+- Middlewares: `request_id`, `basic_auth`, `bearer_auth`,
+  `concurrency_limit`, `rate_limit` and, with `compress`, `decompress`.
+- tower interop (feature `tower`): `middleware::layer(…)` runs any tower
+  layer (tower-http, tower-governor…), and `app.into_service()` turns the
+  application into a tower `Service`.
+- Route patterns: several parameters in a segment (`/flights/:from-:to`,
+  `/files/:name.:ext`), constraints (`/users/:id(\d+)`), optional trailing
+  parameters (`/archive/:year?/:month?`), and `app.case_sensitive(false)`.
+- Named routes and URL generation: `.name("user")`, `req.path_for(…)` and
+  `req.url_for(…)` (actix-web's `url_for`).
+- Signed cookies and sessions (feature `session`): `app.cookie_secret`,
+  `req.sign_cookie`, `req.signed_cookie`, `middleware::session(store)` and
+  `req.session()`, with `MemoryStore` and a `SessionStore` trait.
+- HTML templates (feature `templates`): `app.views(dir)`, `app.templates(env)`
+  and `req.render(name, context)`, with minijinja.
+- WebSocket over HTTP/2 (RFC 8441): browsers on HTTPS + HTTP/2 open their
+  WebSockets on the same connection; `app.ws` handlers are unchanged.
+- HTTP/3 request bodies are streamed to the handler (they were read in full
+  before routing), so per-route body limits apply.
+- `req.set_method(…)`; a body limited upstream reads as `413`.
+- Examples `https` (TLS + HTTP/2) and `live` (SSE + uploads).
+
 - `middleware::compress()` (feature `compress`): responses in Brotli, or gzip
   when the browser does not accept Brotli, for the text-like bodies worth it.
 

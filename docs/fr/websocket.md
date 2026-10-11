@@ -4,7 +4,7 @@ Un WebSocket garde une connexion ouverte dans les deux sens : le serveur peut en
 
 ## Mise en place
 
-La prise en charge de WebSocket est la feature Cargo `ws`, **activée par défaut** : `vitesse = { git = "https://github.com/maxlestage/Vitesse" }` suffit. Elle repose sur tokio-tungstenite, l'implémentation Rust validée par la suite de tests Autobahn. La poignée de main (RFC 6455) et la remise de la connexion TCP après la réponse `101 Switching Protocols` sont assurées par le moteur HTTP/1.1 de Vitesse lui-même.
+La prise en charge de WebSocket est la feature Cargo `ws`, **activée par défaut** : `vitesse = { git = "https://github.com/maxlestage/Vitesse" }` suffit. Elle repose sur tokio-tungstenite, l'implémentation Rust validée par la suite de tests Autobahn. La poignée de main (RFC 6455) et la remise de la connexion TCP après la réponse `101 Switching Protocols` sont assurées par le moteur HTTP/1.1 de Vitesse lui-même. Avec la feature `http2`, WebSocket fonctionne aussi [sur HTTP/2](#websocket-sur-http2).
 
 Si vous n'avez pas besoin de WebSocket, désactivez les features par défaut pour compiler un peu moins :
 
@@ -53,6 +53,7 @@ Tapez une ligne, et le serveur répond `écho : …`.
 | Requête | Réponse |
 |---|---|
 | Une poignée de main WebSocket (`GET` avec `Upgrade: websocket`, `Sec-WebSocket-Version: 13` et une clé valide) | `101 Switching Protocols`, puis le handler prend la main sur la connexion |
+| Une poignée de main WebSocket sur HTTP/2 (un `CONNECT` étendu avec `:protocol websocket`, feature `http2`) | `200 OK`, puis le handler prend la main sur le flux HTTP/2 (voir [WebSocket sur HTTP/2](#websocket-sur-http2)) |
 | Une requête HTTP ordinaire (un navigateur qui ouvre l'URL, `curl`) | `426 Upgrade Required` : « this route only accepts WebSocket connections » |
 | Une autre version du protocole (`Sec-WebSocket-Version` différent de `13`) | `426 Upgrade Required` |
 | Une `Sec-WebSocket-Key` invalide | `400 Bad Request` |
@@ -134,10 +135,12 @@ app.ws("/rooms/:room", |req, mut socket| async move {
 
 > [!NOTE]
 > Les navigateurs ne peuvent pas ajouter d'en-têtes comme `Authorization` à une connexion WebSocket. En revanche, ils envoient les cookies du site avec la poignée de main : authentifiez avec un cookie de session, ou avec un jeton de courte durée dans la query string (`ws://…/live?token=…`).
+>
+> Avec les [sessions](sessions.md) de Vitesse, `req.session()` fonctionne dans le handler WebSocket : elle contient la session telle qu'elle était quand la connexion a été acceptée. Les modifications faites là ne sont pas enregistrées, car le middleware de session a déjà envoyé sa réponse (la `101`) : pour modifier la session, faites-le dans une route ordinaire.
 
 ## Middlewares et authentification
 
-Les middlewares globaux et ceux des routeurs s'exécutent sur la requête de poignée de main, comme sur n'importe quelle requête : journalisation, authentification, limitation de débit… Un middleware qui répond `401` refuse la connexion avant qu'elle ne s'ouvre, et les en-têtes qu'un middleware ajoute figurent dans la réponse `101`.
+Les middlewares globaux et ceux des routeurs s'exécutent sur la requête de poignée de main, comme sur n'importe quelle requête : journalisation, authentification, limitation de débit… Un middleware qui répond `401` refuse la connexion avant qu'elle ne s'ouvre, et les en-têtes qu'un middleware ajoute figurent dans la réponse `101` (la réponse `200` en HTTP/2).
 
 ```rust
 async fn require_session(req: Request, next: Next) -> Response {
@@ -347,6 +350,42 @@ async fn echoes_text_messages() {
 
 D'autres exemples dans [Tests](testing.md#tester-les-websockets).
 
+## WebSocket sécurisé : `wss://`
+
+Une page servie en HTTPS ne peut ouvrir que des connexions `wss://`, du WebSocket sur TLS. Quand Vitesse sert lui-même HTTPS (la feature `tls` et `app.tls(...)`, voir [HTTPS et HTTP/2](https.md)), vos routes `app.ws` répondent en `wss://` sans aucun changement dans leur code :
+
+```js
+const socket = new WebSocket(`wss://${location.host}/echo`);
+```
+
+Derrière un reverse proxy qui termine TLS, le navigateur parle `wss://` au proxy, et le proxy transmet du `ws://` simple à Vitesse.
+
+## WebSocket sur HTTP/2
+
+Quand Vitesse sert lui-même HTTPS avec HTTP/2 (les features `tls` et `http2`, voir [HTTPS et HTTP/2](https.md)), les navigateurs n'ont pas besoin d'une connexion séparée pour un WebSocket : Chrome et Firefox, par exemple, l'ouvrent sur un flux de la connexion HTTP/2 qu'ils ont déjà avec le site (RFC 8441). Vitesse annonce qu'il le prend en charge dès que les features `http2` et `ws` sont toutes deux activées, et il n'y a rien à changer dans votre code :
+
+- les mêmes routes `app.ws` et `ws::Upgrade` acceptent ces poignées de main, qui sont routées comme un `GET` : les middlewares globaux et ceux des routeurs s'exécutent donc dessus comme d'habitude ;
+- la poignée de main reçoit une `200 OK` au lieu d'une `101` (il n'y a pas de `Sec-WebSocket-Key` en HTTP/2), puis le handler reçoit le même `WebSocket` qu'en HTTP/1.1 ;
+- dans le handler, `req.version()` vaut `HTTP/2.0`, et `HTTP/1.1` quand le client a choisi une connexion séparée.
+
+```rust
+app.ws("/echo", |req, mut socket| async move {
+    // « connecté en HTTP/2.0 » dans un navigateur récent, sur un site HTTPS avec HTTP/2
+    let _ = socket.send(format!("connecté en {:?}", req.version())).await;
+    while let Some(Ok(message)) = socket.recv().await {
+        if socket.send(message).await.is_err() {
+            break;
+        }
+    }
+});
+```
+
+Côté navigateur, rien ne change non plus : `new WebSocket("wss://example.com/echo")` choisit HTTP/2 ou HTTP/1.1 tout seul. Cela fonctionne aussi en clair, avec h2c en « prior knowledge », pour les clients qui le gèrent ; les navigateurs n'utilisent jamais h2c.
+
+Derrière un reverse proxy, le navigateur ouvre le WebSocket vers le proxy (en HTTP/2 ou en HTTP/1.1, selon ce que permet le proxy), et le proxy parle généralement HTTP/1.1 à Vitesse : la configuration de [Derrière un reverse proxy](#derrière-un-reverse-proxy) reste la même.
+
+WebSocket sur HTTP/3 (RFC 9220) n'est pas pris en charge : le crate h3 ne l'implémente pas, et les navigateurs ne s'en servent pas. Quand une page est arrivée en [HTTP/3](http3.md), les navigateurs ouvrent ses WebSockets en HTTP/2 ou en HTTP/1.1, sur TCP, que Vitesse sert à côté de HTTP/3.
+
 ## Derrière un reverse proxy
 
 Le proxy doit laisser passer l'`Upgrade`, puis garder la connexion ouverte :
@@ -371,8 +410,8 @@ Les proxys et les hébergeurs ferment les connexions qui restent trop longtemps 
 
 ## Limites
 
-- **HTTP/1.1 uniquement.** WebSocket n'est pas disponible en [HTTP/3](http3.md) : les clients ouvrent leurs connexions WebSocket sur une connexion TCP ordinaire, même quand le reste du site passe en HTTP/3.
-- **Arrêt propre.** Sur `Ctrl+C` ou `SIGTERM`, le serveur n'attend pas les connexions WebSocket ouvertes : elles sont coupées dès que les requêtes HTTP en cours sont terminées, et au plus tard à la fin du délai de grâce de 10 secondes (voir [Configuration du serveur](server.md#arrêt-propre)). Elles sont coupées sans fermeture en bonne et due forme, et les clients constatent une fermeture anormale (code `1006`). Faites en sorte que vos clients se reconnectent automatiquement, ce qu'il leur faut de toute façon pour les coupures réseau.
+- **HTTP/1.1 et HTTP/2, pas HTTP/3.** WebSocket fonctionne en HTTP/1.1 et, avec la feature `http2`, [sur HTTP/2](#websocket-sur-http2), mais pas sur [HTTP/3](http3.md) : les navigateurs ouvrent alors leurs WebSockets sur TCP, même quand le reste du site passe en HTTP/3.
+- **Arrêt propre.** Sur `Ctrl+C` ou `SIGTERM`, le serveur n'attend pas les connexions WebSocket ouvertes : elles sont coupées dès que les requêtes HTTP en cours sont terminées, et au plus tard à la fin du délai de grâce (10 secondes par défaut, `app.shutdown_timeout` ; voir [Configuration du serveur](server.md#arrêt-propre)). Elles sont coupées sans fermeture en bonne et due forme, et les clients constatent une fermeture anormale (code `1006`). Faites en sorte que vos clients se reconnectent automatiquement, ce qu'il leur faut de toute façon pour les coupures réseau.
 - **Taille des messages.** 16 Mio par message par défaut ; abaissez-la avec `Upgrade::max_message_size` pour les points d'accès publics.
 - **Threads.** En mode un thread par cœur, une connexion reste sur le thread qui l'a acceptée : comme dans tout handler, ne le bloquez pas (voir [Performances](performance.md)).
 

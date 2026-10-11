@@ -352,6 +352,167 @@ async fn le_handler_voit_ce_que_le_middleware_a_attache() {
 
 Les middlewares fournis se testent de la même manière, par exemple `middleware::cors()` en envoyant un en-tête `origin` et en vérifiant `access-control-allow-origin`. Pour écrire vos middlewares, voir [Middlewares](middleware.md).
 
+## Tester derrière un proxy
+
+Chaque requête de `TestClient` vient de `127.0.0.1` : `req.ip()` renvoie `127.0.0.1`, et `req.secure()` vaut `false`. Pour tester ce que fait votre application derrière un reverse proxy, configurez [`app.trust_proxy`](requests.md#derrière-un-proxy--trust_proxy) comme en production, et envoyez les en-têtes qu'ajouterait votre proxy. Comme ils viennent de `127.0.0.1`, ils sont crus avec `"loopback"` :
+
+```rust
+use vitesse::prelude::*;
+use vitesse::test::TestClient;
+
+#[tokio::test]
+async fn reads_the_visitor_behind_the_proxy() {
+    let mut app = App::new();
+    app.trust_proxy("loopback");
+    app.get("/whoami", |req: Request| async move {
+        format!("{} {}", req.ip().unwrap(), req.protocol())
+    });
+    let client = TestClient::new(app);
+
+    let res = client
+        .get("/whoami")
+        .header("x-forwarded-for", "203.0.113.9")
+        .header("x-forwarded-proto", "https")
+        .await;
+    assert_eq!(res.text(), "203.0.113.9 https");
+
+    // Sans les en-têtes, le visiteur est le client de test lui-même.
+    assert_eq!(client.get("/whoami").await.text(), "127.0.0.1 http");
+}
+```
+
+La même astuce permet de tester [`middleware::rate_limit`](middleware.md#rate_limit) avec plusieurs clients : sans `trust_proxy`, toutes les requêtes de test partagent le compteur de `127.0.0.1` ; avec, chaque valeur de `x-forwarded-for` compte comme un visiteur différent.
+
+## Tester les sessions
+
+`TestClient` ne garde pas les cookies d'une requête à l'autre : c'est le test qui joue le rôle du navigateur. Lisez l'en-tête `Set-Cookie` de la réponse qui a ouvert la [session](sessions.md), et renvoyez sa partie `nom=valeur` dans un en-tête `cookie` :
+
+```rust
+use vitesse::test::{TestClient, TestResponse};
+
+/// La partie `nom=valeur` de l'en-tête `Set-Cookie` de la réponse.
+fn cookie_of(res: &TestResponse) -> String {
+    let set_cookie = res.header("set-cookie").expect("pas d'en-tête Set-Cookie");
+    set_cookie.split(';').next().unwrap().to_owned()
+}
+
+#[tokio::test]
+async fn logs_in_and_out() {
+    let client = TestClient::new(my_api::app());
+
+    let res = client
+        .post("/login")
+        .form(&[("email", "ada@example.com"), ("password", "secret")])
+        .await;
+    let cookie = cookie_of(&res); // "vitesse.sid=…"
+
+    let res = client.get("/account").header("cookie", &cookie).await;
+    assert_eq!(res.status(), 200);
+
+    let res = client.post("/logout").header("cookie", &cookie).await;
+    assert!(res.header("set-cookie").unwrap().contains("Max-Age=0")); // supprimé dans le navigateur
+    assert_eq!(client.get("/account").header("cookie", &cookie).await.status(), 401);
+}
+```
+
+- `res.header("set-cookie")` renvoie le premier en-tête `Set-Cookie`. Quand une réponse pose plusieurs cookies, parcourez `res.headers().get_all("set-cookie")`.
+- Les [cookies signés](sessions.md#cookies-signés) se testent de la même façon. Modifiez la valeur pour vérifier qu'un cookie falsifié est refusé : `cookie.replacen("dark", "light", 1)` doit se comporter comme s'il n'y avait pas de cookie.
+- Chaque `TestClient::new(my_api::app())` démarre avec un `MemoryStore` vide : les tests ne partagent donc pas de sessions.
+
+## Tester les gabarits
+
+Avec `app.views`, un gabarit est compilé la première fois qu'il est rendu : une erreur de syntaxe dans une page n'apparaît donc que lorsque quelqu'un l'ouvre. Un test qui rend chaque page la détecte avant un déploiement :
+
+```rust
+use vitesse::test::TestClient;
+
+#[tokio::test]
+async fn every_page_renders() {
+    let client = TestClient::new(my_api::app());
+    for path in ["/", "/users", "/login"] {
+        let res = client.get(path).await;
+        assert_eq!(res.status(), 200, "{path}");
+        assert_eq!(res.header("content-type"), Some("text/html; charset=utf-8"));
+    }
+    assert!(client.get("/users").await.text().contains("<li>Ada</li>"));
+}
+```
+
+- `cargo test` lance les tests depuis la racine du paquet : `app.views("templates")` trouve donc le même dossier qu'avec `cargo run`.
+- Un rendu qui échoue donne une `500`, et sa cause, avec le nom du gabarit et la ligne, est affichée dans la sortie des tests (`[vitesse] error 500: …`).
+- Pour essayer un gabarit isolément, donnez à une petite application de test un environnement qui contient ce gabarit, `env.add_template(nom, source)`, avec [`app.templates(env)`](templates.md#filtres-fonctions-et-gabarits-intégrés--apptemplates).
+
+## Tester les Server-Sent Events
+
+`TestClient` lit tout le corps avant de rendre la main : un [flux d'événements](responses.md#server-sent-events) est donc facile à tester, du moment qu'il se termine. `res.text()` contient alors tous les événements, exactement comme le navigateur les recevrait.
+
+```rust
+use vitesse::prelude::*;
+use vitesse::sse::Event;
+use vitesse::test::TestClient;
+
+#[tokio::test]
+async fn sends_a_countdown() {
+    let mut app = App::new();
+    app.get("/countdown", |_| async {
+        let (tx, stream) = sse::channel(8);
+        tokio::spawn(async move {
+            for n in (1..=3).rev() {
+                let _ = tx.send(Event::new().event("count").data(n.to_string())).await;
+            }
+        }); // la tâche se termine et abandonne `tx` : la réponse se termine aussi
+        stream
+    });
+    let client = TestClient::new(app);
+
+    let res = client.get("/countdown").await;
+    assert_eq!(res.header("content-type"), Some("text/event-stream"));
+    assert_eq!(
+        res.text(),
+        "event: count\ndata: 3\n\nevent: count\ndata: 2\n\nevent: count\ndata: 1\n\n"
+    );
+}
+```
+
+Un flux qui ne se termine jamais (une horloge, un fil de notifications) ferait attendre le test indéfiniment. Rendez-le fini dans les tests (avec un paramètre de query string, par exemple), vérifiez les événements séparément (`Event::new().id("1").data("hi").to_string()` vaut `"id: 1\ndata: hi\n\n"`), ou lisez les premiers événements [sur un vrai port](#tests-dintégration-sur-un-vrai-port), avec un délai maximal.
+
+## Tester les envois de fichiers
+
+`TestClient` n'a pas de helper pour les [formulaires multipart](requests.md#envois-de-fichiers-multipart) : écrivez le corps à la main. Chaque partie commence par `--` et la frontière (*boundary*), suivis de ses en-têtes, d'une ligne vide et de son contenu ; la dernière frontière se termine par `--`. Chaque ligne se termine par `\r\n` :
+
+```rust
+// tests/upload.rs
+use vitesse::json;
+use vitesse::test::TestClient;
+
+#[tokio::test]
+async fn uploads_a_file() {
+    let client = TestClient::new(my_api::app());
+    let body = "--XyZ\r\n\
+        content-disposition: form-data; name=\"title\"\r\n\
+        \r\n\
+        Vacances\r\n\
+        --XyZ\r\n\
+        content-disposition: form-data; name=\"photo\"; filename=\"plage.txt\"\r\n\
+        content-type: text/plain\r\n\
+        \r\n\
+        du sable et la mer\r\n\
+        --XyZ--\r\n";
+
+    let res = client
+        .post("/upload")
+        .header("content-type", "multipart/form-data; boundary=XyZ")
+        .body(body)
+        .await;
+    assert_eq!(res.status(), 200);
+
+    // Pas un corps multipart : 415.
+    assert_eq!(client.post("/upload").json(&json!({})).await.status(), 415);
+}
+```
+
+Un `\` en fin de ligne prolonge la chaîne Rust sur la ligne suivante, sans le saut de ligne ni l'indentation. Pour des fichiers binaires ou de nombreuses parties, écrivez une petite fonction qui assemble les parties dans un `Vec<u8>`, et passez celui-ci à `.body(...)`. Vérifiez aussi qu'un corps au-delà de la limite de la route reçoit une `413`.
+
 ## Tests d'intégration sur un vrai port
 
 `TestClient` court-circuite le moteur HTTP/1.1. Pour ce qui n'existe que sur une vraie connexion (`content-length`, keep-alive, pipelining, corps `chunked`, `Expect: 100-continue`, limites de taille des en-têtes, conversations [WebSocket](#tester-les-websockets)), ou pour utiliser un vrai client HTTP, démarrez le serveur sur un vrai port :
@@ -486,6 +647,41 @@ async fn echo_over_a_real_websocket() {
 ```
 
 `connect_async` échoue si le serveur refuse la poignée de main : pour vérifier le statut d'un refus, utilisez `TestClient` comme plus haut.
+
+## Tester comme un service tower
+
+Avec la feature `tower` de Vitesse, `app.into_service()` transforme l'application en `Service` tower, l'abstraction sur laquelle reposent axum et hyper. Vous pouvez alors la tester comme le font les utilisateurs d'axum, avec `tower::ServiceExt::oneshot` :
+
+```toml
+[dependencies]
+vitesse = { git = "https://github.com/maxlestage/Vitesse", features = ["tower"] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt"] }
+tower = { version = "0.5", features = ["util"] }
+```
+
+```rust
+use tower::ServiceExt; // pour oneshot
+use vitesse::prelude::*;
+
+#[tokio::test]
+async fn works_as_a_tower_service() {
+    let service = my_api::app().into_service();
+
+    let req = vitesse::http::Request::get("/hello/Ada").body(Body::empty()).unwrap();
+    let res = service.oneshot(req).await.unwrap(); // le type d'erreur est Infallible
+    assert_eq!(res.status(), 200);
+    let body = res.into_body().to_bytes().await.unwrap();
+    assert_eq!(body, "Bonjour Ada !");
+}
+```
+
+- Les requêtes sont des `http::Request` avec n'importe quel type de corps (`vitesse::Body`, le `Full` de http-body-util…), et les réponses des `http::Response<vitesse::Body>`.
+- Le service est `Copy` : `oneshot` le prend par valeur, mais `service` reste utilisable pour les requêtes suivantes.
+- Contrairement à `TestClient`, il n'y a pas d'adresse client, sauf si vous placez une `SocketAddr` dans les extensions de la requête (sinon, `req.ip()` vaut `None`), et les routes WebSocket répondent `501`.
+
+Pour les tests de tous les jours, `TestClient` est plus court. Le service prend tout son intérêt quand l'application tourne dans une pile tower : servie par hyper, ou imbriquée dans un routeur axum avec `Router::nest_service`.
 
 ## Organiser ses tests
 

@@ -1,5 +1,21 @@
-//! Ready-to-use middlewares: `logger`, `cors`, `helmet`, `timeout`,
-//! `serve_static` and, with the `compress` feature, `compress`.
+//! Ready-to-use middlewares.
+//!
+//! | Middleware | Role | Equivalent |
+//! |---|---|---|
+//! | [`logger`] | One line per request | morgan, actix-web's `Logger`, tower-http's `Trace` |
+//! | [`cors`] | Cross-origin requests | cors, actix-cors, tower-http's `Cors` |
+//! | [`helmet`] | Security headers | helmet |
+//! | [`timeout`] | `503` after a delay | tower-http's `Timeout` |
+//! | [`body_limit`] | Body size limit per route | axum's `DefaultBodyLimit` |
+//! | [`request_id`] | `X-Request-Id` | tower-http's `SetRequestId` |
+//! | [`basic_auth`], [`bearer_auth`] | HTTP authentication | actix-web-httpauth, tower-http's `ValidateRequestHeader` |
+//! | [`concurrency_limit`] | Requests in flight | tower's `ConcurrencyLimit` and `LoadShed` |
+//! | [`rate_limit`] | Requests per client and period | express-rate-limit, tower-governor |
+//! | [`serve_static`] | Static files | `express.static` |
+//! | `compress` (`compress` feature) | Brotli / gzip responses | compression, actix-web's `Compress` |
+//! | `decompress` (`compress` feature) | Compressed request bodies | tower-http's `RequestDecompression` |
+//! | `session` (`session` feature) | Server-side sessions | express-session, actix-session, tower-sessions |
+//! | `layer` (`tower` feature) | Any tower layer | tower-http, tower-governor… |
 
 use std::io::{IsTerminal, Write};
 use std::path::PathBuf;
@@ -13,6 +29,27 @@ use crate::handler::{BoxFuture, Middleware, Next};
 use crate::request::Request;
 use crate::response::{IntoResponse, Response};
 use crate::static_files::ServeDir;
+
+mod auth;
+mod limit;
+mod request_id;
+
+pub use auth::{
+    BasicAuth, BasicCredentials, BasicUser, BearerAuth, BearerToken, basic_auth, bearer_auth,
+    constant_time_eq,
+};
+pub use limit::{ConcurrencyLimit, RateLimit, concurrency_limit, rate_limit};
+pub use request_id::{RequestId, SetRequestId, request_id};
+
+/// Server-side sessions (`session` feature): see
+/// [`vitesse::session`](crate::session).
+#[cfg(feature = "session")]
+pub use crate::session::session;
+
+/// Runs a tower `Layer` as a middleware (`tower` feature): see
+/// [`vitesse::tower`](crate::tower).
+#[cfg(feature = "tower")]
+pub use crate::tower::layer;
 
 /// Logs every request, like `morgan('dev')`:
 ///
@@ -53,6 +90,39 @@ pub fn timeout(duration: Duration) -> impl Middleware {
                 Error::new(StatusCode::SERVICE_UNAVAILABLE, "request timed out").into_response()
             }
         }
+    }
+}
+
+/// Changes the maximum size of the request body read into memory for the
+/// routes it covers (`express.json({ limit })`, axum's `DefaultBodyLimit`,
+/// actix-web's `PayloadConfig`): use it on a route with
+/// [`.with()`](crate::HandlerExt::with) or on a [`Router`](crate::Router).
+/// Beyond the limit, reading the body fails with `413 Payload Too Large`.
+///
+/// ```
+/// use vitesse::prelude::*;
+///
+/// async fn upload(req: Request) -> vitesse::Result<String> {
+///     let bytes = req.bytes().await?;
+///     Ok(format!("{} bytes", bytes.len()))
+/// }
+///
+/// let mut app = App::new(); // 1 MiB by default
+/// app.post("/upload", upload.with(middleware::body_limit(50 * 1024 * 1024)));
+/// ```
+pub fn body_limit(bytes: usize) -> BodyLimit {
+    BodyLimit(bytes)
+}
+
+/// The middleware returned by [`body_limit`].
+#[derive(Debug, Clone, Copy)]
+pub struct BodyLimit(usize);
+
+impl Middleware for BodyLimit {
+    #[inline]
+    fn handle(&'static self, mut req: Request, next: Next) -> BoxFuture<Response> {
+        req.set_body_limit(self.0);
+        next.run(req)
     }
 }
 
@@ -298,6 +368,67 @@ pub fn compress() -> impl Middleware {
     }
 }
 
+/// Decompresses request bodies sent with `Content-Encoding: gzip`, `br` or
+/// `deflate` (tower-http's `RequestDecompression`, actix-web's automatic
+/// decoding), so that `req.json()`, `req.text()`… read the original
+/// content. Other encodings get `415 Unsupported Media Type`. Needs the
+/// `compress` feature.
+///
+/// The compressed body and the decompressed one are both limited by
+/// [`Request::body_limit`] (`413` beyond), which also protects against
+/// "zip bombs".
+///
+/// ```
+/// use vitesse::prelude::*;
+///
+/// let mut app = App::new();
+/// app.middleware(middleware::decompress());
+/// ```
+#[cfg(feature = "compress")]
+pub fn decompress() -> impl Middleware {
+    |mut req: Request, next: Next| async move {
+        let Some(encoding) = req
+            .header(header::CONTENT_ENCODING)
+            .map(|e| e.trim().to_ascii_lowercase())
+        else {
+            return next.run(req).await;
+        };
+        let decoding = match encoding.as_str() {
+            "identity" | "" => None,
+            "gzip" | "x-gzip" => Some(compression::Encoding::Gzip),
+            "br" => Some(compression::Encoding::Brotli),
+            "deflate" => Some(compression::Encoding::Deflate),
+            _ => {
+                return Error::new(
+                    StatusCode::UNSUPPORTED_MEDIA_TYPE,
+                    format!("unsupported content encoding '{encoding}'"),
+                )
+                .into_response();
+            }
+        };
+        if let Some(decoding) = decoding {
+            let limit = req.body_limit();
+            let compressed = match req.bytes().await {
+                Ok(bytes) => bytes,
+                Err(e) => return e.into_response(),
+            };
+            let decoded = tokio::task::spawn_blocking(move || {
+                compression::decode(&compressed, decoding, limit)
+            })
+            .await;
+            match decoded {
+                Ok(Ok(Some(bytes))) => req.set_body(bytes),
+                Ok(Ok(None)) => return Error::payload_too_large().into_response(),
+                _ => return Error::bad_request("invalid compressed body").into_response(),
+            }
+        }
+        let headers = req.headers_mut();
+        headers.remove(header::CONTENT_ENCODING);
+        headers.remove(header::CONTENT_LENGTH);
+        next.run(req).await
+    }
+}
+
 #[cfg(feature = "compress")]
 mod compression {
     use std::io::Write;
@@ -311,6 +442,7 @@ mod compression {
     pub(super) enum Encoding {
         Brotli,
         Gzip,
+        Deflate,
     }
 
     impl Encoding {
@@ -318,8 +450,27 @@ mod compression {
             match self {
                 Encoding::Brotli => "br",
                 Encoding::Gzip => "gzip",
+                Encoding::Deflate => "deflate",
             }
         }
+    }
+
+    /// Decompresses a request body; `None` if the result exceeds `limit`.
+    pub(super) fn decode(
+        bytes: &[u8],
+        encoding: Encoding,
+        limit: usize,
+    ) -> std::io::Result<Option<Vec<u8>>> {
+        use std::io::Read;
+
+        let reader: Box<dyn Read + '_> = match encoding {
+            Encoding::Brotli => Box::new(brotli::Decompressor::new(bytes, 4096)),
+            Encoding::Gzip => Box::new(flate2::read::MultiGzDecoder::new(bytes)),
+            Encoding::Deflate => Box::new(flate2::read::ZlibDecoder::new(bytes)),
+        };
+        let mut out = Vec::new();
+        reader.take(limit as u64 + 1).read_to_end(&mut out)?;
+        Ok((out.len() <= limit).then_some(out))
     }
 
     /// Below this size the headers would cost more than the bytes saved.
@@ -391,6 +542,12 @@ mod compression {
             Encoding::Gzip => {
                 let mut encoder =
                     flate2::write::GzEncoder::new(out, flate2::Compression::default());
+                encoder.write_all(bytes)?;
+                encoder.finish()
+            }
+            Encoding::Deflate => {
+                let mut encoder =
+                    flate2::write::ZlibEncoder::new(out, flate2::Compression::default());
                 encoder.write_all(bytes)?;
                 encoder.finish()
             }

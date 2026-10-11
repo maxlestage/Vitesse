@@ -32,6 +32,8 @@ http-body = "1"
 http-body-util = "0.1"
 httparse = "1.10"
 pin-project-lite = "0.2"
+# Contraintes des paramètres de route (`/:id(\\d+)`), compilées au démarrage.
+regex-lite = "0.1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serde_urlencoded = "0.7"
@@ -51,12 +53,43 @@ h3-quinn = { version = "0.0.10", optional = true }
 quinn = { version = "0.11", default-features = false, features = ["runtime-tokio", "rustls-ring", "log"], optional = true }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "logging"], optional = true }
 
+# HTTPS (`tls`) : TLS sur TCP avec rustls, et HTTP/2 (`http2`) avec h2.
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "logging"], optional = true }
+h2 = { version = "0.4", optional = true }
+
+# Cookies signés et sessions (`session`) : HMAC-SHA256 et aléa du système.
+hmac = { version = "0.13", optional = true }
+sha2 = { version = "0.11", optional = true }
+getrandom = { version = "0.2", optional = true }
+
+# Gabarits HTML (`templates`) : `app.views(...)` et `req.render(...)`.
+minijinja = { version = "2", features = ["loader", "json"], optional = true }
+
+# Interopérabilité avec tower (`tower`) : couches tower-http, service hyper.
+tower-layer = { version = "0.3", optional = true }
+tower-service = { version = "0.3", optional = true }
+
+# Formulaires `multipart/form-data` (`multipart`).
+multer = { version = "3", optional = true }
+
 [features]
 default = ["ws"]
 # `app.ws(...)` et le module `vitesse::ws`.
 ws = ["dep:tokio-tungstenite", "dep:futures-util"]
 # `app.http3(...)` : HTTP/3 sur QUIC (UDP), à côté de HTTP/1.1.
 http3 = ["dep:quinn", "dep:h3", "dep:h3-quinn", "dep:rustls"]
+# `app.tls(...)` et le module `vitesse::tls` : HTTPS (TLS 1.2 et 1.3).
+tls = ["dep:rustls", "dep:tokio-rustls", "rustls/tls12", "tokio-rustls/tls12"]
+# HTTP/2 : négocié par ALPN avec `tls`, et en clair (h2c, « prior knowledge »).
+http2 = ["dep:h2"]
+# `app.cookie_secret(...)`, `middleware::session(...)` et le module `vitesse::session`.
+session = ["dep:hmac", "dep:sha2", "dep:getrandom"]
+# `app.views(dossier)` et `req.render(gabarit, contexte)`, avec minijinja.
+templates = ["dep:minijinja"]
+# `middleware::layer(...)`, `app.into_service()` et le module `vitesse::tower`.
+tower = ["dep:tower-layer", "dep:tower-service"]
+# `req.multipart()` et le module `vitesse::multipart` : envois de fichiers.
+multipart = ["dep:multer"]
 # `middleware::compress()` : réponses en Brotli ou gzip.
 compress = ["dep:brotli", "dep:flate2"]
 
@@ -67,6 +100,14 @@ required-features = ["ws"]
 [[example]]
 name = "http3"
 required-features = ["http3"]
+
+[[example]]
+name = "https"
+required-features = ["tls", "http2"]
+
+[[example]]
+name = "live"
+required-features = ["multipart"]
 
 [package.metadata.docs.rs]
 all-features = true
@@ -79,6 +120,9 @@ rcgen = "0.14"
 tokio-tungstenite = { version = "0.30", features = ["connect"] }
 serde = { version = "1", features = ["derive"] }
 tokio = { version = "1", features = ["full"] }
+# Des couches tower réelles pour tester `vitesse::tower`.
+tower05 = { package = "tower", version = "0.5", features = ["limit", "util"] }
+tower-http = { version = "0.6", features = ["set-header", "validate-request", "limit", "normalize-path", "cors"] }
 
 [profile.release]
 lto = "fat"

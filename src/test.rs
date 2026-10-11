@@ -141,7 +141,7 @@ impl TestRequest {
         let (head, ()) = builder.body(()).expect("invalid request").into_parts();
         let peer = SocketAddr::from(([127, 0, 0, 1], 40000));
         let body = ReqBody::Stream(crate::Body::from(self.body));
-        let req = Request::from_parts(head, body, Some(peer), &self.app.shared);
+        let req = Request::from_parts(head, body, Some(peer), false, &self.app.shared);
         let res = ResponseFuture::new(self.app, req).await;
         let (parts, body) = res.into_http().into_parts();
         let body = if self.method == Method::HEAD {

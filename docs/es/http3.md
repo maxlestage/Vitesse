@@ -1,6 +1,6 @@
 # HTTP/3 y QUIC
 
-HTTP/3 lleva HTTP sobre QUIC, un transporte construido sobre UDP con TLS 1.3 integrado: las conexiones se abren más rápido, un paquete perdido solo retrasa la petición a la que pertenece, y una conexión sobrevive a un cambio de red (de la wifi a los datos móviles, por ejemplo). Vitesse puede servir tu aplicación en HTTP/3 junto a HTTP/1.1: las mismas rutas, los mismos middlewares y los mismos handlers, con una línea más de configuración.
+HTTP/3 lleva HTTP sobre QUIC, un transporte construido sobre UDP con TLS 1.3 integrado: las conexiones se abren más rápido, un paquete perdido solo retrasa la petición a la que pertenece, y una conexión sobrevive a un cambio de red (de la wifi a los datos móviles, por ejemplo). Vitesse puede servir tu aplicación en HTTP/3 junto a HTTP/1.1 (y junto a [HTTPS y HTTP/2](https.md)): las mismas rutas, los mismos middlewares y los mismos handlers, con una línea más de configuración.
 
 ## Activar la feature `http3`
 
@@ -33,6 +33,8 @@ fn main() -> std::io::Result<()> {
     app.run(443)
 }
 ```
+
+Aquí, el puerto TCP 443 habla HTTP/1.1 sin cifrar, que es lo que espera un proxy inverso situado delante. Para servir también HTTPS en él, añade `app.tls(...)` con el mismo certificado (feature `tls`): consulta [HTTPS y HTTP/3 juntos](https.md#https-y-http3-juntos).
 
 `app.http3(...)` añade un socket UDP junto al socket TCP. Cada petición, sea cual sea su protocolo, pasa por los mismos middlewares globales, las mismas rutas, los mismos middlewares de router y el mismo `app.on_error`. En un handler, `req.version()` es `HTTP/3.0` para una petición que llegó por HTTP/3, y la cabecera `Host` se reconstruye a partir de la pseudocabecera `:authority`, así que `req.header("host")` y `req.hostname()` funcionan como en HTTP/1.1.
 
@@ -116,7 +118,7 @@ curl -i http://localhost:4433/                 # HTTP/1.1, con la cabecera alt-s
 | Método de `Http3` | Por defecto | Efecto |
 |---|---|---|
 | `.port(u16)` | El mismo número que el puerto TCP | El puerto UDP en el que escuchar |
-| `.alt_svc(bool)` | `true` | Añade la cabecera `alt-svc` a las respuestas HTTP/1.1 |
+| `.alt_svc(bool)` | `true` | Añade la cabecera `alt-svc` a las respuestas HTTP/1.1 y HTTP/2 |
 | `.alt_svc_port(u16)` | El puerto UDP que realmente se abre | El puerto público anunciado en `alt-svc`, cuando los clientes llegan al servidor por otro puerto (detrás de un proxy, Docker o NAT: normalmente `443`) |
 
 ```rust
@@ -129,7 +131,7 @@ app.http3(
 
 ## Cómo pasan los navegadores a HTTP/3
 
-Un navegador nunca empieza con HTTP/3. Primero se conecta por TCP con HTTPS, y pasa a HTTP/3 para las peticiones siguientes si la respuesta le indica que el servicio existe, con la cabecera `Alt-Svc`. Vitesse añade esta cabecera a cada respuesta HTTP/1.1:
+Un navegador nunca empieza con HTTP/3. Primero se conecta por TCP con HTTPS, y pasa a HTTP/3 para las peticiones siguientes si la respuesta le indica que el servicio existe, con la cabecera `Alt-Svc`. Vitesse añade esta cabecera a cada respuesta HTTP/1.1 y HTTP/2:
 
 ```http
 alt-svc: h3=":443"; ma=86400
@@ -137,11 +139,10 @@ alt-svc: h3=":443"; ma=86400
 
 Así, el navegador recuerda durante un día (`ma=86400`) que este sitio responde en HTTP/3 en el puerto UDP 443.
 
-Los navegadores solo confían en `Alt-Svc` en un sitio HTTPS. Vitesse no hace TLS sobre TCP, así que un navegador que llega directamente a él en HTTP sin cifrar nunca cambia de protocolo. En producción, la organización es por tanto:
+Los navegadores solo confían en `Alt-Svc` en un sitio HTTPS: un navegador que llega a Vitesse en HTTP sin cifrar nunca cambia de protocolo. Dos configuraciones funcionan en producción:
 
-1. un proxy inverso TLS (Caddy, Nginx) en el puerto TCP 443, que reenvía las peticiones a Vitesse en HTTP/1.1;
-2. Vitesse directamente en el puerto UDP 443, con el mismo certificado que el proxy;
-3. `alt-svc` anunciando el puerto `443`: el proxy pasa la cabecera a los navegadores, que después hablan directamente con Vitesse en HTTP/3.
+- **Vitesse sirve HTTPS por sí mismo**, con la feature `tls`: `app.tls(...)` y `app.http3(...)` con el mismo certificado, en los puertos TCP y UDP 443. Los navegadores reciben `alt-svc` en las respuestas HTTPS de Vitesse y pasan a HTTP/3 directamente, sin ningún proxy. Consulta [HTTPS y HTTP/3 juntos](https.md#https-y-http3-juntos).
+- **Detrás de un proxy inverso TLS** (Caddy, Nginx) en el puerto TCP 443, que reenvía las peticiones a Vitesse en HTTP/1.1, mientras Vitesse recibe directamente el puerto UDP 443, con el mismo certificado que el proxy. `alt-svc` anuncia el puerto `443`: el proxy pasa la cabecera a los navegadores, que después hablan directamente con Vitesse en HTTP/3. Esta configuración se detalla [más abajo](#en-producción-detrás-de-caddy-o-nginx).
 
 > [!TIP]
 > Caddy sirve HTTP/3 por defecto, con sus propios certificados. Si Caddy es tu proxy, lo más sencillo es dejar que haga HTTP/3 él mismo y no activar la feature. Actívala cuando tu proxy no haga HTTP/3, o cuando quieras que Vitesse responda a los clientes HTTP/3 sin pasar por el proxy.
@@ -150,7 +151,7 @@ Los clientes fuera del navegador (`curl --http3`, apps móviles, otros servicios
 
 ## En producción detrás de Caddy o Nginx
 
-Vitesse sirve HTTP/1.1 al proxy en un puerto TCP privado, y HTTP/3 a internet en el puerto UDP 443:
+Si Vitesse sirve HTTPS por sí mismo, no necesitas esta sección: consulta [HTTPS y HTTP/2](https.md). Con un proxy, Vitesse sirve HTTP/1.1 al proxy en un puerto TCP privado, y HTTP/3 a internet en el puerto UDP 443:
 
 ```rust
 use vitesse::http3::Http3;
@@ -191,7 +192,7 @@ En el lado del proxy, mantén la configuración habitual (ver [Puesta en producc
 Con systemd, un usuario sin privilegios no puede abrir el puerto 443: añade `AmbientCapabilities=CAP_NET_BIND_SERVICE` a la sección `[Service]`. Las claves de Let's Encrypt solo las puede leer root: cópialas a una carpeta que el usuario del servicio pueda leer (desde el hook de certbot que también reinicia la aplicación).
 
 > [!WARNING]
-> Las peticiones HTTP/3 no pasan por el proxy. `req.ip()` es entonces la dirección real del cliente, pero las cabeceras `X-Real-IP` y `X-Forwarded-For` vienen directamente del cliente: confía en ellas solo en las peticiones HTTP/1.1 (`req.version()`). Del mismo modo, lo que hace el proxy (compresión, limitación de peticiones, registros de acceso, tamaño máximo de los cuerpos) no se aplica a las peticiones HTTP/3: `app.body_limit` sí.
+> Las peticiones HTTP/3 no pasan por el proxy: sus cabeceras `X-Forwarded-For` y `X-Forwarded-Proto`, si las hay, vienen directamente del cliente. Declara el proxy por su dirección, `app.trust_proxy("loopback")`, y Vitesse solo cree estas cabeceras cuando vienen de él: `req.ip()` es entonces la dirección real del cliente en los dos protocolos (consulta [Puesta en producción](production.md#obtener-la-ip-del-cliente)). Del mismo modo, lo que hace el proxy (compresión, limitación de peticiones, registros de acceso, tamaño máximo de los cuerpos) no se aplica a las peticiones HTTP/3: usa los middlewares de Vitesse (`compress`, `rate_limit`, `body_limit`) y `app.body_limit`, que se aplican a todos los protocolos.
 
 ## `bind` y `http3_addr`
 
@@ -217,14 +218,16 @@ async fn main() -> std::io::Result<()> {
 }
 ```
 
-`server.run()` y `server.with_graceful_shutdown(signal)`, igual que `app.run` y `app.listen`, detienen los dos protocolos a la vez: al apagar, las conexiones HTTP/3 reciben un `GOAWAY` (el cliente ya no abre peticiones nuevas en ellas) y las peticiones en curso tienen hasta 10 segundos para terminar, como en HTTP/1.1 (ver [Configuración del servidor](server.md#apagado-ordenado)).
+`server.run()` y `server.with_graceful_shutdown(signal)`, igual que `app.run` y `app.listen`, detienen los dos protocolos a la vez: al apagar, las conexiones HTTP/3 reciben un `GOAWAY` (el cliente ya no abre peticiones nuevas en ellas) y las peticiones en curso tienen hasta `shutdown_timeout` (10 segundos por defecto) para terminar, como en HTTP/1.1 (ver [Configuración del servidor](server.md#apagado-ordenado)).
 
 ## Qué cambia y qué no se admite (todavía)
 
-- **Los cuerpos de las peticiones** se leen enteros antes de ejecutar el handler, hasta `app.body_limit` (`413` si se supera). Por eso `req.take_body()` da un cuerpo que ya está en memoria, no un flujo: leer por partes los cuerpos de las peticiones en HTTP/3 todavía no se admite.
+- **Los cuerpos de las peticiones** se transmiten al handler por partes, a medida que llegan, como en HTTP/1.1 y HTTP/2: `req.take_body()` es un flujo de verdad, `field.save(path)` escribe una [subida](requests.md#subida-de-archivos-multipart) en disco a medida que llega, y el límite del cuerpo es el de la propia petición, `app.body_limit` o el [`middleware::body_limit`](requests.md#límite-de-tamaño-del-cuerpo-y-413) de la ruta (`413` si se supera).
 - **Las respuestas** se envían por partes como en HTTP/1.1 (`Body::from_stream`, archivos…). Vitesse añade `date` y `content-length` (cuando se conoce el tamaño), y quita las cabeceras propias de HTTP/1.1 (`connection`, `transfer-encoding`, `upgrade`, `keep-alive`).
 - **Los hilos**: con `app.run` en modo de un hilo por núcleo (el predeterminado en Linux), HTTP/3 lo sirve un solo hilo, junto a los hilos de HTTP/1.1. Si la mayor parte de tu tráfico es HTTP/3, compara con `app.thread_per_core(false)`.
-- **No se admite**: [WebSocket](websocket.md) sobre HTTP/3 (los clientes abren sus conexiones WebSocket en HTTP/1.1), HTTP/2, 0-RTT (*early data*) ni la lectura por partes de los cuerpos de las peticiones.
+- **WebSocket sobre HTTP/3** (RFC 9220) no se admite: el crate h3 no lo implementa, y los navegadores no dependen de él. Abren sus [WebSockets](websocket.md#websocket-sobre-http2) sobre HTTP/2 o HTTP/1.1, en TCP, aunque la página haya llegado por HTTP/3.
+- **0-RTT** (*early data*) no se admite, a propósito: permite que un cliente que vuelve envíe su primera petición antes de que termine el handshake, pero un atacante que grabe esa petición puede reenviarla, y un `POST` reenviado podría, por ejemplo, hacer un pedido dos veces. Vitesse espera al final del handshake, que con QUIC solo cuesta un viaje de ida y vuelta.
+- HTTP/2 está disponible sobre TCP, con la feature `http2`: consulta [HTTPS y HTTP/2](https.md).
 
 ## Cortafuegos y alojamiento
 
@@ -235,4 +238,4 @@ QUIC usa **UDP**: abrir el puerto TCP 443 no basta.
 - **Heroku**: su router no reenvía UDP a los dynos, así que HTTP/3 no está disponible en Heroku. Deja la feature desactivada allí.
 - **Cloud Run, Render y plataformas similares** terminan HTTP/3 en su borde, cuando lo ofrecen, y hablan HTTP/1.1 con tu contenedor: tampoco necesitas la feature allí.
 
-Si HTTP/3 está bloqueado en algún punto del camino (un cortafuegos corporativo que descarta el UDP, por ejemplo), los navegadores vuelven sin avisar a HTTP/1.1 o HTTP/2 a través del proxy: activar HTTP/3 nunca deja a nadie sin servicio.
+Si HTTP/3 está bloqueado en algún punto del camino (un cortafuegos corporativo que descarta el UDP, por ejemplo), los navegadores vuelven sin avisar a HTTP/1.1 o HTTP/2 sobre TCP: activar HTTP/3 nunca deja a nadie sin servicio.

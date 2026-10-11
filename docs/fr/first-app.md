@@ -101,7 +101,7 @@ curl http://localhost:3000/hello/Ada
 Bonjour, Ada !
 ```
 
-Besoin d'un nombre ? `req.param_as::<u64>("id")?` convertit le paramètre et répond de lui-même `400 Bad Request` si ce n'est pas un nombre. Voir [Routage](routing.md).
+Besoin d'un nombre ? `req.param_as::<u64>("id")?` convertit le paramètre et répond de lui-même `400 Bad Request` si ce n'est pas un nombre. Voir [Routage](routing.md#paramètres-typés).
 
 ## 5. Lire un corps JSON
 

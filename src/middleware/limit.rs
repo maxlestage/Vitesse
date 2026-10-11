@@ -85,7 +85,9 @@ impl Middleware for ConcurrencyLimit {
 
 /// Limits each client to `max` requests per `period` (by default, a client
 /// is an IP address, see [`App::trust_proxy`](crate::App::trust_proxy)
-/// behind a proxy). Beyond that: `429 Too Many Requests` with `Retry-After`.
+/// behind a proxy; requests without a known address, on a Unix socket
+/// without `trust_proxy`, share one counter). Beyond that: `429 Too Many
+/// Requests` with `Retry-After`.
 /// Every response carries `X-RateLimit-Limit` and `X-RateLimit-Remaining`.
 ///
 /// Requests are spread evenly over the period (the GCRA algorithm, as in
@@ -111,6 +113,7 @@ impl Middleware for ConcurrencyLimit {
 /// of the application, each one counts on its own.
 pub fn rate_limit(max: u32, period: Duration) -> RateLimit {
     let max = max.max(1);
+    let period = period.min(crate::util::MAX_DELAY);
     RateLimit {
         max,
         period,
@@ -149,6 +152,9 @@ enum KeyFn {
 #[derive(PartialEq, Eq, Hash)]
 enum Key {
     Ip(IpAddr),
+    /// The requests whose client address is unknown (a Unix socket without
+    /// `trust_proxy`): they share one counter rather than escape the limit.
+    UnknownIp,
     Custom(Box<str>),
 }
 
@@ -209,7 +215,7 @@ impl RateLimit {
 impl Middleware for RateLimit {
     fn handle(&'static self, req: Request, next: Next) -> BoxFuture<Response> {
         let key = match &self.key {
-            KeyFn::Ip => req.ip().map(Key::Ip),
+            KeyFn::Ip => Some(req.ip().map_or(Key::UnknownIp, Key::Ip)),
             KeyFn::Custom(f) => f(&req).map(|k| Key::Custom(k.into())),
         };
         let Some(key) = key else {

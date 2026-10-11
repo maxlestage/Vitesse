@@ -352,4 +352,80 @@ mod websocket {
         let (res, _send) = client.send_request(req, false).unwrap();
         assert_eq!(res.await.unwrap().status(), 404);
     }
+
+    /// Les WebSockets ne retardent pas l'arrêt propre, comme en HTTP/1.1.
+    #[tokio::test]
+    async fn graceful_shutdown_does_not_wait_for_websockets() {
+        let mut app = App::new();
+        app.ws("/ws", |_req, mut socket| async move {
+            while let Some(Ok(message)) = socket.recv().await {
+                if socket.send(message).await.is_err() {
+                    break;
+                }
+            }
+        });
+        let server = app.bind("127.0.0.1:0").await.unwrap();
+        let addr = server.local_addr();
+        let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
+        let running = tokio::spawn(server.with_graceful_shutdown(async {
+            let _ = stopped.await;
+        }));
+
+        let tcp = TcpStream::connect(addr).await.unwrap();
+        let (client, conn) = h2::client::handshake(tcp).await.unwrap();
+        tokio::spawn(async move {
+            let _ = conn.await;
+        });
+        let mut client = client.ready().await.unwrap();
+        while !client.is_extended_connect_protocol_enabled() {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        let mut req = http::Request::builder()
+            .method(Method::CONNECT)
+            .uri("http://localhost/ws")
+            .header("sec-websocket-version", "13")
+            .body(())
+            .unwrap();
+        req.extensions_mut()
+            .insert(h2::ext::Protocol::from_static("websocket"));
+        let (res, _send) = client.send_request(req, false).unwrap();
+        assert_eq!(res.await.unwrap().status(), 200);
+
+        let start = std::time::Instant::now();
+        stop.send(()).unwrap();
+        tokio::time::timeout(Duration::from_secs(5), running)
+            .await
+            .expect("the server stops without waiting for the WebSocket")
+            .unwrap()
+            .unwrap();
+        assert!(
+            start.elapsed() < Duration::from_secs(3),
+            "{:?}",
+            start.elapsed()
+        );
+    }
+}
+
+#[tokio::test]
+async fn a_preface_split_across_reads_is_still_http2() {
+    let addr = server(app()).await;
+    // Un relais qui livre les 12 premiers octets (`PRI * HTTP/2`), puis le
+    // reste un peu plus tard, comme peut le faire le réseau.
+    let relay = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let relay_addr = relay.local_addr().unwrap();
+    tokio::spawn(async move {
+        let (mut client, _) = relay.accept().await.unwrap();
+        let mut upstream = TcpStream::connect(addr).await.unwrap();
+        let mut first = vec![0u8; 24];
+        client.read_exact(&mut first).await.unwrap();
+        upstream.write_all(&first[..12]).await.unwrap();
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        upstream.write_all(&first[12..]).await.unwrap();
+        let _ = tokio::io::copy_bidirectional(&mut client, &mut upstream).await;
+    });
+    let mut c = client(relay_addr).await;
+    let (res, body) = request(&mut c, Method::GET, "/", &[], b"").await;
+    assert_eq!(res.status, 200);
+    assert_eq!(res.version, http::Version::HTTP_2);
+    assert!(!body.is_empty());
 }

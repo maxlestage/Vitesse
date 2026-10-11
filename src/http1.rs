@@ -248,6 +248,10 @@ impl<IO: Io> Conn<IO> {
                     Ok(Some(head)) => head,
                     Ok(None) => break,
                     Err(_) if cfg!(feature = "http2") && self.is_h2_preface() => {
+                        if self.rbuf.len() < H2_PREFACE.len() {
+                            // Début du préambule seulement : on attend la suite.
+                            break;
+                        }
                         self.http2 = true;
                         return Ok(());
                     }
@@ -334,9 +338,10 @@ impl<IO: Io> Conn<IO> {
         }
     }
 
-    /// The connection starts with the HTTP/2 preface.
+    /// The connection starts with (the beginning of) the HTTP/2 preface.
     fn is_h2_preface(&self) -> bool {
-        self.served == 0 && self.rbuf.starts_with(H2_PREFACE)
+        let n = self.rbuf.len().min(H2_PREFACE.len());
+        self.served == 0 && n > 0 && self.rbuf[..n] == H2_PREFACE[..n]
     }
 
     /// The request body, if it has already been fully received (the common
@@ -490,6 +495,10 @@ impl<IO: Io> Conn<IO> {
     async fn flush(&mut self) -> io::Result<()> {
         if !self.wbuf.is_empty() {
             self.io.write_all(&self.wbuf).await?;
+            // TLS garde des enregistrements chiffrés en attente : sans `flush`,
+            // la fin d'une réponse peut rester dans son tampon (rien à faire en
+            // TCP).
+            self.io.flush().await?;
             self.wbuf.clear();
             if self.wbuf.capacity() > 1024 * 1024 {
                 self.wbuf.shrink_to(READ_SIZE);
@@ -521,6 +530,7 @@ impl<IO: Io> Conn<IO> {
                 head = &[];
             }
         }
+        self.io.flush().await?;
         self.wbuf.clear();
         Ok(())
     }

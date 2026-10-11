@@ -207,7 +207,7 @@ let mut app = App::new(); // 1 MiB everywhere...
 app.post("/upload", upload.with(middleware::body_limit(50 * 1024 * 1024))); // ...50 MiB here
 ```
 
-`req.body_limit()` returns the limit that applies to a request, and `req.set_body_limit(bytes)` changes it from your own middleware. Over [HTTP/3](http3.md), request bodies are read before routing, within `app.body_limit`: raise that one if HTTP/3 clients upload large files. See [Body size limit and 413](requests.md#body-size-limit-and-413) for the details.
+`req.body_limit()` returns the limit that applies to a request, and `req.set_body_limit(bytes)` changes it from your own middleware. It applies over HTTP/1.1, [HTTP/2](https.md) and [HTTP/3](http3.md) alike. See [Body size limit and 413](requests.md#body-size-limit-and-413) for the details.
 
 ## Timeouts and connections
 

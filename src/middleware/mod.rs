@@ -110,10 +110,6 @@ pub fn timeout(duration: Duration) -> impl Middleware {
 /// let mut app = App::new(); // 1 MiB by default
 /// app.post("/upload", upload.with(middleware::body_limit(50 * 1024 * 1024)));
 /// ```
-///
-/// Over HTTP/3, request bodies are read before routing, within
-/// [`App::body_limit`](crate::App::body_limit): raise that one if HTTP/3
-/// clients upload large files.
 pub fn body_limit(bytes: usize) -> BodyLimit {
     BodyLimit(bytes)
 }

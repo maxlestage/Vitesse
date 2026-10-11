@@ -392,12 +392,24 @@ impl Request {
 
     /// Builds a request from an [`http::Request`] (test client).
     pub(crate) fn from_parts(
-        parts: http::request::Parts,
+        mut parts: http::request::Parts,
         body: ReqBody,
         remote: Option<SocketAddr>,
         secure: bool,
         shared: &'static Shared,
     ) -> Self {
+        // En HTTP/2 et HTTP/3, l'hôte est dans `:authority` (l'URI) : on le
+        // remet dans `Host` pour que `req.header("host")` fonctionne comme en
+        // HTTP/1.1.
+        if !parts.headers.contains_key(header::HOST) {
+            if let Some(host) = parts
+                .uri
+                .authority()
+                .and_then(|a| HeaderValue::from_str(a.as_str()).ok())
+            {
+                parts.headers.insert(header::HOST, host);
+            }
+        }
         let mut inner = Inner::take(shared);
         inner.method = parts.method;
         inner.version = parts.version;

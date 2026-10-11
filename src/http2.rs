@@ -13,6 +13,8 @@ use std::future::poll_fn;
 use std::io;
 use std::net::SocketAddr;
 use std::pin::{Pin, pin};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::task::{Context, Poll};
 use std::time::{Duration, SystemTime};
 
@@ -23,6 +25,7 @@ use http::{HeaderValue, Method, StatusCode, header};
 use http_body::{Body as _, Frame, SizeHint};
 use http_body_util::BodyExt;
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
+use tokio::sync::Notify;
 use tokio::task::JoinSet;
 use tokio::time::Instant;
 
@@ -45,6 +48,9 @@ const CONNECTION_WINDOW: u32 = 1024 * 1024;
 const MAX_HEADER_LIST: u32 = 64 * 1024;
 /// Time given to the client to send its preface and settings.
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
+/// Time given to a client to acknowledge the `GOAWAY` of an idle
+/// connection, before it is closed anyway.
+const GOAWAY_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Serves an HTTP/2 connection until it is closed.
 pub(crate) async fn serve<IO: Io>(
@@ -70,6 +76,7 @@ pub(crate) async fn serve<IO: Io>(
     };
 
     let mut streams = JoinSet::new();
+    let requests = Arc::new(Requests::default());
     let mut stopped = pin!(state.stopped());
     // Une connexion sans requête en cours est fermée après le délai de keep-alive.
     let idle_timeout = match app.config.keep_alive {
@@ -77,39 +84,104 @@ pub(crate) async fn serve<IO: Io>(
         d => d,
     };
     let mut idle = pin!(tokio::time::sleep(idle_timeout));
-    // Pendant l'arrêt propre, la connexion compte comme occupée jusqu'à ce
-    // que ses dernières réponses soient parties.
-    let mut stopping: Option<Busy> = None;
+    // Après le GOAWAY, la connexion est fermée de force passé ce délai (un
+    // client qui ne répond plus ne la garde pas ouverte).
+    let mut close_by = pin!(tokio::time::sleep(Duration::ZERO));
+    let mut closing = false;
+    // Pendant l'arrêt propre, la connexion compte comme occupée tant que des
+    // requêtes HTTP sont en cours (pas les WebSockets), et un instant de plus
+    // pour que leurs dernières trames partent.
+    let mut hold: Option<Busy> = None;
+    let mut release = pin!(tokio::time::sleep(Duration::ZERO));
+    let mut releasing = false;
     loop {
         let next = tokio::select! {
             next = conn.accept() => next,
-            () = &mut stopped, if stopping.is_none() => {
+            () = &mut stopped, if !closing => {
                 // GOAWAY : le client n'ouvrira plus de flux ici.
-                stopping = Some(Busy::new(state));
+                closing = true;
                 conn.graceful_shutdown();
+                if requests.active() > 0 {
+                    hold = Some(Busy::new(state));
+                }
+                close_by.as_mut().reset(Instant::now() + app.config.shutdown_timeout);
                 continue;
             }
-            () = &mut idle, if stopping.is_none() => {
+            () = &mut idle, if !closing => {
                 while streams.try_join_next().is_some() {}
                 if streams.is_empty() {
-                    stopping = Some(Busy::new(state));
+                    closing = true;
                     conn.graceful_shutdown();
+                    close_by.as_mut().reset(Instant::now() + GOAWAY_TIMEOUT);
                 } else {
                     idle.as_mut().reset(Instant::now() + idle_timeout);
                 }
                 continue;
             }
+            () = requests.done.notified(), if hold.is_some() && !releasing => {
+                if requests.active() == 0 {
+                    releasing = true;
+                    release.as_mut().reset(Instant::now() + Duration::from_millis(50));
+                }
+                continue;
+            }
+            () = &mut release, if releasing => {
+                hold = None;
+                releasing = false;
+                continue;
+            }
+            () = &mut close_by, if closing => break,
         };
         match next {
             Some(Ok((req, respond))) => {
                 idle.as_mut().reset(Instant::now() + idle_timeout);
-                streams.spawn(respond_to(req, respond, peer, secure, app, state));
+                let guard = RequestGuard::new(&requests, state);
+                streams.spawn(respond_to(req, respond, peer, secure, app, guard));
                 while streams.try_join_next().is_some() {}
             }
             Some(Err(_)) | None => break,
         }
     }
-    drop(stopping);
+    drop(hold);
+}
+
+/// The HTTP requests in flight on a connection (WebSockets excluded).
+#[derive(Default)]
+struct Requests {
+    active: AtomicUsize,
+    /// Signaled when the last request in flight finishes.
+    done: Notify,
+}
+
+impl Requests {
+    fn active(&self) -> usize {
+        self.active.load(Ordering::Acquire)
+    }
+}
+
+/// A request in flight: counted by its connection and by the server (for
+/// the graceful shutdown) until it is dropped.
+struct RequestGuard {
+    requests: Arc<Requests>,
+    _busy: Busy,
+}
+
+impl RequestGuard {
+    fn new(requests: &Arc<Requests>, state: &'static ServerState) -> Self {
+        requests.active.fetch_add(1, Ordering::AcqRel);
+        RequestGuard {
+            requests: requests.clone(),
+            _busy: Busy::new(state),
+        }
+    }
+}
+
+impl Drop for RequestGuard {
+    fn drop(&mut self) {
+        if self.requests.active.fetch_sub(1, Ordering::AcqRel) == 1 {
+            self.requests.done.notify_one();
+        }
+    }
 }
 
 /// Answers one request (one stream).
@@ -119,21 +191,10 @@ async fn respond_to(
     peer: Option<SocketAddr>,
     secure: bool,
     app: &'static AppService,
-    state: &'static ServerState,
+    busy: RequestGuard,
 ) {
-    let busy = Busy::new(state);
+    #[cfg_attr(not(feature = "ws"), allow(unused_mut))]
     let (mut parts, body) = req.into_parts();
-    // En HTTP/2, l'hôte est dans `:authority` : on le remet dans `Host` pour
-    // que `req.header("host")` fonctionne comme en HTTP/1.1.
-    let missing_host = !parts.headers.contains_key(header::HOST);
-    if let Some(host) = parts
-        .uri
-        .authority()
-        .filter(|_| missing_host)
-        .and_then(|a| HeaderValue::from_str(a.as_str()).ok())
-    {
-        parts.headers.insert(header::HOST, host);
-    }
     let is_head = parts.method == Method::HEAD;
     // Une poignée de main WebSocket (CONNECT étendu, `:protocol websocket`)
     // devient un `GET` pour le routage ; le flux servira ensuite au WebSocket.
@@ -178,7 +239,7 @@ async fn respond_with(
     mut respond: SendResponse<Bytes>,
     is_head: bool,
     #[cfg_attr(not(feature = "http3"), allow(unused_variables))] app: &'static AppService,
-    busy: Busy,
+    busy: RequestGuard,
     tunnel: Option<RecvStream>,
 ) {
     let (mut head, body) = res.into_http().into_parts();

@@ -296,18 +296,7 @@ async fn respond<S>(
     S: h3::quic::BidiStream<Bytes>,
     S::RecvStream: Send + 'static,
 {
-    let (mut parts, ()) = req.into_parts();
-    // En HTTP/3, l'hôte est dans `:authority` : on le remet dans `Host` pour
-    // que `req.header("host")` fonctionne comme en HTTP/1.1.
-    let missing_host = !parts.headers.contains_key(header::HOST);
-    if let Some(host) = parts
-        .uri
-        .authority()
-        .filter(|_| missing_host)
-        .and_then(|a| HeaderValue::from_str(a.as_str()).ok())
-    {
-        parts.headers.insert(header::HOST, host);
-    }
+    let (parts, ()) = req.into_parts();
     let is_head = parts.method == Method::HEAD;
 
     // Le corps arrive au fil de l'eau : le handler le lit (dans la limite

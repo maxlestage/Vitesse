@@ -295,7 +295,7 @@ impl App {
     /// actix-web's `keep_alive`). `Duration::ZERO` disables keep-alive: the
     /// connection is closed after each response (`Connection: close`).
     pub fn keep_alive(&mut self, timeout: Duration) -> &mut Self {
-        self.config.keep_alive = timeout;
+        self.config.keep_alive = timeout.min(crate::util::MAX_DELAY);
         self
     }
 
@@ -304,14 +304,15 @@ impl App {
     /// Request Timeout` and the connection is closed. Protects against
     /// clients that open connections and send nothing (slowloris).
     pub fn header_timeout(&mut self, timeout: Duration) -> &mut Self {
-        self.config.header_timeout = timeout.max(Duration::from_millis(20));
+        self.config.header_timeout =
+            timeout.clamp(Duration::from_millis(20), crate::util::MAX_DELAY);
         self
     }
 
     /// Time given to in-flight requests to finish during a graceful
     /// shutdown (10 s by default, actix-web's `shutdown_timeout`).
     pub fn shutdown_timeout(&mut self, timeout: Duration) -> &mut Self {
-        self.config.shutdown_timeout = timeout;
+        self.config.shutdown_timeout = timeout.min(crate::util::MAX_DELAY);
         self
     }
 

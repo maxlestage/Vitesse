@@ -359,8 +359,22 @@ impl App {
         let fallback = self.fallback.unwrap_or_else(|| Arc::new(not_found));
         let tree: &'static Tree<MethodMap> = Box::leak(Box::new(self.tree));
         let core = Arc::new(Core { tree, fallback });
+        let chains = build_scopes(self.scopes, &core);
+        let mut scopes = Tree::new();
+        scopes.set_case_insensitive(tree.is_case_insensitive());
+        for (i, (prefix, _)) in chains.iter().enumerate() {
+            // `/docs/:lang(en|fr)` couvre `/docs/:lang(en|fr)/*`, avec ses contraintes.
+            let Ok(segments) = parse_pattern(prefix) else {
+                continue;
+            };
+            for mut variant in variants(&segments) {
+                variant.push(crate::tree::Segment::Wildcard("*"));
+                scopes.entry(&variant, || i);
+            }
+        }
         let dispatcher: Arc<dyn Handler> = Arc::new(Dispatcher {
-            scopes: build_scopes(self.scopes, &core),
+            scopes,
+            chains: chains.into_iter().map(|(_, chain)| chain).collect(),
             core,
         });
         let mut middlewares = self.middlewares;
@@ -528,8 +542,10 @@ impl AppService {
 /// Routing: finds the route and calls its handler.
 struct Dispatcher {
     core: Arc<Core>,
-    /// Chains of the mounted routers' middlewares, longest prefix first.
-    scopes: Box<[(Box<str>, Chain)]>,
+    /// The mount prefixes of the routers (`prefix/*`), pointing into `chains`.
+    scopes: Tree<usize>,
+    /// For each prefix, the chain of the middlewares that cover it.
+    chains: Box<[Chain]>,
 }
 
 impl Handler for Dispatcher {
@@ -544,38 +560,28 @@ impl Handler for Dispatcher {
         }
         // Aucune route ne répond : les middlewares des routeurs montés sur ce
         // préfixe passent d'abord, puis le 404, le 405 ou l'OPTIONS automatique.
-        let path = req.path();
-        let ci = self.core.tree.is_case_insensitive();
-        match self
-            .scopes
-            .iter()
-            .find(|(prefix, _)| under(path, prefix, ci))
-        {
-            Some((_, chain)) => Next::new(chain).run(req),
+        let mut captures = Vec::new();
+        match self.scopes.find(req.path(), &mut captures) {
+            Some(&i) => Next::new(&self.chains[i]).run(req),
             None => self.core.call(req),
         }
     }
 }
 
-/// `path` est sous `prefix`, segment par segment : `/api` couvre `/api` et
-/// `/api/x` (pas `/apix`), un segment avec des paramètres (`:id`,
-/// `v:version`) accepte n'importe quel segment, un paramètre optionnel peut
-/// manquer, et un joker `*` couvre tout le reste.
-fn under(path: &str, prefix: &str, case_insensitive: bool) -> bool {
-    let mut segments = path.split('/').filter(|s| !s.is_empty());
-    for expected in prefix.split('/').filter(|s| !s.is_empty()) {
+/// Le préfixe `prefix` (d'un routeur monté) est sous `parent`, segment par
+/// segment : `/api` couvre `/api` et `/api/x` (pas `/apix`), un segment avec
+/// des paramètres (`:id`, `v:version`) couvre n'importe quel segment, un
+/// paramètre optionnel peut manquer, et un joker `*` couvre tout le reste.
+fn under(prefix: &str, parent: &str) -> bool {
+    let mut segments = prefix.split('/').filter(|s| !s.is_empty());
+    for expected in parent.split('/').filter(|s| !s.is_empty()) {
         if expected.starts_with('*') {
             return true;
         }
         let Some(segment) = segments.next() else {
             return expected.starts_with(':') && expected.ends_with('?');
         };
-        let same = if case_insensitive {
-            segment.eq_ignore_ascii_case(expected)
-        } else {
-            segment == expected
-        };
-        if !(same || expected.contains(':')) {
+        if !(segment == expected || expected.contains(':')) {
             return false;
         }
     }
@@ -586,7 +592,7 @@ fn under(path: &str, prefix: &str, case_insensitive: bool) -> bool {
 /// les préfixes les plus courts (routeurs extérieurs) d'abord, puis dans
 /// l'ordre de montage.
 /// Le fallback est celui du routeur le plus profond qui couvre le préfixe.
-fn build_scopes(scopes: Vec<Scope>, core: &Arc<Core>) -> Box<[(Box<str>, Chain)]> {
+fn build_scopes(scopes: Vec<Scope>, core: &Arc<Core>) -> Vec<(Box<str>, Chain)> {
     let depth = |p: &str| p.split('/').filter(|s| !s.is_empty()).count();
     let mut ordered: Vec<(usize, Scope)> = scopes.into_iter().enumerate().collect();
     ordered.sort_by_key(|(i, scope)| (depth(&scope.prefix), *i));
@@ -601,7 +607,7 @@ fn build_scopes(scopes: Vec<Scope>, core: &Arc<Core>) -> Box<[(Box<str>, Chain)]
                 ordered
                     .iter()
                     .map(|(_, scope)| scope)
-                    .filter(|scope| under(prefix, &scope.prefix, false))
+                    .filter(|scope| under(prefix, &scope.prefix))
             };
             let middlewares: Vec<Arc<dyn Middleware>> = covering()
                 .flat_map(|scope| scope.middlewares.iter().cloned())

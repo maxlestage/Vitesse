@@ -887,16 +887,17 @@ impl Request {
     /// ```
     ///
     /// Fails with a `500` if the name is unknown, if a parameter is missing
-    /// or in excess, or if a value doesn't satisfy its constraint.
+    /// or in excess, or if a value doesn't satisfy its constraint (the cause
+    /// is logged, not sent to the client).
     pub fn path_for(&self, name: &str, params: &[&dyn fmt::Display]) -> Result<String, Error> {
         let pattern = self
             .inner
             .shared
             .names
             .get(name)
-            .ok_or_else(|| Error::internal(format!("unknown route name '{name}'")))?;
+            .ok_or_else(|| internal(format!("unknown route name '{name}'")))?;
         crate::tree::build_path(pattern, params)
-            .map_err(|e| Error::internal(format!("cannot build the URL of '{name}': {e}")))
+            .map_err(|e| internal(format!("cannot build the URL of '{name}': {e}")))
     }
 
     /// The absolute URL of a named route: [`Request::path_for`] preceded by
@@ -905,7 +906,7 @@ impl Request {
         let path = self.path_for(name, params)?;
         let host = self
             .host()
-            .ok_or_else(|| Error::internal("cannot build an absolute URL without a host"))?;
+            .ok_or_else(|| internal("cannot build an absolute URL without a host".into()))?;
         Ok(format!("{}://{host}{path}", self.protocol()))
     }
 
@@ -1128,6 +1129,11 @@ impl Request {
             .get_mut()
             .unwrap_or_else(PoisonError::into_inner) = ReqBody::Stream(body.into());
     }
+}
+
+/// A `500` whose cause is logged rather than sent to the client.
+fn internal(cause: String) -> Error {
+    Error::internal("Internal Server Error").with_source(cause)
 }
 
 /// Reads a body into memory, up to a maximum size.

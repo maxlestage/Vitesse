@@ -206,3 +206,52 @@ async fn session_without_the_middleware_is_a_500() {
     });
     assert_eq!(TestClient::new(app).get("/").await.status(), 500);
 }
+
+#[cfg(feature = "ws")]
+#[tokio::test]
+async fn the_session_is_readable_in_a_websocket_handler() {
+    use futures_util::StreamExt;
+
+    let mut app = app(MemoryStore::new());
+    app.ws("/ws", |req, mut socket| async move {
+        let user = req
+            .session()
+            .get::<String>("user")
+            .unwrap_or_else(|| "nobody".into());
+        let _ = socket.send(user).await;
+    });
+    let server = app.bind("127.0.0.1:0").await.unwrap();
+    let addr = server.local_addr();
+    tokio::spawn(server.run());
+
+    // Connexion en HTTP, puis WebSocket avec le cookie de session.
+    let mut tcp = tokio::net::TcpStream::connect(addr).await.unwrap();
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    tcp.write_all(
+        b"POST /login HTTP/1.1\r\nhost: x\r\ncontent-length: 0\r\nconnection: close\r\n\r\n",
+    )
+    .await
+    .unwrap();
+    let mut out = String::new();
+    tcp.read_to_string(&mut out).await.unwrap();
+    let cookie = out
+        .lines()
+        .find_map(|l| l.strip_prefix("set-cookie: "))
+        .unwrap()
+        .split(';')
+        .next()
+        .unwrap()
+        .to_owned();
+
+    let mut request =
+        tokio_tungstenite::tungstenite::client::IntoClientRequest::into_client_request(format!(
+            "ws://{addr}/ws"
+        ))
+        .unwrap();
+    request
+        .headers_mut()
+        .insert("cookie", cookie.parse().unwrap());
+    let (mut ws, _) = tokio_tungstenite::connect_async(request).await.unwrap();
+    let message = ws.next().await.unwrap().unwrap();
+    assert_eq!(message.into_text().unwrap().as_str(), "ada");
+}

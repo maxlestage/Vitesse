@@ -86,8 +86,94 @@ app.get("/users/:id/posts/:post", |req: Request| async move {
 
 - `req.params()` recorre todos los pares `(nombre, valor)`, en orden.
 - Los valores vienen decodificados: `/users/Fran%C3%A7ois` da `François`. Un `+` sigue siendo un `+`, porque solo significa espacio en la query string. `req.path()` sigue devolviendo la ruta sin decodificar.
-- Un parámetro ocupa un segmento entero. Nunca coincide con un segmento vacío ni con nada que contenga una `/`.
-- Los nombres solo pueden tener letras, dígitos y `_`. No se admiten segmentos parciales como `/vuelos/:desde-:hasta` ni expresiones regulares. Captura el segmento entero y divídelo tú.
+- Un parámetro nunca coincide con un valor vacío ni con nada que contenga una `/`.
+- Los nombres solo pueden tener letras, dígitos y `_`.
+
+La sintaxis es la de Express (versión 4), así que funcionan algunas formas más: varios parámetros en un segmento, restricciones y parámetros opcionales.
+
+### Varios parámetros en un segmento
+
+Un segmento puede mezclar texto y parámetros, siempre que algo de texto los separe:
+
+```rust
+app.get("/flights/:from-:to", |req: Request| async move {
+    let from = req.param("from").unwrap();
+    let to = req.param("to").unwrap();
+    format!("de {from} a {to}")
+});
+app.get("/files/:name.:ext", show_file);
+app.get("/api/v:version/status", api_status);
+app.get("/img/:id.png", show_png);
+```
+
+| Petición | Ruta | Parámetros |
+|---|---|---|
+| `/flights/LAX-SFO` | `/flights/:from-:to` | `from = "LAX"`, `to = "SFO"` |
+| `/files/report.pdf` | `/files/:name.:ext` | `name = "report"`, `ext = "pdf"` |
+| `/files/archive.tar.gz` | `/files/:name.:ext` | `name = "archive"`, `ext = "tar.gz"` |
+| `/api/v2/status` | `/api/v:version/status` | `version = "2"` |
+| `/img/42.png` | `/img/:id.png` | `id = "42"` |
+| `/files/README` o `/api/2/status` | ninguna: `404` | |
+
+- Cada parámetro toma al menos un carácter, y todos salvo el último toman lo menos posible, como en Express: por eso `archive.tar.gz` da `archive` y `tar.gz`.
+- Dos parámetros tienen que estar separados por texto: `/:from:to` se rechaza al arrancar, ya que nada indica dónde termina `from`.
+
+### Restricciones con expresiones regulares
+
+Una expresión regular entre paréntesis, justo después del nombre, restringe los valores que acepta un parámetro. Una petición cuyo valor no coincide simplemente no coincide con la ruta: otra ruta puede atenderla, o recibe un `404`.
+
+```rust
+app.get(r"/users/:id(\d+)", |req: Request| async move {
+    let id: u64 = req.param_as("id")?;
+    Ok::<_, Error>(format!("usuario n.º {id}"))
+});
+app.get("/docs/:lang(en|fr|es)/:page", show_doc);
+app.get(r"/posts/:year(\d{4})-:slug", show_post);
+```
+
+| Petición | Respuesta |
+|---|---|
+| `/users/42` | `usuario n.º 42` |
+| `/users/ada` | `404` (u otra ruta, consulta [más abajo](#gana-la-ruta-más-específica)) |
+| `/docs/fr/routing` | `show_doc`, con `lang = "fr"` |
+| `/docs/de/routing` | `404` |
+| `/posts/2024-hello-world` | `show_post`, con `year = "2024"` y `slug = "hello-world"` |
+
+- En Rust, escribe la ruta como una cadena en bruto, `r"/users/:id(\d+)"`, para que las barras invertidas se queden tal cual. En una cadena normal, duplícalas: `"/users/:id(\\d+)"`.
+- La expresión tiene que coincidir con el valor entero: `:lang(en|fr)` acepta `fr`, no `fra`. No hacen falta `^` ni `$`.
+- No puede contener una `/`, ya que un parámetro nunca la contiene.
+- Se compara con el valor tal como aparece en la URL, antes de decodificarlo: para ella, `%20` son tres caracteres.
+- Vitesse usa [regex-lite](https://crates.io/crates/regex-lite): la sintaxis habitual (clases, `\d`, `\w`, `|`, repeticiones, `(?i)` para ignorar mayúsculas y minúsculas) funciona, pero `\d` y `\w` solo cubren ASCII, y las clases Unicode como `\p{L}` no están disponibles. Las expresiones se compilan una sola vez, al arrancar, y solo se ejecutan para los parámetros que tienen una restricción.
+- Una expresión no válida detiene el programa al arrancar: `invalid route: invalid regular expression…`.
+
+Una restricción elige la ruta, y `req.param_as` sigue convirtiendo el valor: aquí, un número demasiado grande para caber en un `u64` sigue recibiendo un `400`.
+
+> [!NOTE]
+> Express 5 eliminó las expresiones regulares de las rutas, y actix-web las escribe `{id:\d+}`. Vitesse conserva la sintaxis de Express 4, `:id(\d+)`.
+
+### Parámetros opcionales
+
+Un `?` después de un parámetro lo hace opcional. Así, una sola ruta responde a varias rutas distintas:
+
+```rust
+app.get("/archive/:year?/:month?", |req: Request| async move {
+    match (req.param("year"), req.param("month")) {
+        (Some(year), Some(month)) => format!("archivo de {month}/{year}"),
+        (Some(year), None) => format!("archivo de {year}"),
+        _ => "todo el archivo".to_owned(),
+    }
+});
+```
+
+| Petición | `req.param("year")` | `req.param("month")` |
+|---|---|---|
+| `/archive` | `None` | `None` |
+| `/archive/2024` | `Some("2024")` | `None` |
+| `/archive/2024/05` | `Some("2024")` | `Some("05")` |
+
+- Solo los últimos segmentos de una ruta pueden ser opcionales (`/:lang?/about` se rechaza), y solo un parámetro que ocupa un segmento entero (`/files/:name.:ext?` también se rechaza).
+- Una restricción también puede ser opcional: `r"/users/:id(\d+)?"` coincide con `/users` y `/users/7`, no con `/users/ada`.
+- La ruta cuenta como una ruta por cada forma posible: `/archive/:year?` junto con otra ruta `/archive` para el mismo método es un [duplicado](#rutas-no-válidas-o-duplicadas).
 
 ## Parámetros tipados
 
@@ -107,6 +193,8 @@ GET /users/42   → 200 usuario n.º 42
 GET /users/abc  → 400 {"error":"invalid parameter 'id': 'abc'"}
 GET /users/-1   → 400 (un u64 no puede ser negativo)
 ```
+
+Para responder `404` en lugar de `400` a `/users/abc`, o para dejar que otra ruta la atienda, añade una [restricción](#restricciones-con-expresiones-regulares) a la ruta: `r"/users/:id(\d+)"`.
 
 Para tus propios tipos, implementa `FromStr`:
 
@@ -165,28 +253,47 @@ app.get("/files/*path", |req: Request| async move {
 
 ### Gana la ruta más específica
 
-Cuando varias rutas podrían coincidir, Vitesse las compara segmento a segmento: **estático > parámetro > comodín**. El orden de declaración no importa. En Express, gana la primera ruta registrada.
+Cuando varias rutas podrían coincidir, Vitesse las compara segmento a segmento, del tipo de segmento más específico al menos específico:
+
+1. un segmento estático (`/users/new`);
+2. un segmento con una restricción o con texto alrededor de sus parámetros (`/users/:id(\d+)`, `/img/:id.png`);
+3. un parámetro simple (`/users/:name`);
+4. un comodín (`/users/*rest`).
+
+El orden en que declaras las rutas no importa, mientras que en Express gana la primera ruta registrada. Así, una ruta con una restricción y un parámetro simple pueden compartir la misma posición:
 
 ```rust
 app.get("/users/new", |_| async { "formulario de alta" });
-app.get("/users/:id", |_| async { "un usuario" });
+app.get(r"/users/:id(\d+)", |_| async { "un usuario, por id" });
+app.get("/users/:name", |_| async { "un usuario, por nombre" });
 app.get("/users/*rest", |_| async { "todo lo demás bajo /users" });
 ```
 
 | Petición | Ruta usada |
 |---|---|
-| `/users/new` | `/users/new` (el estático le gana al parámetro) |
-| `/users/42` | `/users/:id` |
+| `/users/new` | `/users/new` (el estático le gana a todo) |
+| `/users/42` | `/users/:id(\d+)` (la restricción coincide) |
+| `/users/ada` | `/users/:name` (la restricción no coincide) |
 | `/users/42/settings` | `/users/*rest` |
 | `/users` | `/users/*rest` (comodín vacío) |
 
 Si una rama no lleva a ninguna parte, el enrutador retrocede y prueba la siguiente opción. Con `/a/:x/c` y `/a/b/d`, una petición a `/a/b/c` coincide con `/a/:x/c` con `x = "b"`.
 
+El orden de declaración solo importa entre dos segmentos del segundo tipo en la misma posición, por ejemplo `/:id(\d+)` y `/:slug([a-z-]+)`: se prueban en el orden en que los declaraste.
+
 ### Barra final, mayúsculas y query string
 
 - La barra final se ignora: `/users/` coincide con `/users`. Express hace lo mismo por defecto.
-- Las rutas **distinguen mayúsculas de minúsculas**: `/Users` no coincide con `/users`. Express no las distingue por defecto.
+- Las rutas **distinguen mayúsculas de minúsculas** por defecto: `/Users` no coincide con `/users`. Express no las distingue por defecto; para hacer lo mismo, llama a `app.case_sensitive(false)`.
 - La query string no influye: `/search?q=rust` coincide con `/search`.
+
+```rust
+let mut app = App::new();
+app.case_sensitive(false);
+app.get("/users/:id", show_user); // también responde a /Users/Ada y /USERS/Ada
+```
+
+Con `app.case_sensitive(false)`, los segmentos estáticos y el texto alrededor de los parámetros (`.png` en `/img/:id.png`) coinciden sin importar las mayúsculas, también en los prefijos de montaje. Los parámetros conservan las mayúsculas y minúsculas de la petición (`req.param("id")` es `"Ada"`), y las restricciones no se tocan: añade `(?i)` a la expresión si también debe ignorar las mayúsculas. Solo afecta a las letras ASCII.
 
 ### Rutas no válidas o duplicadas
 
@@ -194,7 +301,9 @@ Vitesse detecta los errores de declaración al arrancar la aplicación, no cuand
 
 - la ruta no empieza por `/`;
 - tiene un segmento vacío (`/a//b`);
-- un nombre de parámetro no es válido;
+- un nombre de parámetro no es válido, o dos parámetros van seguidos sin texto entre ellos (`/:a:b`);
+- una restricción no es una expresión regular válida, o su paréntesis no está cerrado;
+- un parámetro opcional no está al final de la ruta, o no ocupa un segmento entero;
 - un comodín no es el último segmento;
 - el mismo método se registra dos veces en la misma ruta.
 
@@ -204,6 +313,8 @@ Dos patrones que solo se diferencian en el nombre de sus parámetros son la mism
 thread 'main' panicked at src/main.rs:12:9:
 duplicate route: GET /users/:name is already defined
 ```
+
+`/users/:id(\d+)` y `/users/:name` no chocan, ya que solo una de las dos tiene una restricción.
 
 ## La ruta elegida: `req.route()`
 
@@ -219,8 +330,11 @@ app.get("/users/:id", |req: Request| async move {
 |---|---|---|
 | `GET /users/42` | `/users/42` | `Some("/users/:id")` |
 | `GET /api/v1/items/a/b`, router montado en `/api/:version` con una ruta `/items/*path` | `/api/v1/items/a/b` | `Some("/api/:version/items/*path")` |
+| `GET /archive/2024`, ruta `/archive/:year?/:month?` | `/archive/2024` | `Some("/archive/:year?/:month?")` |
 | `DELETE /users/42`, sin ruta `DELETE` (`405`) | `/users/42` | `None` |
 | `GET /nope` (`404`) | `/nope` | `None` |
+
+El patrón es el que declaraste, restricciones y `?` incluidos: `r"/users/:id(\d+)"` da `/users/:id(\d+)`.
 
 Es lo que quieres en los registros y las métricas: `/users/:id` ocupa una sola línea en un panel, donde la ruta en bruto ocuparía una por usuario. Los middlewares globales se ejecutan antes del enrutamiento, así que ahí `req.route()` busca la ruta en el momento en que lo llamas. Llámalo antes de `next.run(req)`, que se queda con la petición; el resultado es un `&'static str`, así que puedes conservarlo después:
 
@@ -237,6 +351,49 @@ app.middleware(|req: Request, next: Next| async move {
 ```
 
 En los middlewares de router, los de ruta y los handlers, la ruta ya se conoce y `req.route()` no cuesta nada.
+
+## Rutas con nombre y generación de URL
+
+Escribir `/users/42` a mano en cada enlace y cada redirección funciona hasta que la ruta cambia. Mejor dale un nombre a la ruta, con `.name(...)` justo después de ella, y deja que Vitesse construya sus rutas, como `url_for` en actix-web:
+
+```rust
+async fn show_user(req: Request) -> String {
+    format!("usuario {}", req.param("id").unwrap_or("?"))
+}
+
+async fn create_user(req: Request) -> vitesse::Result<Redirect> {
+    let id = 42; // el id del nuevo usuario
+    let link = req.path_for("user", &[&id])?; // "/users/42"
+    Ok(Redirect::see_other(link))
+}
+
+app.get("/users/:id", show_user).name("user");
+app.post("/users", create_user);
+```
+
+- `req.path_for(nombre, &[valores])` devuelve la ruta que corresponde a ese nombre, con sus parámetros rellenados **en orden**. Los valores pueden ser cualquier cosa que implemente `Display`: `&[&42]`, `&[&"LAX", &"SFO"]`, `&[]` para una ruta sin parámetros.
+- `req.url_for(nombre, &[valores])` devuelve la URL absoluta, `https://example.com/users/42`: la misma ruta, precedida de `req.protocol()` y `req.host()`. Detrás de un proxy, decláralo con [`app.trust_proxy`](production.md#obtener-la-ip-del-cliente) para que reflejen lo que ve el cliente.
+
+| Ruta | Llamada | Resultado |
+|---|---|---|
+| `/users/:id` | `path_for("user", &[&42])` | `/users/42` |
+| `/users/:id` | `path_for("user", &[&"ada lovelace"])` | `/users/ada%20lovelace` |
+| `/flights/:from-:to` | `path_for("flight", &[&"LAX", &"SFO"])` | `/flights/LAX-SFO` |
+| `/files/*path` | `path_for("file", &[&"docs/report 2024.pdf"])` | `/files/docs/report%202024.pdf` |
+| `/archive/:year?/:month?` | `path_for("archive", &[&2024])` | `/archive/2024` |
+| `/users/:id` | `url_for("user", &[&42])` | `https://example.com/users/42` |
+
+- Los valores se codifican, así que un espacio se convierte en `%20` y una `/` en `%2F`. Solo un comodín conserva sus `/`, ya que representa varios segmentos.
+- Los parámetros opcionales del final se pueden omitir, y un comodín también: `path_for("archive", &[])` da `/archive`.
+- Las restricciones se comprueban: `path_for` rechaza `"ada"` para `r"/users/:id(\d+)"`.
+- La ruta se construye en el momento de la llamada, así que puede ir a cualquier parte: una cabecera `Location`, un enlace en `Html(...)`, un campo JSON.
+
+Los nombres se comprueban en dos momentos:
+
+- **Al arrancar**, `name` entra en pánico si no hay una ruta justo antes (un `mount`, por ejemplo), o si el nombre ya está ocupado: los nombres son únicos en toda la aplicación.
+- **Al llamarlos**, `path_for` y `url_for` devuelven un error `500` si el nombre es desconocido, si falta o sobra un valor, si un valor no cumple su restricción o (solo `url_for`) si la petición no tiene host. El cliente solo ve `{"error":"Internal Server Error"}`; la causa (`cannot build the URL of 'user': missing a value for ':id'`) se escribe en la salida de error, como los demás errores del servidor.
+
+Las rutas declaradas en un [router](routers.md#rutas-con-nombre-en-los-routers) también pueden tener nombre. El nombre pertenece a toda la aplicación, y la ruta incluye el prefijo de montaje: sus parámetros van primero en la lista de valores.
 
 ## HEAD, OPTIONS y 405
 

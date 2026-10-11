@@ -383,6 +383,65 @@ async fn lee_al_visitante_detras_del_proxy() {
 
 El mismo truco sirve para probar [`middleware::rate_limit`](middleware.md#rate_limit) con varios clientes: sin `trust_proxy`, todas las peticiones de prueba comparten el contador de `127.0.0.1`; con él, cada valor de `x-forwarded-for` cuenta como un visitante distinto.
 
+## Probar las sesiones
+
+`TestClient` no guarda las cookies de una petición a la siguiente: la prueba hace de navegador. Lee la cabecera `Set-Cookie` de la respuesta que abrió la [sesión](sessions.md), y devuelve su parte `nombre=valor` en una cabecera `cookie`:
+
+```rust
+use vitesse::test::{TestClient, TestResponse};
+
+/// La parte `nombre=valor` de la cabecera `Set-Cookie` de la respuesta.
+fn cookie_of(res: &TestResponse) -> String {
+    let set_cookie = res.header("set-cookie").expect("no hay cabecera Set-Cookie");
+    set_cookie.split(';').next().unwrap().to_owned()
+}
+
+#[tokio::test]
+async fn inicia_y_cierra_sesion() {
+    let client = TestClient::new(my_api::app());
+
+    let res = client
+        .post("/login")
+        .form(&[("email", "ada@example.com"), ("password", "secret")])
+        .await;
+    let cookie = cookie_of(&res); // "vitesse.sid=…"
+
+    let res = client.get("/account").header("cookie", &cookie).await;
+    assert_eq!(res.status(), 200);
+
+    let res = client.post("/logout").header("cookie", &cookie).await;
+    assert!(res.header("set-cookie").unwrap().contains("Max-Age=0")); // borrada en el navegador
+    assert_eq!(client.get("/account").header("cookie", &cookie).await.status(), 401);
+}
+```
+
+- `res.header("set-cookie")` devuelve la primera cabecera `Set-Cookie`. Cuando una respuesta crea varias cookies, recórrelas con `res.headers().get_all("set-cookie")`.
+- Las [cookies firmadas](sessions.md#cookies-firmadas) se prueban de la misma forma. Cambia el valor para comprobar que se rechaza una cookie falsificada: `cookie.replacen("dark", "light", 1)` tiene que comportarse como si no hubiera cookie.
+- Cada `TestClient::new(my_api::app())` empieza con un `MemoryStore` vacío, así que las pruebas no comparten sesiones.
+
+## Probar las plantillas
+
+Con `app.views`, una plantilla se compila la primera vez que se renderiza, así que un error de sintaxis en una página solo aparece cuando alguien la abre. Una prueba que renderiza cada página lo detecta antes de un despliegue:
+
+```rust
+use vitesse::test::TestClient;
+
+#[tokio::test]
+async fn todas_las_paginas_se_renderizan() {
+    let client = TestClient::new(my_api::app());
+    for path in ["/", "/users", "/login"] {
+        let res = client.get(path).await;
+        assert_eq!(res.status(), 200, "{path}");
+        assert_eq!(res.header("content-type"), Some("text/html; charset=utf-8"));
+    }
+    assert!(client.get("/users").await.text().contains("<li>Ada</li>"));
+}
+```
+
+- `cargo test` ejecuta las pruebas desde la raíz del paquete, así que `app.views("templates")` encuentra la misma carpeta que `cargo run`.
+- Un renderizado fallido es un `500`, y su causa, con el nombre y la línea de la plantilla, se escribe en la salida de las pruebas (`[vitesse] error 500: …`).
+- Para probar una plantilla por separado, dale a una pequeña aplicación de prueba un entorno con esa plantilla, `env.add_template(nombre, fuente)`, a través de [`app.templates(env)`](templates.md#filtros-funciones-y-plantillas-integradas-apptemplates).
+
 ## Probar Server-Sent Events
 
 `TestClient` lee el cuerpo entero antes de devolver la respuesta, así que un [flujo de eventos](responses.md#server-sent-events) es fácil de probar siempre que termine: `res.text()` contiene entonces todos los eventos, exactamente como los recibiría el navegador.

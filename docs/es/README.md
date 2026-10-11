@@ -10,15 +10,17 @@ Todo lo que necesitas para crear aplicaciones web rápidas con Vitesse, el frame
 
 ## Lo esencial
 
-- [Enrutamiento](routing.md): rutas, métodos HTTP, parámetros de ruta, comodines y la ruta elegida.
+- [Enrutamiento](routing.md): rutas, métodos HTTP, parámetros de ruta, restricciones y parámetros opcionales, comodines, la ruta elegida y las rutas con nombre.
 - [Leer la petición](requests.md): parámetros, query string, cabeceras, cookies, negociación de contenido, cuerpos (JSON, formularios) y subida de archivos.
 - [Responder](responses.md): texto, JSON, HTML, códigos de estado, cabeceras, cookies, redirecciones, archivos, streaming y Server-Sent Events.
+- [Plantillas HTML](templates.md): renderizar páginas HTML con minijinja (feature `templates`): plantillas base y herencia, bucles, filtros y escapado automático.
 - [Middlewares](middleware.md): middlewares globales y por ruta, `next`, los middlewares incluidos (registros, CORS, autenticación, limitación de peticiones, compresión…) y las capas de tower.
 - [Routers](routers.md): agrupar rutas con `Router` y montarlas bajo un prefijo, con sus propios middlewares y su fallback.
 - [Estado compartido](state.md): compartir configuración, contadores o pools de conexiones entre peticiones.
+- [Cookies firmadas y sesiones](sessions.md): cookies a prueba de manipulaciones y datos por visitante guardados en el servidor (feature `session`), con tu propio almacén.
 - [Manejo de errores](errors.md): `vitesse::Error`, el operador `?`, respuestas de error personalizadas y pánicos.
 - [Archivos estáticos](static-files.md): servir una carpeta de archivos con caché, peticiones parciales y protecciones integradas.
-- [WebSocket](websocket.md): conexiones bidireccionales en tiempo real con `app.ws`, desde un servidor de eco hasta una sala de chat.
+- [WebSocket](websocket.md): conexiones bidireccionales en tiempo real con `app.ws`, sobre HTTP/1.1 y HTTP/2, desde un servidor de eco hasta una sala de chat.
 
 ## Profundizando
 

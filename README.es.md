@@ -33,8 +33,12 @@ fn main() -> std::io::Result<()> {
   Events, HTTPS y HTTP/2 (features `tls` y `http2`), y HTTP/3 sobre QUIC con
   una sola línea (feature `http3`).
 - **Todo incluido**: CORS, compresión, IDs de petición, autenticación Basic
-  y Bearer, limitación de tasa y de concurrencia, proxies de confianza, y
-  cualquier capa de [tower](https://crates.io/crates/tower) (feature `tower`).
+  y Bearer, limitación de tasa y de concurrencia, proxies de confianza,
+  cookies firmadas y sesiones (feature `session`), plantillas HTML (feature
+  `templates`), y cualquier capa de [tower](https://crates.io/crates/tower)
+  (feature `tower`).
+- **Rutas expresivas**: `/flights/:from-:to`, `/users/:id(\d+)`,
+  `/archive/:year?`, rutas con nombre y generación de URL.
 - **Rápido**: más rápido que actix-web, axum y Drogon en el benchmark de
   abajo.
 - **Robusto**: los pánicos se convierten en respuestas `500`, los límites de
@@ -112,6 +116,8 @@ ordenada con `Ctrl+C` / `SIGTERM`. Si ya tienes un runtime de tokio, usa
 | `http3` | Desactivada | HTTP/3 sobre QUIC: `app.http3(...)` y `vitesse::http3` ([guía](docs/es/http3.md)) |
 | `multipart` | Desactivada | Subida de archivos: `req.multipart()` y `vitesse::multipart` ([guía](docs/es/requests.md)) |
 | `compress` | Desactivada | `middleware::compress()` y `middleware::decompress()`: Brotli, gzip ([guía](docs/es/middleware.md#compress)) |
+| `session` | Desactivada | Cookies firmadas y sesiones: `app.cookie_secret(...)`, `middleware::session(...)` ([guía](docs/es/sessions.md)) |
+| `templates` | Desactivada | Plantillas HTML con minijinja: `app.views(...)`, `req.render(...)` ([guía](docs/es/templates.md)) |
 | `tower` | Desactivada | Capas de tower como middlewares, la aplicación como `Service` de tower ([guía](docs/es/middleware.md)) |
 
 ```toml
@@ -309,8 +315,9 @@ y uno solo de cada para todo un lote de peticiones con pipelining.
 - **Un thread por núcleo** (Linux): cada núcleo tiene su propio bucle de
   eventos y su propio socket `SO_REUSEPORT`, y una petición nunca cambia de
   thread.
-- **Un router sin regex**: un árbol de segmentos, sin asignaciones para las
-  rutas estáticas.
+- **Un router en árbol**: un árbol de segmentos, sin asignaciones para las
+  rutas estáticas; las expresiones regulares solo se ejecutan para los
+  parámetros que declaran una restricción.
 - **Cero contadores atómicos compartidos por petición**: la aplicación se
   congela al arrancar (`&'static`), así que handlers, middlewares y estado
   se leen sin `Arc`.
@@ -319,14 +326,12 @@ Los detalles están en [Rendimiento](docs/es/performance.md).
 
 ## Límites actuales
 
-No incluye (todavía): WebSocket sobre HTTP/2 o HTTP/3, un almacén de
-sesiones (usa
-[tower-sessions](docs/es/from-axum-actix.md#sesiones-con-tower-sessions)
-con la feature `tower`), rutas con nombre y generación de URL, expresiones
-regulares en las rutas, parámetros parciales dentro de un segmento
-(`/vuelos/:origen-:destino`) ni motores de plantillas (usa cualquier crate de
-plantillas y devuelve `Html(...)`). La lista completa está en las
-[preguntas frecuentes](docs/es/faq.md).
+No incluye, a propósito: WebSocket sobre HTTP/3 (ningún navegador lo usa),
+el server push de HTTP/2 (eliminado de los navegadores), el mecanismo
+`Upgrade: h2c` (eliminado del estándar HTTP/2; h2c «prior knowledge»
+funciona) ni 0-RTT sobre HTTP/3 (peticiones que se pueden reenviar). tokio
+es el único runtime, y la API puede cambiar hasta la 1.0. La lista completa
+está en las [preguntas frecuentes](docs/es/faq.md).
 
 ## Ejecutar el proyecto
 

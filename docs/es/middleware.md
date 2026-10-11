@@ -164,6 +164,7 @@ El módulo `vitesse::middleware` (accesible como `middleware::` con el preludio)
 | `middleware::request_id()` | `express-request-id` | un id para cada petición, en `X-Request-Id` |
 | `middleware::basic_auth(credenciales)` | `express-basic-auth` | autenticación HTTP Basic (nombre de usuario y contraseña) |
 | `middleware::bearer_auth(token)` | `passport-http-bearer` | tokens `Authorization: Bearer` |
+| `middleware::session(almacén)` | `express-session` | sesiones del lado del servidor, que se leen con `req.session()` (feature `session`) |
 | `middleware::concurrency_limit(max)` | | limita el número de peticiones atendidas a la vez |
 | `middleware::rate_limit(max, periodo)` | `express-rate-limit` | peticiones por cliente y periodo, `429` por encima |
 | `middleware::serve_static(carpeta)` | `express.static(carpeta)` | archivos estáticos, ver [Archivos estáticos](static-files.md) |
@@ -326,6 +327,34 @@ Acepta un token (`&'static str` o `String`), un array o un `Vec` de tokens, o un
 > [!IMPORTANT]
 > La autenticación Basic envía la contraseña con cada petición, simplemente codificada en base64, y cualquiera que vea un token puede reutilizarlo: úsalos solo sobre HTTPS ([HTTPS y HTTP/2](https.md), o un proxy que termine el TLS).
 
+### `session`
+
+Sesiones del lado del servidor, como `express-session`. Necesita la feature de Cargo `session`:
+
+```toml
+[dependencies]
+vitesse = { git = "https://github.com/maxlestage/Vitesse", features = ["session"] }
+```
+
+```rust
+use vitesse::session::MemoryStore;
+
+app.middleware(middleware::session(MemoryStore::new()));
+app.get("/visits", |req: Request| async move {
+    let session = req.session();
+    let visits = session.get::<u32>("visits").unwrap_or(0) + 1;
+    session.insert("visits", visits)?;
+    Ok::<_, Error>(format!("visita n.º {visits}"))
+});
+```
+
+- A la entrada, carga la sesión del visitante desde el almacén, con el id de la cookie `vitesse.sid`. A la salida, guarda la sesión y envía la cookie, solo si algo cambió: los visitantes que nunca escriben en su sesión no reciben ninguna cookie.
+- Los handlers, y los middlewares que se ejecutan después de él, acceden a la sesión con `req.session()`, que responde `500` donde el middleware no está instalado. Añádelo con `app.middleware`, antes de un middleware de autenticación que lea la sesión.
+- La cookie es `HttpOnly`, `SameSite=Lax`, `Secure` sobre HTTPS, y firmada cuando la aplicación tiene un secreto (`app.cookie_secret(...)`). `.cookie_name(...)`, `.max_age(...)` (1 día por defecto), `.rolling(true)`, `.secure(...)`, `.same_site(...)`, `.domain(...)` y `.path(...)` la modifican.
+- `MemoryStore` guarda las sesiones en la memoria del proceso; implementa el trait `SessionStore` para guardarlas en Redis o en una base de datos.
+
+El inicio y el cierre de sesión, las opciones, los almacenes y el CSRF se explican en [Cookies firmadas y sesiones](sessions.md).
+
 ### `concurrency_limit`
 
 Limita el número de peticiones que se atienden a la vez en lo que cubre, para proteger una ruta costosa o una base de datos frágil:
@@ -359,7 +388,7 @@ app.post("/login", login.with(middleware::rate_limit(5, Duration::from_secs(60))
 
 - Un cliente puede enviar una ráfaga de `max` peticiones, y después una cada `periodo / max` (el algoritmo GCRA): con `rate_limit(60, Duration::from_secs(60))`, 60 de golpe, y después una por segundo.
 - Por encima, la respuesta es `429 Too Many Requests` con `Retry-After` (en segundos). Todas las respuestas que pasan por el middleware llevan `X-RateLimit-Limit` y `X-RateLimit-Remaining`.
-- Por defecto, un cliente es una dirección IP, `req.ip()`. Detrás de un proxy inverso, configura [`app.trust_proxy`](requests.md#detrás-de-un-proxy-trust_proxy), o todos los visitantes compartirán el contador del proxy.
+- Por defecto, un cliente es una dirección IP, `req.ip()`. Detrás de un proxy inverso, configura [`app.trust_proxy`](requests.md#detrás-de-un-proxy-trust_proxy), o todos los visitantes compartirán el contador del proxy. Las peticiones sin ninguna dirección (en un socket Unix sin `trust_proxy`) también comparten un mismo contador, en lugar de escapar del límite.
 - `.key(...)` identifica a los clientes de otra forma, por clave de API o por id de usuario, por ejemplo. Cuando devuelve `None`, la petición no se limita:
 
 ```rust

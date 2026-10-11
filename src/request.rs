@@ -471,6 +471,12 @@ impl Request {
         &self.inner.method
     }
 
+    /// Replaces the method (e.g. a "method override" middleware that turns
+    /// a `POST` with `_method=DELETE` into a `DELETE` before routing).
+    pub fn set_method(&mut self, method: Method) {
+        self.inner.method = method;
+    }
+
     /// The full URI (path + query string).
     pub fn uri(&self) -> &Uri {
         self.inner.uri.get_or_init(|| {
@@ -1035,7 +1041,12 @@ where
     let mut total = 0usize;
     while let Some(frame) = body.frame().await {
         let frame = frame.map_err(|e| {
-            Error::bad_request("failed to read the request body").with_source(e.into())
+            let e: BoxError = e.into();
+            // Un corps limité en amont (tower-http's `RequestBodyLimit`…).
+            if e.is::<http_body_util::LengthLimitError>() {
+                return Error::payload_too_large();
+            }
+            Error::bad_request("failed to read the request body").with_source(e)
         })?;
         let Ok(data) = frame.into_data() else {
             continue;

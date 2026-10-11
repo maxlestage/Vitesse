@@ -107,6 +107,8 @@ pub mod sse;
 pub mod test;
 #[cfg(feature = "tls")]
 pub mod tls;
+#[cfg(feature = "tower")]
+pub mod tower;
 #[cfg(feature = "ws")]
 pub mod ws;
 

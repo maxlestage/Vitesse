@@ -1,6 +1,6 @@
 # Lire la requête
 
-Chaque handler reçoit une `Request`. Vous y lisez la méthode, le chemin, les paramètres de route, la query string, les en-têtes, les cookies, le corps, les fichiers envoyés et l'adresse du client, et savoir quel format le client préfère. Cette page passe tout cela en revue, avec l'équivalent Express quand il existe.
+Chaque handler reçoit une `Request`. Vous y lisez la méthode, le chemin, les paramètres de route, la query string, les en-têtes, les cookies et la session, le corps, les fichiers envoyés et l'adresse du client ; elle vous dit aussi quel format le client préfère, et construit les URL de vos routes. Cette page passe tout cela en revue, avec l'équivalent Express quand il existe.
 
 ## L'objet `Request`
 
@@ -98,6 +98,26 @@ app.get("/users/:id/posts/:post", |req: Request| async move {
 ### La route correspondante
 
 `req.route()` renvoie le motif de la route qui répond à la requête, préfixe de montage compris : `Some("/users/:id/posts/:post")` pour `/users/42/posts/7`. C'est le `req.route.path` d'Express, et c'est ce qu'il vous faut dans les journaux et les métriques, où le chemin brut donnerait une ligne par utilisateur. Voir [Routage](routing.md#la-route-correspondante--reqroute).
+
+### Construire des URL : `path_for` et `url_for`
+
+Donnez un nom à une route avec `.name(...)`, et n'importe quel handler peut construire son URL au lieu de l'écrire à la main (le `url_for` d'actix-web ; Express n'a pas d'équivalent) :
+
+```rust
+app.get("/users/:id", show_user).name("user");
+
+app.post("/users", |req: Request| async move {
+    let id = 42; // l'identifiant de l'utilisateur que vous venez de créer
+    let location = req.url_for("user", &[&id])?; // "https://example.com/users/42"
+    Ok::<_, Error>(res::status(201).header("location", location).json(json!({ "id": id })))
+});
+```
+
+- `req.path_for(nom, &[...])` renvoie le chemin, `"/users/42"` : les valeurs remplissent les paramètres de la route dans l'ordre, et sont encodées pour l'URL (`"a b"` donne `a%20b`). Passez `&[]` pour une route sans paramètres, et `&[&"LAX", &"SFO"]` pour en remplir plusieurs.
+- `req.url_for(nom, &[...])` ajoute le protocole et l'hôte de la requête en cours (`req.protocol()` et `req.host()` : elle suit donc [`trust_proxy`](#derrière-un-proxy--trust_proxy)). Pour des liens qui quittent le site, dans un e-mail par exemple, préférez `path_for` après une URL de base tirée de votre configuration (voir [Hôte et protocole](#hôte-et-protocole)).
+- Toutes deux renvoient une `Error` pour un nom inconnu, une valeur manquante ou en trop, ou une valeur qui ne respecte pas la contrainte du paramètre (et `url_for` pour une requête sans hôte). Ce sont des erreurs de programmation, pas des erreurs du client : le client reçoit une simple `500 {"error":"Internal Server Error"}`, et la cause est affichée sur la sortie d'erreur.
+
+Le nommage des routes, les paramètres optionnels et les contraintes sont expliqués dans [Routage](routing.md#routes-nommées-et-génération-durl).
 
 ## Query string
 
@@ -244,7 +264,21 @@ app.get("/", |req: Request| async move {
 });
 ```
 
-La valeur est renvoyée telle que le navigateur l'a envoyée (sans les guillemets qui l'entourent). Elle n'est ni décodée ni vérifiée par une signature. Pour poser ou supprimer des cookies, voir [Envoyer la réponse](responses.md).
+La valeur est renvoyée telle que le navigateur l'a envoyée (sans les guillemets qui l'entourent), sans être décodée. Pour poser ou supprimer des cookies, voir [Envoyer la réponse](responses.md#cookies).
+
+### Cookies signés et session
+
+Avec la feature `session`, deux autres choses viennent des cookies. `req.signed_cookie(nom)` lit un cookie signé avec le secret de l'application (`app.cookie_secret(...)`), comme le `req.signedCookies.nom` d'Express : vous obtenez la valeur, ou `None` si le cookie manque ou si le visiteur l'a modifié. Et avec le middleware `session`, `req.session()` renvoie la session du visiteur, comme `req.session` avec express-session :
+
+```rust
+app.get("/", |req: Request| async move {
+    let theme = req.signed_cookie("theme").unwrap_or_else(|| "light".into());
+    let user: Option<String> = req.session().get("user");
+    format!("thème : {theme}, utilisateur : {user:?}")
+});
+```
+
+La signature, les sessions, la connexion et la déconnexion, et les stockages de sessions sont expliqués dans [Cookies signés et sessions](sessions.md).
 
 ## Corps
 
@@ -386,7 +420,7 @@ async fn larger_bodies_for_admins(mut req: Request, next: Next) -> Response {
 
 - La limite n'entre en jeu que lorsque vous lisez le corps. Un handler qui ne le lit jamais ne produit jamais de `413`.
 - Elle couvre aussi [`req.multipart()`](#envois-de-fichiers-multipart) (le formulaire entier) et [`middleware::decompress()`](middleware.md#decompress) (la taille compressée et la taille décompressée), mais pas `take_body()`.
-- En [HTTP/3](http3.md), les corps sont lus avant le routage, dans la limite de `app.body_limit` : si des clients HTTP/3 envoient de gros fichiers, augmentez aussi la limite globale.
+- Elle fonctionne de la même façon en HTTP/1.1, en [HTTP/2](https.md) et en [HTTP/3](http3.md).
 - Un corps interrompu par le `RequestBodyLimitLayer` de tower-http (voir [Couches tower](middleware.md#couches-tower)) donne aussi une `413`.
 
 ### Streaming avec `take_body`
@@ -644,6 +678,8 @@ app.get("/me", |req: Request| async move {
 | `secure()` | `req.secure` | `bool` |
 | `set_uri(uri)` | affecter `req.url` | |
 | `route()` | `req.route.path` | `Option<&'static str>` |
+| `path_for(nom, &[...])` | | `Result<String, Error>` (`500`) : le chemin d'une route nommée |
+| `url_for(nom, &[...])` | | `Result<String, Error>` (`500`) : la même chose, avec le protocole et l'hôte |
 | `param(nom)` | `req.params.nom` | `Option<&str>` |
 | `param_as::<T>(nom)` | | `Result<T, Error>` (`400`) |
 | `params()` | `req.params` | itérateur de `(&str, &str)` |
@@ -659,6 +695,9 @@ app.get("/me", |req: Request| async move {
 | `accepts(&[...])` | `req.accepts([...])` | `Option<&str>` (`None` : répondre `406`) |
 | `accepts_language(&[...])` | `req.acceptsLanguages(...)` | `Option<&str>` |
 | `cookie(nom)` | `req.cookies.nom` | `Option<&str>` |
+| `signed_cookie(nom)` (feature `session`) | `req.signedCookies.nom` | `Option<String>` (`None` s'il manque ou a été modifié) |
+| `sign_cookie(cookie)` (feature `session`) | `res.cookie(nom, valeur, { signed: true })` | `Cookie`, à envoyer avec `.cookie(...)` |
+| `session()` (feature `session`) | `req.session` | `&Session` (`500` sans le middleware `session`) |
 | `json::<T>().await` | `req.body` + `express.json()` | `Result<T, Error>` |
 | `form::<T>().await` | `req.body` + `express.urlencoded()` | `Result<T, Error>` |
 | `text().await` | `req.body` + `express.text()` | `Result<String, Error>` |
@@ -672,3 +711,4 @@ app.get("/me", |req: Request| async move {
 | `state::<T>()` / `try_state::<T>()` | `req.app.locals` | `&T` / `Option<&T>` |
 | `get::<T>()` / `set(valeur)` | `res.locals` | `Option<&T>` / `Option<T>` (la valeur précédente) |
 | `extensions()` / `extensions_mut()` | | `&Extensions` / `&mut Extensions` |
+| `render(gabarit, contexte)` (feature `templates`) | `res.render(view, locals)` | `Result<Html<String>, Error>`, voir [Gabarits HTML](templates.md) |

@@ -10,15 +10,17 @@ Tout ce qu'il faut pour créer des applications web rapides avec Vitesse, le fra
 
 ## L'essentiel
 
-- [Routage](routing.md) : routes, méthodes HTTP, paramètres de chemin, jokers et route correspondante.
+- [Routage](routing.md) : routes, méthodes HTTP, paramètres de chemin, contraintes et paramètres optionnels, jokers, route correspondante et routes nommées.
 - [Lire la requête](requests.md) : paramètres, query string, en-têtes, cookies, négociation de contenu, corps (JSON, formulaires) et envois de fichiers.
 - [Répondre](responses.md) : texte, JSON, HTML, statuts, en-têtes, cookies, redirections, fichiers, streaming et Server-Sent Events.
+- [Gabarits HTML](templates.md) : générer des pages HTML avec minijinja (feature `templates`) : gabarits de base et héritage, boucles, filtres et échappement automatique.
 - [Middlewares](middleware.md) : middlewares globaux et par route, `next`, les middlewares fournis (journalisation, CORS, authentification, limitation de débit, compression…) et les couches tower.
 - [Routeurs et sous-applications](routers.md) : regrouper des routes avec `Router`, les monter sous un préfixe, avec leurs propres middlewares et leur propre fallback.
 - [État partagé](state.md) : partager une configuration, des compteurs ou un pool de connexions entre les requêtes.
+- [Cookies signés et sessions](sessions.md) : des cookies infalsifiables et des données par visiteur gardées sur le serveur (feature `session`), avec votre propre stockage.
 - [Gestion des erreurs](errors.md) : `vitesse::Error`, l'opérateur `?`, réponses d'erreur personnalisées et paniques.
 - [Fichiers statiques](static-files.md) : servir un dossier de fichiers avec cache, requêtes partielles et protections intégrées.
-- [WebSocket](websocket.md) : des connexions bidirectionnelles en temps réel avec `app.ws`, du serveur d'écho au salon de discussion.
+- [WebSocket](websocket.md) : des connexions bidirectionnelles en temps réel avec `app.ws`, en HTTP/1.1 et en HTTP/2, du serveur d'écho au salon de discussion.
 
 ## Aller plus loin
 

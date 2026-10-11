@@ -296,7 +296,7 @@ app.shutdown_timeout(Duration::from_secs(25)); // std::time::Duration
 | Protocol | Cargo feature | How |
 |---|---|---|
 | HTTP/1.1 (and HTTP/1.0) | Built in | Always, over TCP or a [Unix socket](#unix-domain-sockets) |
-| [WebSocket](websocket.md) | `ws` (enabled by default) | `app.ws(...)`, over HTTP/1.1: `ws://`, or `wss://` with TLS |
+| [WebSocket](websocket.md) | `ws` (enabled by default) | `app.ws(...)`, over HTTP/1.1 (`ws://`, or `wss://` with TLS) and, with `http2`, [over HTTP/2](websocket.md#websocket-over-http2) |
 | [HTTPS](https.md) (TLS 1.2 and 1.3) | `tls` | `app.tls(Tls::from_pem_files("fullchain.pem", "privkey.pem")?)`: every TCP connection speaks TLS |
 | [HTTP/2](https.md) over TLS | `tls` and `http2` | Negotiated during the TLS handshake (ALPN): what browsers use |
 | [HTTP/2 in clear text](https.md#http2-in-clear-text-h2c) (h2c) | `http2` | For the clients that start in HTTP/2 ("prior knowledge"), on the same port as HTTP/1.1 |

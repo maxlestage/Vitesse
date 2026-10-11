@@ -69,7 +69,7 @@ Almost all the time spent on a simple request goes into the kernel (reading from
   - a single timer per connection (not per request) handles idle connections.
 - **Almost no allocations**: requests (and their buffers) are recycled per thread, so are response header maps, and the router writes parameters into reused buffers. All that remains is the handler's `Future` (and the buffer of a JSON body).
 - **One thread per core** (Linux): each core has its own event loop and its own `SO_REUSEPORT` socket; the kernel spreads the connections and a request never changes thread.
-- **A router without regular expressions**: a tree of path segments, walked without any allocation for static routes; parameters point into the path.
+- **A router without regular expressions on the common path**: a tree of path segments, walked without any allocation for static routes; parameters point into the path. Regular expressions only run for the segments that need them ([constraints](routing.md#constraints-with-regular-expressions), text around parameters), compiled once at startup.
 - **No shared atomic counter per request**: the application is frozen at startup (`&'static`), so handlers, middleware and state are read without `Arc`.
 - **Few copies**: the request travels through middleware and handlers by moving a single pointer, a response weighs only 72 bytes, and the body is only read if the handler asks for it.
 

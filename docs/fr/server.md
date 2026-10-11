@@ -207,7 +207,7 @@ let mut app = App::new(); // 1 Mio partout...
 app.post("/upload", upload.with(middleware::body_limit(50 * 1024 * 1024))); // ...50 Mio ici
 ```
 
-`req.body_limit()` renvoie la limite qui s'applique à une requête, et `req.set_body_limit(octets)` la modifie depuis votre propre middleware. En [HTTP/3](http3.md), les corps de requête sont lus avant le routage, dans la limite de `app.body_limit` : augmentez celle-ci si des clients HTTP/3 envoient de gros fichiers. Voir [Taille maximale du corps et 413](requests.md#taille-maximale-du-corps-et-413) pour les détails.
+`req.body_limit()` renvoie la limite qui s'applique à une requête, et `req.set_body_limit(octets)` la modifie depuis votre propre middleware. Elle s'applique de la même façon en HTTP/1.1, en [HTTP/2](https.md) et en [HTTP/3](http3.md). Voir [Taille maximale du corps et 413](requests.md#taille-maximale-du-corps-et-413) pour les détails.
 
 ## Délais et connexions
 
@@ -296,7 +296,7 @@ app.shutdown_timeout(Duration::from_secs(25)); // std::time::Duration
 | Protocole | Feature Cargo | Comment |
 |---|---|---|
 | HTTP/1.1 (et HTTP/1.0) | Intégré | Toujours, en TCP ou sur un [socket Unix](#sockets-unix) |
-| [WebSocket](websocket.md) | `ws` (activée par défaut) | `app.ws(...)`, sur HTTP/1.1 : `ws://`, ou `wss://` avec TLS |
+| [WebSocket](websocket.md) | `ws` (activée par défaut) | `app.ws(...)`, sur HTTP/1.1 (`ws://`, ou `wss://` avec TLS) et, avec `http2`, [sur HTTP/2](websocket.md#websocket-sur-http2) |
 | [HTTPS](https.md) (TLS 1.2 et 1.3) | `tls` | `app.tls(Tls::from_pem_files("fullchain.pem", "privkey.pem")?)` : chaque connexion TCP parle TLS |
 | [HTTP/2](https.md) sur TLS | `tls` et `http2` | Négocié pendant la poignée de main TLS (ALPN) : c'est ce qu'utilisent les navigateurs |
 | [HTTP/2 en clair](https.md#http2-en-clair-h2c) (h2c) | `http2` | Pour les clients qui commencent en HTTP/2 (« prior knowledge »), sur le même port que HTTP/1.1 |

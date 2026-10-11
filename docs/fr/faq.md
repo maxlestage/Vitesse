@@ -21,7 +21,7 @@ Le benchmark mesure aussi des serveurs écrits dans d'autres langages, puisque c
 
 ### Pourquoi pas actix-web ou axum ?
 
-Ce sont deux excellents frameworks, matures, et Vitesse couvre désormais l'essentiel de ce qu'ils proposent : HTTPS et HTTP/2 (plus HTTP/3), WebSocket, Server-Sent Events, envois de fichiers multipart, taille maximale du corps par route, authentification, limites de débit et de concurrence, identifiants de requête, compression, proxys de confiance, délais configurables, sockets Unix, et l'écosystème de middlewares [tower](https://crates.io/crates/tower) grâce à la feature `tower`. [Venir d'axum ou d'actix-web](from-axum-actix.md) donne les équivalents, fonctionnalité par fonctionnalité.
+Ce sont deux excellents frameworks, matures, et Vitesse couvre désormais l'essentiel de ce qu'ils proposent : HTTPS et HTTP/2 (plus HTTP/3), WebSocket (en HTTP/2 aussi), Server-Sent Events, contraintes dans les routes et routes nommées avec génération d'URL, envois de fichiers multipart, taille maximale du corps par route, cookies signés et sessions, gabarits HTML, authentification, limites de débit et de concurrence, identifiants de requête, compression, proxys de confiance, délais configurables, sockets Unix, et l'écosystème de middlewares [tower](https://crates.io/crates/tower) grâce à la feature `tower`. [Venir d'axum ou d'actix-web](from-axum-actix.md) donne les équivalents, fonctionnalité par fonctionnalité.
 
 Vitesse est un bon choix si :
 
@@ -65,7 +65,7 @@ Oui, les deux :
 - **WebSocket** est intégré (la feature `ws`, activée par défaut) : `app.ws("/chat", |req, socket| async move { … })`, dans le style d'`express-ws`. Voir [WebSocket](websocket.md).
 - **HTTP/3** sur QUIC est disponible avec la feature `http3`, à activer : `app.http3(Http3::from_pem_files(...)?)` sert la même application en UDP, à côté de HTTP/1.1. Voir [HTTP/3 et QUIC](http3.md).
 
-WebSocket fonctionne en HTTP/1.1 (`ws://`, ou `wss://` avec la feature `tls`), pas en HTTP/2 ni en HTTP/3. Pour envoyer des données du serveur vers le client dans un seul sens, les Server-Sent Events sont souvent plus simples : voir la question suivante.
+WebSocket fonctionne en HTTP/1.1 (`ws://`, ou `wss://` avec la feature `tls`) et, avec la feature `http2`, [en HTTP/2](websocket.md#websocket-sur-http2), que les navigateurs utilisent d'eux-mêmes sur un site en HTTPS. Il ne fonctionne pas en HTTP/3 : les navigateurs ouvrent alors leurs WebSockets en HTTP/2 ou en HTTP/1.1. Pour envoyer des données du serveur vers le client dans un seul sens, les Server-Sent Events sont souvent plus simples : voir la question suivante.
 
 ### Vitesse gère-t-il les Server-Sent Events ?
 
@@ -108,7 +108,18 @@ Derrière un reverse proxy, vous pouvez aussi laisser le proxy compresser les r�
 
 ### Les moteurs de templates ?
 
-Non intégrés, comme Express sans moteur de vues. Utilisez le crate de templates de votre choix ([askama](https://crates.io/crates/askama), [minijinja](https://crates.io/crates/minijinja), [tera](https://crates.io/crates/tera)…) et renvoyez le résultat avec `Html(rendu)`. Chargez ou compilez vos templates une seule fois au démarrage et partagez-les via l'[état](state.md).
+Oui, avec la feature `templates`, qui apporte [minijinja](https://crates.io/crates/minijinja) (la syntaxe Jinja2 : `{{ name }}`, `{% for %}`, `{% extends %}`…). Elle joue le rôle de `app.set('views', …)` et de `res.render(…)` dans Express :
+
+```rust
+app.views("templates"); // templates/users.html, templates/layout.html…
+app.get("/users", |req: Request| async move {
+    req.render("users.html", json!({ "users": ["Ada", "Grace"] }))
+});
+```
+
+Les valeurs sont échappées pour le HTML dans les gabarits `.html`, et un gabarit manquant ou une erreur de rendu devient une `500` dont la cause est journalisée. Voir [Gabarits HTML](templates.md).
+
+Les autres crates de gabarits ([askama](https://crates.io/crates/askama), [tera](https://crates.io/crates/tera)…) fonctionnent aussi : faites le rendu avec eux, et renvoyez le résultat avec `Html(rendu)`.
 
 ### Comment utiliser une base de données ?
 
@@ -141,23 +152,24 @@ Voir [Envois de fichiers](requests.md#envois-de-fichiers-multipart).
 
 Pour l'authentification, deux middlewares sont fournis : `middleware::basic_auth(("admin", "secret"))` (le navigateur demande un nom d'utilisateur et un mot de passe) et `middleware::bearer_auth(jeton)` (`Authorization: Bearer …`, pour les API). Tous deux acceptent aussi une closure, pour vérifier les identifiants auprès de vos propres utilisateurs, et les comparent en temps constant. Les identifiants partent avec chaque requête : ne les utilisez qu'en HTTPS. Voir [`basic_auth` et `bearer_auth`](middleware.md#basic_auth-et-bearer_auth).
 
-Pour les sessions, Vitesse n'a pas de stockage à lui : utilisez [tower-sessions](https://crates.io/crates/tower-sessions) grâce à la feature `tower`, comme avec axum :
+Les sessions et les cookies signés sont intégrés, avec la feature `session`, comme `express-session` et `cookie-parser` dans Express :
 
 ```rust
-use tower_sessions::{MemoryStore, Session, SessionManagerLayer};
+use vitesse::session::MemoryStore;
 
-app.middleware(middleware::layer(SessionManagerLayer::new(MemoryStore::default())));
+app.cookie_secret(std::env::var("COOKIE_SECRET").expect("COOKIE_SECRET n'est pas défini"));
+app.middleware(middleware::session(MemoryStore::new()));
 app.get("/visits", |req: Request| async move {
-    let session = req.get::<Session>().unwrap().clone();
-    let visits: u32 = session.get("visits").await?.unwrap_or(0) + 1;
-    session.insert("visits", visits).await?;
-    Ok::<_, Error>(format!("visit #{visits}"))
+    let session = req.session();
+    let visits = session.get::<u32>("visits").unwrap_or(0) + 1;
+    session.insert("visits", visits)?;
+    Ok::<_, Error>(format!("visite n°{visits}"))
 });
 ```
 
-Son cookie est `Secure` par défaut : il lui faut donc HTTPS (ou `.with_secure(false)` pendant le développement), et `MemoryStore` oublie tout au redémarrage : utilisez un stockage persistant en production. Voir [Sessions avec tower-sessions](from-axum-actix.md#sessions-avec-tower-sessions).
+Le navigateur ne reçoit qu'un identifiant aléatoire, dans un cookie `HttpOnly` (signé, ici, par le secret de l'application) ; les données restent sur le serveur. `MemoryStore` oublie tout au redémarrage et n'est pas partagé entre les instances : en production, branchez votre propre stockage (Redis, PostgreSQL…) en implémentant le trait `SessionStore`. Sans sessions, `req.sign_cookie(...)` et `req.signed_cookie(nom)` donnent des cookies que le client peut lire mais pas modifier. Voir [Cookies signés et sessions](sessions.md).
 
-Vous pouvez aussi construire les vôtres : lisez les cookies avec `req.cookie(nom)`, posez-les avec `Cookie` (`http_only`, `secure`, `same_site`…), vérifiez un jeton dans un middleware et attachez l'utilisateur à la requête avec `req.set(user)`. Voir [Middlewares](middleware.md).
+[tower-sessions](https://crates.io/crates/tower-sessions), le choix habituel avec axum, fonctionne aussi, grâce à la feature `tower` et à ses stockages tout prêts : voir [Sessions avec tower-sessions](from-axum-actix.md#sessions-avec-tower-sessions).
 
 ### Pourquoi CORS refuse-t-il mes cookies ?
 
@@ -199,6 +211,24 @@ app.middleware(middleware::layer(CorsLayer::permissive()));
 
 Dans l'autre sens, `app.into_service()` transforme votre application en `Service` tower : servez-la avec hyper, imbriquez-la dans un routeur axum (`Router::nest_service`), ou testez-la avec `tower::ServiceExt::oneshot`. Voir [Couches tower](middleware.md#couches-tower).
 
+### Les routes acceptent-elles des expressions régulières ou des paramètres optionnels ?
+
+Oui, avec la syntaxe d'Express 4 : `r"/users/:id(\d+)"` ne correspond qu'à des chiffres, `/archive/:year?/:month?` correspond aussi à `/archive`, et `/flights/:from-:to` tire deux paramètres d'un seul segment. Une route avec une contrainte l'emporte sur un simple paramètre à la même position : `/users/:id(\d+)` et `/users/:name` peuvent donc coexister. `app.case_sensitive(false)` fait ignorer la casse aux routes, comme Express par défaut. Voir [Paramètres de chemin](routing.md#paramètres-de-chemin).
+
+### Peut-on générer des URL à partir du nom des routes ?
+
+Oui, comme avec le `url_for` d'actix-web : nommez la route avec `.name(...)`, puis construisez son chemin avec `req.path_for` ou son URL absolue avec `req.url_for`. Les valeurs sont encodées pour l'URL, et les contraintes sont vérifiées :
+
+```rust
+app.get("/users/:id", show_user).name("user");
+app.post("/users", |req: Request| async move {
+    let link = req.path_for("user", &[&42])?; // "/users/42"
+    Ok::<_, Error>(Redirect::see_other(link))
+});
+```
+
+Voir [Routes nommées et génération d'URL](routing.md#routes-nommées-et-génération-durl).
+
 ### Peut-on ajouter des routes pendant que le serveur tourne ?
 
 Non. L'application est figée au démarrage du serveur (c'est l'une des raisons de sa rapidité : ni verrous, ni compteurs de références). Fixez vos routes au démarrage, et utilisez l'[état](state.md) pour les données qui changent.
@@ -227,23 +257,23 @@ Vitesse est un logiciel propriétaire : © Maxime Nathan Lestage, tous droits r�
 
 ## Limites actuelles
 
-Comme Express, Vitesse fait volontairement peu de choses. Ne sont pas (encore) inclus :
+Ne sont pas inclus, chacun pour une raison :
 
 - **Les extracteurs**, par choix : un handler prend une seule `Request` et lui demande ce dont il a besoin ;
-- **WebSocket sur HTTP/2 et HTTP/3** : [WebSocket](websocket.md) fonctionne en HTTP/1.1, avec ou sans TLS ;
-- **Le server push HTTP/2** et le mécanisme **`Upgrade: h2c`** : HTTP/2 fonctionne sur TLS, et en clair avec « prior knowledge » (voir [HTTPS et HTTP/2](https.md)) ;
-- **Le 0-RTT et la lecture en flux des corps de requête en HTTP/3** : en HTTP/3, les corps de requête sont lus en entier avant l'exécution du handler ;
-- **Les moteurs de templates** : utilisez un crate de templates et renvoyez `Html(...)` ;
-- **Un stockage de sessions et des cookies signés intégrés** : utilisez [tower-sessions](from-axum-actix.md#sessions-avec-tower-sessions) grâce à la feature `tower` ;
-- **Les paramètres partiels dans un segment** (`/vols/:de-:vers`), ainsi que les paramètres facultatifs (`/:id?`) et les expressions régulières dans les routes ;
-- **La génération d'URL à partir de routes nommées** (le `url_for` d'actix-web) ;
-- **D'autres runtimes que tokio**.
+- **WebSocket sur HTTP/3** (RFC 9220) : le crate h3 ne l'implémente pas, et les navigateurs ne s'en servent pas. Ils ouvrent leurs WebSockets en HTTP/2 ou en HTTP/1.1, que [Vitesse sert](websocket.md#websocket-sur-http2) ;
+- **Le server push HTTP/2** : Chrome l'a retiré en 2022 et Firefox en 2024, et axum et actix-web ne le proposent pas non plus ;
+- le mécanisme **`Upgrade: h2c`** : la RFC 9113 l'a retiré de HTTP/2. HTTP/2 fonctionne sur TLS, et en clair avec « prior knowledge » (voir [HTTPS et HTTP/2](https.md#http2-en-clair-h2c)) ;
+- **Le 0-RTT (*early data*) en HTTP/3** : une requête envoyée aussi tôt peut être rejouée par un attaquant, Vitesse attend donc la fin de la poignée de main (voir [HTTP/3](http3.md#ce-qui-change-et-ce-qui-nest-pas-encore-pris-en-charge)) ;
+- **D'autres runtimes que tokio** (async-std, smol) ;
+- **Une API 1.x stable** : Vitesse en est à la version 0.1, et son API peut encore changer avant la 1.0.
 
 Quelques autres points à connaître :
 
 - les limites de taille du moteur sont fixes (60 Kio pour la tête de requête, 64 en-têtes), mais ses délais sont des réglages : `keep_alive` (60 s), `header_timeout` (30 s) et `shutdown_timeout` (10 s), tout comme `max_connections` (voir [Configuration du serveur](server.md#délais-et-connexions)) ;
-- `body_limit` s'applique à toute l'application, et `middleware::body_limit` le modifie par route ou par routeur ;
-- les routes sont sensibles à la casse (`/Users` ≠ `/users`) ;
+- `body_limit` s'applique à toute l'application, et `middleware::body_limit` le modifie par route ou par routeur, dans tous les protocoles ;
+- les routes sont sensibles à la casse par défaut (`/Users` ≠ `/users`) : appelez `app.case_sensitive(false)` pour ignorer la casse, comme le fait Express ;
 - on ne peut pas ajouter de routes une fois le serveur démarré ;
+- les gabarits chargés avec `app.views(...)` sont lus une fois, puis gardés en mémoire : redémarrez le serveur pour voir une modification ;
+- les sessions d'un `MemoryStore` vivent dans la mémoire de chaque processus : elles sont perdues au redémarrage et ne sont pas partagées entre les instances ;
 - `X-Forwarded-For`, `X-Forwarded-Proto` et `X-Forwarded-Host` ne sont lus qu'une fois vos proxys déclarés avec `app.trust_proxy(...)` ;
 - `middleware::rate_limit` compte dans la mémoire de chaque processus : avec plusieurs instances, chacune compte de son côté.

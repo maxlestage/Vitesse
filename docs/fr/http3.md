@@ -192,7 +192,7 @@ Côté proxy, gardez la configuration habituelle (voir [Mise en production](prod
 Sous systemd, un utilisateur non privilégié ne peut pas ouvrir le port 443 : ajoutez `AmbientCapabilities=CAP_NET_BIND_SERVICE` à la section `[Service]`. Les clés de Let's Encrypt ne sont lisibles que par root : copiez-les dans un dossier lisible par l'utilisateur du service (depuis le hook de certbot qui redémarre aussi l'application).
 
 > [!WARNING]
-> Les requêtes HTTP/3 ne passent pas par le proxy : leurs en-têtes `X-Forwarded-For` et `X-Forwarded-Proto`, s'il y en a, viennent directement du client. Déclarez le proxy par son adresse, `app.trust_proxy("loopback")`, et Vitesse ne croit ces en-têtes que lorsqu'ils viennent de lui : `req.ip()` est alors la vraie adresse du client pour les deux protocoles (voir [Mise en production](production.md#connaître-ladresse-ip-du-client)). De même, ce que fait le proxy (compression, limitation de débit, journaux d'accès, taille maximale des corps) ne s'applique pas aux requêtes HTTP/3 : utilisez les middlewares de Vitesse (`compress`, `rate_limit`) et `app.body_limit`.
+> Les requêtes HTTP/3 ne passent pas par le proxy : leurs en-têtes `X-Forwarded-For` et `X-Forwarded-Proto`, s'il y en a, viennent directement du client. Déclarez le proxy par son adresse, `app.trust_proxy("loopback")`, et Vitesse ne croit ces en-têtes que lorsqu'ils viennent de lui : `req.ip()` est alors la vraie adresse du client pour les deux protocoles (voir [Mise en production](production.md#connaître-ladresse-ip-du-client)). De même, ce que fait le proxy (compression, limitation de débit, journaux d'accès, taille maximale des corps) ne s'applique pas aux requêtes HTTP/3 : utilisez les middlewares de Vitesse (`compress`, `rate_limit`, `body_limit`) et `app.body_limit`, qui s'appliquent à tous les protocoles.
 
 ## `bind` et `http3_addr`
 
@@ -222,10 +222,12 @@ async fn main() -> std::io::Result<()> {
 
 ## Ce qui change, et ce qui n'est pas (encore) pris en charge
 
-- **Les corps de requête** sont lus en entier avant l'exécution du handler, jusqu'à `app.body_limit` (`413` au-delà). `req.take_body()` donne donc un corps déjà en mémoire, pas un flux : la lecture en flux des corps de requête en HTTP/3 n'est pas encore prise en charge.
+- **Les corps de requête** arrivent au handler en flux, au fur et à mesure, comme en HTTP/1.1 et en HTTP/2 : `req.take_body()` est un vrai flux, `field.save(chemin)` écrit un [fichier envoyé](requests.md#envois-de-fichiers-multipart) sur le disque à mesure qu'il arrive, et la limite de taille du corps est celle de la requête, `app.body_limit` ou le [`middleware::body_limit`](requests.md#taille-maximale-du-corps-et-413) de la route (`413` au-delà).
 - **Les réponses** sont envoyées en flux comme en HTTP/1.1 (`Body::from_stream`, fichiers…). Vitesse ajoute `date` et `content-length` (quand la taille est connue), et retire les en-têtes propres à HTTP/1.1 (`connection`, `transfer-encoding`, `upgrade`, `keep-alive`).
 - **Les threads** : avec `app.run` en mode un thread par cœur (le défaut sous Linux), HTTP/3 est servi par un seul thread, à côté des threads HTTP/1.1. Si l'essentiel de votre trafic passe en HTTP/3, comparez avec `app.thread_per_core(false)`.
-- **Non pris en charge** : [WebSocket](websocket.md) sur HTTP/3 (les clients ouvrent leurs connexions WebSocket en HTTP/1.1), le 0-RTT (*early data*) et la lecture en flux des corps de requête. HTTP/2 est disponible en TCP, avec la feature `http2` : voir [HTTPS et HTTP/2](https.md).
+- **WebSocket sur HTTP/3** (RFC 9220) n'est pas pris en charge : le crate h3 ne l'implémente pas, et les navigateurs ne s'en servent pas. Ils ouvrent leurs [WebSockets](websocket.md#websocket-sur-http2) en HTTP/2 ou en HTTP/1.1, sur TCP, même quand la page est arrivée en HTTP/3.
+- **Le 0-RTT** (*early data*) n'est pas pris en charge, volontairement : il permet à un client qui revient d'envoyer sa première requête avant la fin de la poignée de main, mais un attaquant qui enregistre cette requête peut la rejouer, et un `POST` rejoué pourrait, par exemple, passer deux fois la même commande. Vitesse attend la fin de la poignée de main, qui ne coûte qu'un aller-retour avec QUIC.
+- HTTP/2 est disponible en TCP, avec la feature `http2` : voir [HTTPS et HTTP/2](https.md).
 
 ## Pare-feu et hébergement
 

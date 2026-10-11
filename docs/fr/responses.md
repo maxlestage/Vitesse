@@ -180,10 +180,22 @@ La route de connexion envoie `Set-Cookie: session=abc123; Path=/; Max-Age=604800
 | `.http_only(true)` | `HttpOnly` |
 | `.same_site(SameSite::Strict / Lax / None)` | `SameSite` |
 
-Chaque appel à `.cookie(...)` ajoute son propre en-tête `Set-Cookie` : vous pouvez donc en envoyer plusieurs. `.clear_cookie(nom)` envoie `nom=; Path=/; Max-Age=0` : si le cookie a été créé avec un autre chemin ou domaine, construisez vous-même le cookie de suppression avec les mêmes attributs et `.max_age(Duration::ZERO)`. Pour lire les cookies envoyés par le navigateur, utilisez `req.cookie("session")` (voir [Lire la requête](requests.md)).
+`cookie.name()` et `cookie.value()` relisent un cookie, et `cookie.with_value(valeur)` renvoie le même cookie avec une autre valeur.
+
+Chaque appel à `.cookie(...)` ajoute son propre en-tête `Set-Cookie` : vous pouvez donc en envoyer plusieurs. `.clear_cookie(nom)` envoie `nom=; Path=/; Max-Age=0` : si le cookie a été créé avec un autre chemin ou domaine, construisez vous-même le cookie de suppression avec les mêmes attributs et `.max_age(Duration::ZERO)`. Pour lire les cookies envoyés par le navigateur, utilisez `req.cookie("session")` (voir [Lire la requête](requests.md#cookies)).
 
 > [!IMPORTANT]
-> La valeur est écrite telle quelle : elle n'est ni signée, ni chiffrée, ni encodée. Gardez-la compatible avec une URL (un jeton de session aléatoire, par exemple) et stockez les données sensibles côté serveur. Les navigateurs n'acceptent `SameSite::None` qu'avec `.secure(true)`.
+> La valeur est écrite telle quelle : elle n'est ni chiffrée ni encodée, et pas signée non plus, sauf si vous la signez (voir plus bas). Gardez-la compatible avec une URL (un jeton de session aléatoire, par exemple) et stockez les données sensibles côté serveur. Les navigateurs n'acceptent `SameSite::None` qu'avec `.secure(true)`.
+
+Avec la feature `session` et un secret (`app.cookie_secret(...)`), `req.sign_cookie(cookie)` signe un cookie avant que vous ne l'envoyiez, comme `res.cookie(nom, valeur, { signed: true })` en Express. Le visiteur peut toujours lire la valeur, mais pas la modifier : `req.signed_cookie(nom)` la relit, et renvoie `None` pour un cookie qui a été modifié.
+
+```rust
+app.post("/theme/dark", |req: Request| async move {
+    res::send_status(204).cookie(req.sign_cookie(Cookie::new("theme", "dark")))
+});
+```
+
+Cette route envoie `Set-Cookie: theme=dark.<signature>; Path=/`. Pour des données que le visiteur ne doit pas voir, ou que vous devez pouvoir révoquer (qui est connecté), utilisez une session : le navigateur ne garde alors qu'un identifiant aléatoire. Les deux sont expliqués dans [Cookies signés et sessions](sessions.md).
 
 ### Redirections
 
@@ -200,6 +212,19 @@ app.post("/contact", |_| async { Redirect::see_other("/merci") });
 ```
 
 Pour un autre statut, posez l'en-tête vous-même : `res::status(308).header("location", "/v2")`. Une URL contenant des caractères invalides (comme un retour à la ligne) produit un `500`.
+
+## Rendre un gabarit
+
+`Html(...)` envoie du HTML que vous avez construit vous-même. Pour de vraies pages, avec un gabarit de base, des boucles et l'échappement, activez la feature `templates` : `req.render(gabarit, contexte)` rend un gabarit du dossier déclaré avec `app.views(...)`, comme le `res.render` d'Express :
+
+```rust
+app.views("templates");
+app.get("/users", |req: Request| async move {
+    req.render("users.html", json!({ "title": "Utilisateurs", "users": ["Ada", "Grace"] }))
+});
+```
+
+`req.render` renvoie un `Result<Html<String>, Error>` : un `200` avec `content-type: text/html; charset=utf-8`, ou un `500` si le gabarit manque ou si son rendu échoue (la cause est journalisée). Le contexte peut être un `json!` ou n'importe quelle structure `Serialize`. Tout est expliqué dans [Gabarits HTML](templates.md).
 
 ## Fichiers et téléchargements
 

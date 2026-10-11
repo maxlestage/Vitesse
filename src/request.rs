@@ -18,13 +18,25 @@ use serde::de::DeserializeOwned;
 
 use crate::body::{Body, BoxError};
 use crate::error::Error;
+use crate::router::{MethodMap, Route};
 use crate::tree::{Captures, Tree};
 use crate::util::percent_decode;
 
 /// Data shared by the whole application (state, configuration).
 pub(crate) struct Shared {
+    /// The routes, for [`Request::route`] before routing.
+    pub(crate) routes: Option<&'static Tree<MethodMap>>,
+    /// Named routes: name → path template ([`Request::path_for`]).
+    pub(crate) names: HashMap<Box<str>, crate::tree::UrlTemplate>,
+    /// The secret that signs cookies ([`App::cookie_secret`](crate::App::cookie_secret)).
+    #[cfg(feature = "session")]
+    pub(crate) cookie_key: Option<crate::session::Key>,
+    /// The templates ([`App::views`](crate::App::views)).
+    #[cfg(feature = "templates")]
+    pub(crate) templates: Option<minijinja::Environment<'static>>,
     pub(crate) state: StateMap,
     pub(crate) body_limit: usize,
+    pub(crate) trust_proxy: crate::proxy::TrustProxy,
 }
 
 /// Typed storage for the global state (`app.state(...)`).
@@ -201,7 +213,14 @@ struct Inner {
     /// Positions found by the router (reused buffer).
     captures: Captures,
     params: Params,
+    /// The pattern of the route found by the router.
+    route: Option<&'static str>,
     remote: Option<SocketAddr>,
+    /// Received over TLS (HTTPS, HTTP/3).
+    secure: bool,
+    /// Maximum size of the body read into memory (`app.body_limit` unless a
+    /// middleware changed it).
+    body_limit: usize,
     /// The request carries `Range`, `If-Range`, `If-None-Match` or
     /// `If-Modified-Since` (spotted while parsing, at no extra cost).
     conditional: bool,
@@ -228,7 +247,10 @@ impl Inner {
             body: Mutex::new(ReqBody::Empty),
             captures: Vec::new(),
             params: Params::default(),
+            route: None,
             remote: None,
+            secure: false,
+            body_limit: shared.body_limit,
             conditional: false,
             shared,
         }
@@ -240,6 +262,7 @@ impl Inner {
         match pool::take() {
             Some(mut inner) => {
                 inner.shared = shared;
+                inner.body_limit = shared.body_limit;
                 inner
             }
             None => Box::new(Inner::new(shared)),
@@ -261,7 +284,9 @@ impl Inner {
         self.captures.clear();
         self.params.names = &[];
         self.params.values.clear();
+        self.route = None;
         self.remote = None;
+        self.secure = false;
         self.conditional = false;
     }
 
@@ -325,6 +350,7 @@ impl Request {
     /// Builds a request read from the network; `head` is the raw head,
     /// copied into a recycled box.
     #[inline]
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn from_wire(
         head: &[u8],
         method: Method,
@@ -332,6 +358,7 @@ impl Request {
         target: (usize, usize),
         raw_headers: &RawHeaders,
         remote: Option<SocketAddr>,
+        secure: bool,
         shared: &'static Shared,
     ) -> Self {
         let mut inner = Inner::take(shared);
@@ -340,6 +367,7 @@ impl Request {
         inner.head.extend_from_slice(head);
         inner.raw_headers.copy_from(raw_headers);
         inner.remote = remote;
+        inner.secure = secure;
         let (start, end) = target;
         if head.get(start) == Some(&b'/') {
             inner.set_target(start, end);
@@ -364,11 +392,24 @@ impl Request {
 
     /// Builds a request from an [`http::Request`] (test client).
     pub(crate) fn from_parts(
-        parts: http::request::Parts,
+        mut parts: http::request::Parts,
         body: ReqBody,
         remote: Option<SocketAddr>,
+        secure: bool,
         shared: &'static Shared,
     ) -> Self {
+        // En HTTP/2 et HTTP/3, l'hôte est dans `:authority` (l'URI) : on le
+        // remet dans `Host` pour que `req.header("host")` fonctionne comme en
+        // HTTP/1.1.
+        if !parts.headers.contains_key(header::HOST) {
+            if let Some(host) = parts
+                .uri
+                .authority()
+                .and_then(|a| HeaderValue::from_str(a.as_str()).ok())
+            {
+                parts.headers.insert(header::HOST, host);
+            }
+        }
         let mut inner = Inner::take(shared);
         inner.method = parts.method;
         inner.version = parts.version;
@@ -382,6 +423,7 @@ impl Request {
         inner.extensions = parts.extensions;
         *inner.body.get_mut().unwrap_or_else(PoisonError::into_inner) = body;
         inner.remote = remote;
+        inner.secure = secure;
         Request {
             inner: ManuallyDrop::new(inner),
         }
@@ -418,9 +460,17 @@ impl Request {
         tree.find(path, &mut inner.captures)
     }
 
-    /// Records the parameters of the route found by the router.
+    /// Records the route found by the router, and its parameters.
     #[inline]
-    pub(crate) fn set_params(&mut self, names: &'static [Box<str>]) {
+    pub(crate) fn set_route(&mut self, route: &'static Route) {
+        self.inner.route = Some(&route.pattern);
+        if !route.names.is_empty() {
+            self.set_params(&route.names);
+        }
+    }
+
+    #[inline]
+    fn set_params(&mut self, names: &'static [Box<str>]) {
         let inner = &mut **self.inner;
         let path = path_of(&inner.head, inner.target, inner.path_end);
         inner.params.names = names;
@@ -439,6 +489,12 @@ impl Request {
     #[inline]
     pub fn method(&self) -> &Method {
         &self.inner.method
+    }
+
+    /// Replaces the method (e.g. a "method override" middleware that turns
+    /// a `POST` with `_method=DELETE` into a `DELETE` before routing).
+    pub fn set_method(&mut self, method: Method) {
+        self.inner.method = method;
     }
 
     /// The full URI (path + query string).
@@ -563,6 +619,43 @@ impl Request {
         self.header(header::CONTENT_TYPE)
     }
 
+    /// The preferred type among `types`, according to the `Accept` header
+    /// (`req.accepts()` in Express): the highest quality wins, then the most
+    /// specific match. Types can be extensions (`"json"`, `"html"`) or MIME
+    /// types (`"application/json"`, `"image/*"`). Without `Accept`, the
+    /// first type; `None` if none is acceptable (answer `406`).
+    ///
+    /// ```
+    /// use vitesse::prelude::*;
+    ///
+    /// async fn show(req: Request) -> Response {
+    ///     match req.accepts(&["html", "json"]) {
+    ///         Some("html") => res::html("<h1>Ada</h1>"),
+    ///         Some(_) => res::json(json!({ "name": "Ada" })),
+    ///         None => res::send_status(406),
+    ///     }
+    /// }
+    /// ```
+    pub fn accepts<'a>(&self, types: &[&'a str]) -> Option<&'a str> {
+        crate::negotiation::accepts(self.header_all("accept"), types)
+    }
+
+    /// The preferred language among `languages`, according to the
+    /// `Accept-Language` header (`req.acceptsLanguages()` in Express): `"fr"`
+    /// matches `fr-FR`, and the other way round. Without the header, the
+    /// first language.
+    ///
+    /// ```
+    /// # use vitesse::prelude::*;
+    /// async fn home(req: Request) -> Redirect {
+    ///     let lang = req.accepts_language(&["en", "fr", "es"]).unwrap_or("en");
+    ///     Redirect::to(format!("/{lang}/"))
+    /// }
+    /// ```
+    pub fn accepts_language<'a>(&self, languages: &[&'a str]) -> Option<&'a str> {
+        crate::negotiation::accepts_language(self.header_all("accept-language"), languages)
+    }
+
     /// Checks the type of the body (`req.is('json')`): accepts a full type
     /// (`application/json`), a subtype (`json`) or a wildcard (`text/*`).
     pub fn is(&self, ty: &str) -> bool {
@@ -586,15 +679,60 @@ impl Request {
     }
 
     /// The requested host, without the port (`req.hostname`).
+    ///
+    /// Behind a trusted proxy ([`App::trust_proxy`](crate::App::trust_proxy)),
+    /// the host comes from `X-Forwarded-Host`.
     pub fn hostname(&self) -> Option<&str> {
-        let host = match self.header(header::HOST) {
-            Some(host) => host,
-            None => self.inner.uri.get()?.host()?,
-        };
+        let host = self.host()?;
         if host.starts_with('[') {
             return host.split_once(']').map(|(h, _)| &h[1..]);
         }
         Some(host.rsplit_once(':').map_or(host, |(h, _)| h))
+    }
+
+    /// The requested host, with its port if there is one (`req.host` in
+    /// Express 5): `Host`, the authority of an HTTP/2 or HTTP/3 request, or,
+    /// behind a trusted proxy, `X-Forwarded-Host`.
+    pub fn host(&self) -> Option<&str> {
+        if self.trusts_proxy() {
+            if let Some(host) = self.forwarded("x-forwarded-host") {
+                return Some(host);
+            }
+        }
+        match self.header(header::HOST) {
+            Some(host) => Some(host),
+            None => self.inner.uri.get()?.authority().map(|a| a.as_str()),
+        }
+    }
+
+    /// `"https"` when the request arrived over TLS (or, behind a trusted
+    /// proxy, when `X-Forwarded-Proto` says so), `"http"` otherwise
+    /// (`req.protocol`).
+    pub fn protocol(&self) -> &'static str {
+        if self.secure() { "https" } else { "http" }
+    }
+
+    /// Whether the request arrived over HTTPS (`req.secure`): TLS, HTTP/3,
+    /// or `X-Forwarded-Proto: https` from a trusted proxy.
+    pub fn secure(&self) -> bool {
+        self.inner.secure
+            || (self.trusts_proxy()
+                && self
+                    .forwarded("x-forwarded-proto")
+                    .is_some_and(|p| p.eq_ignore_ascii_case("https")))
+    }
+
+    /// The direct peer is a trusted proxy.
+    fn trusts_proxy(&self) -> bool {
+        let trust = &self.inner.shared.trust_proxy;
+        *trust != crate::proxy::TrustProxy::None
+            && trust.trusts_peer(self.inner.remote.map(|peer| peer.ip()))
+    }
+
+    /// The first value of an `X-Forwarded-*` header.
+    fn forwarded(&self, name: &str) -> Option<&str> {
+        let value = self.header(name)?.split(',').next()?.trim();
+        (!value.is_empty()).then_some(value)
     }
 
     /// The value of a cookie (`req.cookies.name`).
@@ -614,6 +752,66 @@ impl Request {
             }
         }
         None
+    }
+
+    /// Renders a template of [`App::views`](crate::App::views) with a
+    /// context (anything that serializes: `json!({...})`, a struct…), as
+    /// an HTML response (`res.render(view, locals)` in Express). Needs the
+    /// `templates` feature: see [`templates`](crate::templates).
+    ///
+    /// A missing template or a rendering error is a `500`, whose cause is
+    /// logged.
+    #[cfg(feature = "templates")]
+    pub fn render(
+        &self,
+        template: &str,
+        context: impl serde::Serialize,
+    ) -> Result<crate::Html<String>, Error> {
+        crate::templates::render(self.inner.shared.templates.as_ref(), template, context)
+    }
+
+    /// The secret that signs cookies, if the application has one.
+    #[cfg(feature = "session")]
+    pub(crate) fn cookie_key(&self) -> Option<&'static crate::session::Key> {
+        self.inner.shared.cookie_key.as_ref()
+    }
+
+    /// The value of a signed cookie (`req.signedCookies.name`), or `None`
+    /// if it is missing or its signature is wrong (changed by the client).
+    /// Needs [`App::cookie_secret`](crate::App::cookie_secret) and the
+    /// `session` feature.
+    #[cfg(feature = "session")]
+    pub fn signed_cookie(&self, name: &str) -> Option<String> {
+        let key = self.cookie_key()?;
+        key.verify(name, self.cookie(name)?).map(str::to_owned)
+    }
+
+    /// Signs a cookie with the application's secret, before sending it with
+    /// [`Response::cookie`](crate::Response::cookie) (`res.cookie(name,
+    /// value, { signed: true })`): read it back with [`Request::signed_cookie`].
+    /// The value stays readable by the client, who can't change it.
+    ///
+    /// # Panics
+    /// If the application has no [`cookie_secret`](crate::App::cookie_secret).
+    #[cfg(feature = "session")]
+    pub fn sign_cookie(&self, cookie: crate::Cookie) -> crate::Cookie {
+        let key = self
+            .cookie_key()
+            .expect("signing a cookie needs a secret: call `app.cookie_secret(...)` at startup");
+        let value = key.sign(cookie.name(), cookie.value());
+        cookie.with_value(value)
+    }
+
+    /// The session of this request (`req.session`), opened by the
+    /// [`session`](crate::middleware::session) middleware (`session`
+    /// feature).
+    ///
+    /// # Panics
+    /// If the middleware is not installed (the panic becomes a `500`).
+    #[cfg(feature = "session")]
+    pub fn session(&self) -> &crate::session::Session {
+        self.get::<crate::session::Session>()
+            .expect("no session: add `middleware::session(...)` to the application")
     }
 
     // ----- Paramètres de route et query string ------------------------------
@@ -646,6 +844,83 @@ impl Request {
             .ok_or_else(|| Error::bad_request(format!("missing parameter '{name}'")))?;
         raw.parse()
             .map_err(|_| Error::bad_request(format!("invalid parameter '{name}': '{raw}'")))
+    }
+
+    /// The pattern of the route that answers this request, mount prefix
+    /// included: `"/api/users/:id"` for `/api/users/42` (axum's
+    /// `MatchedPath`, actix-web's `match_pattern`). Handy to label metrics
+    /// and logs without one series per user id.
+    ///
+    /// Global middlewares run before routing: there, the route is looked up
+    /// on demand (call it before `next.run(req)`, which takes the request).
+    /// `None` if no route matches.
+    ///
+    /// ```
+    /// use vitesse::prelude::*;
+    ///
+    /// let mut app = App::new();
+    /// app.middleware(|req: Request, next: Next| async move {
+    ///     let route = req.route().unwrap_or("<none>");
+    ///     let res = next.run(req).await;
+    ///     println!("{route} -> {}", res.status_code());
+    ///     res
+    /// });
+    /// app.get("/users/:id", |req: Request| async move {
+    ///     req.route().unwrap_or_default().to_owned() // "/users/:id"
+    /// });
+    /// ```
+    pub fn route(&self) -> Option<&'static str> {
+        if let Some(route) = self.inner.route {
+            return Some(route);
+        }
+        let mut captures = Vec::new();
+        self.inner
+            .shared
+            .routes?
+            .find(self.path(), &mut captures)?
+            .find(self.method())
+            .map(|route| &*route.pattern)
+    }
+
+    /// The path of a named route ([`App::name`](crate::App::name)), with
+    /// its parameters filled in order and percent-encoded (actix-web's
+    /// `url_for`). Optional parameters at the end can be left out; a
+    /// wildcard takes a whole sub-path.
+    ///
+    /// ```
+    /// use vitesse::prelude::*;
+    ///
+    /// let mut app = App::new();
+    /// app.get("/flights/:from-:to", |_| async { "flight" }).name("flight");
+    /// app.get("/", |req: Request| async move {
+    ///     let link = req.path_for("flight", &[&"LAX", &"SFO"])?;
+    ///     Ok::<_, Error>(Html(format!("<a href=\"{link}\">LAX → SFO</a>")))
+    /// });
+    /// ```
+    ///
+    /// Fails with a `500` if the name is unknown, if a parameter is missing
+    /// or in excess, or if a value doesn't satisfy its constraint (the cause
+    /// is logged, not sent to the client).
+    pub fn path_for(&self, name: &str, params: &[&dyn fmt::Display]) -> Result<String, Error> {
+        let template = self
+            .inner
+            .shared
+            .names
+            .get(name)
+            .ok_or_else(|| internal(format!("unknown route name '{name}'")))?;
+        template
+            .build(params)
+            .map_err(|e| internal(format!("cannot build the URL of '{name}': {e}")))
+    }
+
+    /// The absolute URL of a named route: [`Request::path_for`] preceded by
+    /// the protocol and the host of this request (`https://example.com/users/42`).
+    pub fn url_for(&self, name: &str, params: &[&dyn fmt::Display]) -> Result<String, Error> {
+        let path = self.path_for(name, params)?;
+        let host = self
+            .host()
+            .ok_or_else(|| internal("cannot build an absolute URL without a host".into()))?;
+        Ok(format!("{}://{host}{path}", self.protocol()))
     }
 
     /// All route parameters, as `(name, value)` pairs.
@@ -703,11 +978,20 @@ impl Request {
         self.inner.remote
     }
 
-    /// The client's IP (`req.ip`). Behind a proxy, look at the
-    /// `X-Forwarded-For` header instead.
+    /// The client's IP (`req.ip`).
+    ///
+    /// By default, this is the address of the TCP peer: behind a reverse
+    /// proxy, the proxy's address. Declare your proxies with
+    /// [`App::trust_proxy`](crate::App::trust_proxy), and the client's
+    /// address is read from `X-Forwarded-For`, like in Express.
     #[inline]
     pub fn ip(&self) -> Option<IpAddr> {
-        self.inner.remote.map(|a| a.ip())
+        let peer = self.inner.remote.map(|a| a.ip());
+        let trust = &self.inner.shared.trust_proxy;
+        if *trust == crate::proxy::TrustProxy::None {
+            return peer;
+        }
+        trust.client_ip(peer, self.header_all("x-forwarded-for"))
     }
 
     // ----- État global et données locales -----------------------------------
@@ -764,11 +1048,27 @@ impl Request {
             .unwrap_or_else(PoisonError::into_inner)
     }
 
-    /// Reads the whole body (limited by `app.body_limit`, `413` beyond that).
+    /// The maximum size of the body read into memory: [`App::body_limit`](crate::App::body_limit),
+    /// unless a middleware such as [`middleware::body_limit`](crate::middleware::body_limit)
+    /// changed it for this request.
+    #[inline]
+    pub fn body_limit(&self) -> usize {
+        self.inner.body_limit
+    }
+
+    /// Changes the maximum size of the body read into memory, for this
+    /// request only (a route that receives large uploads, for example).
+    #[inline]
+    pub fn set_body_limit(&mut self, bytes: usize) {
+        self.inner.body_limit = bytes;
+    }
+
+    /// Reads the whole body (limited by [`Request::body_limit`], `413`
+    /// beyond that).
     ///
     /// The result is cached, so this can be called several times.
     pub async fn bytes(&self) -> Result<Bytes, Error> {
-        let limit = self.inner.shared.body_limit;
+        let limit = self.inner.body_limit;
         let body = {
             let mut guard = self.lock_body();
             match &*guard {
@@ -815,6 +1115,14 @@ impl Request {
             .map_err(|e| Error::bad_request(format!("invalid form data: {e}")))
     }
 
+    /// Reads a `multipart/form-data` body (file uploads) field by field, as
+    /// it arrives; `415` if the body is not multipart. Needs the `multipart`
+    /// feature: see [`multipart`](crate::multipart).
+    #[cfg(feature = "multipart")]
+    pub fn multipart(&self) -> Result<crate::multipart::Multipart, Error> {
+        crate::multipart::Multipart::from_request(self)
+    }
+
     /// Takes the raw body as a stream, without reading it (uploads,
     /// proxies…).
     pub fn take_body(&self) -> Body {
@@ -836,6 +1144,11 @@ impl Request {
     }
 }
 
+/// A `500` whose cause is logged rather than sent to the client.
+fn internal(cause: String) -> Error {
+    Error::internal("Internal Server Error").with_source(cause)
+}
+
 /// Reads a body into memory, up to a maximum size.
 async fn collect<B>(body: B, limit: usize) -> Result<Bytes, Error>
 where
@@ -851,7 +1164,12 @@ where
     let mut total = 0usize;
     while let Some(frame) = body.frame().await {
         let frame = frame.map_err(|e| {
-            Error::bad_request("failed to read the request body").with_source(e.into())
+            let e: BoxError = e.into();
+            // Un corps limité en amont (tower-http's `RequestBodyLimit`…).
+            if e.is::<http_body_util::LengthLimitError>() {
+                return Error::payload_too_large();
+            }
+            Error::bad_request("failed to read the request body").with_source(e)
         })?;
         let Ok(data) = frame.into_data() else {
             continue;

@@ -62,22 +62,35 @@ Vitesse trae consigo `tokio`, `serde_json`, `http` y `bytes`, y los reexporta. P
 
 ## Features de Cargo
 
-Dos partes de Vitesse son features de Cargo, que activas o desactivas en `Cargo.toml`:
+Algunas partes de Vitesse son features de Cargo, que activas o desactivas en `Cargo.toml`. Solo `ws` está activada por defecto: las demás añaden dependencias y tiempo de compilación, así que solo pagas por lo que usas.
 
 | Feature | Por defecto | Añade |
 |---|---|---|
 | `ws` | Activada | `app.ws(...)` y el módulo `vitesse::ws`: consulta [WebSocket](websocket.md) |
+| `tls` | Desactivada | `app.tls(...)` y el módulo `vitesse::tls`: HTTPS (TLS 1.2 y 1.3, con rustls), consulta [HTTPS y HTTP/2](https.md) |
+| `http2` | Desactivada | HTTP/2: negociado por los navegadores sobre TLS (con `tls`), y sin cifrar para los clientes que empiezan en HTTP/2, consulta [HTTPS y HTTP/2](https.md) |
 | `http3` | Desactivada | `app.http3(...)` y el módulo `vitesse::http3`: HTTP/3 sobre QUIC, consulta [HTTP/3 y QUIC](http3.md) |
+| `multipart` | Desactivada | `req.multipart()` y el módulo `vitesse::multipart`: subida de archivos (`multipart/form-data`), consulta [Subida de archivos](requests.md#subida-de-archivos-multipart) |
+| `compress` | Desactivada | `middleware::compress()` (respuestas en Brotli o gzip) y `middleware::decompress()` (cuerpos de petición comprimidos), consulta [`compress`](middleware.md#compress) |
+| `session` | Desactivada | `app.cookie_secret(...)`, las cookies firmadas (`req.sign_cookie`, `req.signed_cookie`), `middleware::session(...)` y el módulo `vitesse::session`, con los crates hmac, sha2 y getrandom: consulta [Cookies firmadas y sesiones](sessions.md) |
+| `templates` | Desactivada | `app.views(...)`, `app.templates(...)`, `req.render(...)` y el módulo `vitesse::templates`, con [minijinja](https://crates.io/crates/minijinja): consulta [Plantillas HTML](templates.md) |
+| `tower` | Desactivada | `middleware::layer(...)`, `app.into_service()` y el módulo `vitesse::tower`: middlewares de tower y tower-http, consulta [Capas de tower](middleware.md#capas-de-tower) |
+
+Todo lo demás, incluidos los Server-Sent Events (`vitesse::sse`) y los demás middlewares incluidos, está siempre disponible.
 
 ```toml
 [dependencies]
-# HTTP/3 además de las features por defecto:
-vitesse = { git = "https://github.com/maxlestage/Vitesse", features = ["http3"] }
-# o sin WebSocket, para compilar un poco menos:
+# HTTPS y HTTP/2 servidos por el propio Vitesse, además de las features por defecto:
+vitesse = { git = "https://github.com/maxlestage/Vitesse", features = ["tls", "http2"] }
+# Un sitio web con subida de archivos y compresión, detrás de un proxy inverso:
+# vitesse = { git = "https://github.com/maxlestage/Vitesse", features = ["multipart", "compress"] }
+# Páginas renderizadas en el servidor, con inicio de sesión:
+# vitesse = { git = "https://github.com/maxlestage/Vitesse", features = ["templates", "session"] }
+# Sin WebSocket, para compilar un poco menos:
 # vitesse = { git = "https://github.com/maxlestage/Vitesse", default-features = false }
 ```
 
-Con `cargo add`: `cargo add vitesse --git https://github.com/maxlestage/Vitesse --features http3`, o `cargo add vitesse --git https://github.com/maxlestage/Vitesse --no-default-features`.
+Con `cargo add`: `cargo add vitesse --git https://github.com/maxlestage/Vitesse --features tls,http2`, o `cargo add vitesse --git https://github.com/maxlestage/Vitesse --no-default-features`.
 
 ## Dependencias opcionales
 

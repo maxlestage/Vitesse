@@ -64,7 +64,7 @@ Pour une requête, l'ordre est le suivant : middlewares globaux (`app.middleware
 
 ### Les requêtes auxquelles aucune route ne répond
 
-Les middlewares d'un routeur s'exécutent aussi pour les requêtes sous son préfixe auxquelles aucune de ses routes ne répond : le `404` (ou votre `app.fallback`), le `405 Method Not Allowed` et la réponse automatique à `OPTIONS` (`204` avec `Allow`). Dans l'exemple ci-dessus, `GET /admin/inconnu` passe lui aussi par `require_token` : sans jeton, le visiteur reçoit un `401` et ne sait même pas si la page existe.
+Les middlewares d'un routeur s'exécutent aussi pour les requêtes sous son préfixe auxquelles aucune de ses routes ne répond : le `404` (le [fallback](#le-fallback-dun-routeur) du routeur s'il en a un, sinon celui de l'application), le `405 Method Not Allowed` et la réponse automatique à `OPTIONS` (`204` avec `Allow`). Dans l'exemple ci-dessus, `GET /admin/inconnu` passe lui aussi par `require_token` : sans jeton, le visiteur reçoit un `401` et ne sait même pas si la page existe.
 
 C'est ce qui permet à un logger ou à CORS sur un routeur de fonctionner comme on s'y attend :
 
@@ -84,7 +84,34 @@ Quelques précisions :
 - Le préfixe est comparé segment par segment : un routeur monté sur `/api` couvre `/api` et `/api/...`, mais pas `/apix`.
 - Les middlewares globaux (`app.middleware`) passent toujours en premier, pour chaque requête. Avec des routeurs imbriqués, viennent ensuite les middlewares du routeur extérieur, puis ceux du routeur intérieur.
 - Si un middleware du routeur réécrit le chemin d'une telle requête avec `req.set_uri(...)`, le routage est refait sur le nouveau chemin.
-- Un préfixe peut contenir des paramètres : un routeur monté sur `/users/:user_id/posts` couvre `/users/42/posts/...`, quelle que soit la valeur de `:user_id`.
+- Un préfixe peut contenir des paramètres : un routeur monté sur `/users/:user_id/posts` couvre `/users/42/posts/...`, quelle que soit la valeur de `:user_id`. Les contraintes du préfixe sont vérifiées pour ces requêtes aussi : un routeur monté sur `/docs/:lang(en|fr|es)` ne couvre pas `/docs/de/...`, dont la `404` vient de l'application, sans les middlewares ni le fallback du routeur.
+
+## Le fallback d'un routeur
+
+Par défaut, un chemin inconnu sous le préfixe d'un routeur reçoit la `404` de l'application : votre `app.fallback`, ou la réponse par défaut `{"error":"Cannot GET /nope"}`. `router.fallback(handler)` y répond à la place. Une API peut ainsi garder des erreurs JSON pendant que le reste du site affiche une page HTML :
+
+```rust
+let mut api = Router::new();
+api.get("/users", |_| async { Json(vec!["ada", "grace"]) });
+api.fallback(|req: Request| async move {
+    (404, Json(json!({ "error": format!("aucune route d'API pour {}", req.path()) })))
+});
+
+let mut app = App::new();
+app.mount("/api", api);
+app.fallback(|_| async { (404, Html("<h1>Page introuvable</h1>")) });
+```
+
+| Requête | Réponse |
+|---|---|
+| `GET /api/users` | la route |
+| `GET /api/nope` | le fallback du routeur : `404 {"error":"aucune route d'API pour /api/nope"}` |
+| `POST /api/users` | `405 Method Not Allowed` : le chemin existe, aucun fallback n'est donc appelé |
+| `GET /nope` | le fallback de l'application : la page HTML |
+
+- Le fallback s'exécute après les middlewares du routeur, comme l'une de ses routes : un routeur protégé par une authentification protège aussi son fallback, et les en-têtes qu'ajoutent ses middlewares figurent sur les réponses du fallback.
+- Avec des routeurs imbriqués, c'est le routeur le plus profond doté d'un fallback qui l'emporte : un fallback sur le routeur monté sur `/api/admin` répond à `/api/admin/nope`, celui de `/api` répond au reste de `/api`. Un routeur sans fallback utilise celui de son parent, et en dernier lieu celui de l'application.
+- Comme `app.fallback`, il peut répondre n'importe quoi, pas seulement une `404` : une redirection, une page HTML, ou l'`index.html` d'une application monopage qui vit sous le préfixe.
 
 ## Imbriquer des routeurs
 
@@ -118,6 +145,27 @@ posts.get("/", |req: Request| async move {
 app.mount("/users/:user_id/posts", posts); // GET /users/42/posts
 ```
 
+Tout ce que propose la [syntaxe des routes](routing.md#paramètres-de-chemin) fonctionne aussi dans un préfixe : plusieurs paramètres dans un segment (`/api/v:version`), les [contraintes](routing.md#contraintes-avec-des-expressions-régulières) et les [paramètres optionnels](routing.md#paramètres-optionnels). Ici, un seul routeur sert la documentation en trois langues, avec une page d'accueil par langue :
+
+```rust
+let mut docs = Router::new();
+docs.get("/:page?", |req: Request| async move {
+    let lang = req.param("lang").unwrap_or("en");
+    let page = req.param("page").unwrap_or("index");
+    format!("page {page} en {lang}")
+});
+
+app.mount("/docs/:lang(en|fr|es)", docs);
+```
+
+| Requête | Réponse |
+|---|---|
+| `GET /docs/fr` | `page index en fr` |
+| `GET /docs/es/routing` | `page routing en es` |
+| `GET /docs/de/routing` | `404` : `de` ne respecte pas la contrainte |
+
+`req.route()` donne le motif complet, préfixe compris : `/docs/:lang(en|fr|es)/:page?`. Les paramètres optionnels doivent rester à la fin du chemin complet, préfixe et route compris : avec un préfixe comme `/:lang?`, toute route autre que le `/` du routeur fait paniquer `mount`. Placez plutôt le paramètre optionnel dans les routes du routeur, comme ci-dessus.
+
 ## Routes WebSocket
 
 `router.ws(chemin, handler)` déclare une route [WebSocket](websocket.md), exactement comme `app.ws`. Le préfixe du routeur s'applique, et ses middlewares s'exécutent sur la requête de poignée de main, avant que la connexion ne soit acceptée : un middleware qui répond `401` refuse la connexion.
@@ -132,6 +180,27 @@ live.ws("/feed", |_req, mut socket| async move {
 app.mount("/live", live); // ws://example.com/live/feed
 ```
 
+## Routes nommées dans les routeurs
+
+Une route déclarée dans un routeur peut recevoir un [nom](routing.md#routes-nommées-et-génération-durl) avec `.name(...)`, exactement comme sur `App`. Le nom appartient à toute l'application, et le chemin qu'il construit inclut le préfixe de montage :
+
+```rust
+let mut api = Router::new();
+api.get(r"/items/:id(\d+)", show_item).name("item");
+api.post("/items", |req: Request| async move {
+    // Les paramètres du préfixe viennent en premier : ":version", puis ":id".
+    let link = req.path_for("item", &[&"v1", &7])?; // "/api/v1/items/7"
+    Ok::<_, Error>((201, Json(json!({ "link": link }))))
+});
+
+app.mount("/api/:version", api);
+```
+
+- N'importe quel handler peut utiliser le nom, dans le routeur ou ailleurs dans l'application : `req.path_for("item", …)` fonctionne aussi depuis `app.get("/", …)`.
+- Les valeurs suivent l'ordre des paramètres dans le chemin complet : ceux du préfixe d'abord, puis ceux de la route.
+- Les noms doivent être uniques dans toute l'application : deux routeurs qui nomment tous deux une route `"show"` font paniquer le second `mount` au démarrage. Préfixez-les (`"users.show"`, `"posts.show"`).
+- `name` suit une route : l'appeler juste après `mount` panique, puisque `mount` ajoute des routes mais n'en est pas une.
+
 ## Comment fonctionne le montage
 
 `mount` copie les routes du routeur dans l'arbre de routage de l'application, une fois pour toutes, au démarrage. Quelques conséquences :
@@ -139,8 +208,9 @@ app.mount("/live", live); // ws://example.com/live/feed
 - **Aucun coût par requête** : une route montée est exactement aussi rapide qu'une route déclarée directement sur `App`.
 - **Le routeur est consommé** par `mount`. Pour monter deux fois les mêmes routes (`/api/v1` et `/api/latest`, par exemple), construisez le routeur dans une fonction et appelez-la deux fois.
 - **Les conflits sont détectés au démarrage** : si la même méthode et le même chemin sont définis deux fois, même dans des routeurs différents, le programme panique dès son lancement, avec un message comme `duplicate route: GET /api/x is already defined`.
-- **La priorité des routes** est globale : un segment statique passe avant un paramètre, qui passe avant un joker (`/users/new` avant `/users/:id`), quel que soit le routeur d'origine.
-- Le handler de repli (`app.fallback`), le gestionnaire d'erreurs (`app.on_error`) et l'état (`app.state`) appartiennent à l'application, pas aux routeurs.
+- **La priorité des routes** est globale : un segment statique passe avant un segment contraint ou composé, qui passe avant un simple paramètre, qui passe lui-même avant un joker (`/users/new`, puis `/users/:id(\d+)`, puis `/users/:name`), quel que soit le routeur d'origine. Voir [Comment les routes sont choisies](routing.md#comment-les-routes-sont-choisies).
+- **Les noms des routes** sont globaux eux aussi : voir [Routes nommées dans les routeurs](#routes-nommées-dans-les-routeurs).
+- Le gestionnaire d'erreurs (`app.on_error`) et l'état (`app.state`) appartiennent à l'application, pas aux routeurs. Un routeur peut toutefois avoir son propre [fallback](#le-fallback-dun-routeur), qui répond avant `app.fallback`.
 
 ## Organiser un projet
 

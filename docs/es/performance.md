@@ -69,7 +69,7 @@ Casi todo el tiempo de una petición sencilla se pasa en el kernel (leyendo y es
   - un solo temporizador por conexión (no por petición) gestiona la inactividad.
 - **Casi ninguna asignación de memoria**: las peticiones (y sus búferes) se reciclan por hilo, igual que las tablas de cabeceras de las respuestas, y el enrutador escribe los parámetros en búferes reutilizados. Solo queda el `Future` del handler (y el búfer de un cuerpo JSON).
 - **Un hilo por núcleo** (Linux): cada núcleo tiene su propio bucle de eventos y su propio socket `SO_REUSEPORT`; el kernel reparte las conexiones y una petición nunca cambia de hilo.
-- **Un enrutador sin expresiones regulares**: un árbol de segmentos que se recorre sin ninguna asignación para las rutas estáticas; los parámetros apuntan dentro de la ruta.
+- **Un enrutador sin expresiones regulares en el caso habitual**: un árbol de segmentos que se recorre sin ninguna asignación para las rutas estáticas; los parámetros apuntan dentro de la ruta. Las expresiones regulares solo se ejecutan para los segmentos que las necesitan ([restricciones](routing.md#restricciones-con-expresiones-regulares), texto alrededor de los parámetros), compiladas una sola vez al arrancar.
 - **Ningún contador atómico compartido por petición**: la aplicación se congela al arrancar (`&'static`), así que handlers, middlewares y estado se leen sin `Arc`.
 - **Pocas copias**: la petición recorre middlewares y handlers moviendo un solo puntero, una respuesta pesa solo 72 bytes y el cuerpo solo se lee si el handler lo pide.
 

@@ -58,8 +58,9 @@
 //!   a single system call.
 //! - **One thread per core** ([`App::run`] on Linux): each core has its own
 //!   event loop and its own `SO_REUSEPORT` socket, with no synchronization.
-//! - **A regex-free router**: a tree of path segments, with no allocation
-//!   for routes without parameters.
+//! - **A tree router**: a tree of path segments, with no allocation for
+//!   routes without parameters; regular expressions only run for the
+//!   parameters that declare a constraint (`/users/:id(\d+)`).
 //! - **Zero shared atomic counters per request**: the application is frozen
 //!   at startup (`&'static`).
 //! - **Few allocations**: a request travels through middlewares and
@@ -83,6 +84,12 @@ mod body;
 mod error;
 mod handler;
 mod http1;
+#[cfg(feature = "http2")]
+mod http2;
+mod negotiation;
+#[cfg(any(feature = "tls", feature = "http3"))]
+mod pem;
+mod proxy;
 mod request;
 mod response;
 mod router;
@@ -95,7 +102,18 @@ mod util;
 #[cfg(feature = "http3")]
 pub mod http3;
 pub mod middleware;
+#[cfg(feature = "multipart")]
+pub mod multipart;
+#[cfg(feature = "session")]
+pub mod session;
+pub mod sse;
+#[cfg(feature = "templates")]
+pub mod templates;
 pub mod test;
+#[cfg(feature = "tls")]
+pub mod tls;
+#[cfg(feature = "tower")]
+pub mod tower;
 #[cfg(feature = "ws")]
 pub mod ws;
 
@@ -106,11 +124,14 @@ pub use app::{App, DEFAULT_BODY_LIMIT};
 pub use body::{Body, BoxError};
 pub use error::{Error, Result};
 pub use handler::{BoxFuture, Chained, Handler, HandlerExt, Middleware, Next};
+pub use proxy::{Network, TrustProxy};
 pub use request::Request;
 pub use response::{
     Cookie, Html, IntoResponse, IntoStatus, Json, Redirect, Response, SameSite, res,
 };
 pub use router::Router;
+#[cfg(unix)]
+pub use server::UnixServer;
 pub use server::{ListenAddr, Server};
 pub use static_files::ServeDir;
 
@@ -122,6 +143,7 @@ pub use tokio;
 /// Everything you need to write an application: `use vitesse::prelude::*;`
 pub mod prelude {
     pub use crate::middleware;
+    pub use crate::sse;
     #[cfg(feature = "ws")]
     pub use crate::ws;
     pub use crate::{

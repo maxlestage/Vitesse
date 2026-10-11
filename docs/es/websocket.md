@@ -4,7 +4,7 @@ Un WebSocket mantiene una conexión abierta en los dos sentidos, así que el ser
 
 ## Preparación
 
-El soporte de WebSocket es la feature de Cargo `ws`, **activada por defecto**: con `vitesse = { git = "https://github.com/maxlestage/Vitesse" }` no necesitas nada más. Se apoya en tokio-tungstenite, la implementación en Rust validada con la batería de pruebas Autobahn. El handshake (RFC 6455) y la entrega de la conexión TCP tras la respuesta `101 Switching Protocols` los realiza el propio motor HTTP/1.1 de Vitesse.
+El soporte de WebSocket es la feature de Cargo `ws`, **activada por defecto**: con `vitesse = { git = "https://github.com/maxlestage/Vitesse" }` no necesitas nada más. Se apoya en tokio-tungstenite, la implementación en Rust validada con la batería de pruebas Autobahn. El handshake (RFC 6455) y la entrega de la conexión TCP tras la respuesta `101 Switching Protocols` los realiza el propio motor HTTP/1.1 de Vitesse. Con la feature `http2`, WebSocket también funciona [sobre HTTP/2](#websocket-sobre-http2).
 
 Si no necesitas WebSocket, desactiva las features por defecto para compilar un poco menos:
 
@@ -53,6 +53,7 @@ Escribe una línea y el servidor responde `eco: …`.
 | Petición | Respuesta |
 |---|---|
 | Un handshake WebSocket (`GET` con `Upgrade: websocket`, `Sec-WebSocket-Version: 13` y una clave válida) | `101 Switching Protocols`, y después el handler se hace cargo de la conexión |
+| Un handshake WebSocket sobre HTTP/2 (un `CONNECT` extendido con `:protocol websocket`, feature `http2`) | `200 OK`, y después el handler se hace cargo del stream HTTP/2 (consulta [WebSocket sobre HTTP/2](#websocket-sobre-http2)) |
 | Una petición HTTP normal (un navegador que abre la URL, `curl`) | `426 Upgrade Required`: «this route only accepts WebSocket connections» |
 | Otra versión del protocolo (`Sec-WebSocket-Version` distinta de `13`) | `426 Upgrade Required` |
 | Una `Sec-WebSocket-Key` no válida | `400 Bad Request` |
@@ -134,10 +135,12 @@ app.ws("/rooms/:room", |req, mut socket| async move {
 
 > [!NOTE]
 > Los navegadores no pueden añadir cabeceras como `Authorization` a una conexión WebSocket. Lo que sí hacen es enviar las cookies del sitio con el handshake: autentica con una cookie de sesión, o con un token de corta duración en la query string (`ws://…/live?token=…`).
+>
+> Con las [sesiones](sessions.md) de Vitesse, `req.session()` funciona en el handler WebSocket: contiene la sesión tal como estaba cuando se aceptó la conexión. Los cambios que hagas ahí no se guardan, porque el middleware de sesión ya ha enviado su respuesta (el `101`): para cambiar la sesión, hazlo en una ruta normal.
 
 ## Middlewares y autenticación
 
-Los middlewares globales y los de los routers se ejecutan sobre la petición del handshake, como sobre cualquier petición: registro, autenticación, limitación de peticiones… Un middleware que responde `401` rechaza la conexión antes de que se abra, y las cabeceras que añade un middleware aparecen en la respuesta `101`.
+Los middlewares globales y los de los routers se ejecutan sobre la petición del handshake, como sobre cualquier petición: registro, autenticación, limitación de peticiones… Un middleware que responde `401` rechaza la conexión antes de que se abra, y las cabeceras que añade un middleware aparecen en la respuesta `101` (la respuesta `200` sobre HTTP/2).
 
 ```rust
 async fn require_session(req: Request, next: Next) -> Response {
@@ -347,6 +350,42 @@ async fn echoes_text_messages() {
 
 Más ejemplos en [Pruebas](testing.md#probar-websockets).
 
+## WebSocket seguro: `wss://`
+
+Una página servida por HTTPS solo puede abrir conexiones `wss://`, WebSocket sobre TLS. Cuando Vitesse sirve HTTPS por sí mismo (la feature `tls` y `app.tls(...)`, consulta [HTTPS y HTTP/2](https.md)), tus rutas `app.ws` responden a `wss://` sin ningún cambio en su código:
+
+```js
+const socket = new WebSocket(`wss://${location.host}/echo`);
+```
+
+Detrás de un proxy inverso que termina el TLS, el navegador habla `wss://` con el proxy, y el proxy reenvía `ws://` sin cifrar a Vitesse.
+
+## WebSocket sobre HTTP/2
+
+Cuando Vitesse sirve HTTPS por sí mismo con HTTP/2 (las features `tls` y `http2`, consulta [HTTPS y HTTP/2](https.md)), los navegadores no necesitan una conexión aparte para un WebSocket: Chrome y Firefox, por ejemplo, lo abren en un stream de la conexión HTTP/2 que ya tienen con el sitio (RFC 8441). Vitesse anuncia que lo admite en cuanto las features `http2` y `ws` están activadas a la vez, y no hay nada que cambiar en tu código:
+
+- las mismas rutas `app.ws` y `ws::Upgrade` aceptan estos handshakes, que se enrutan como un `GET`, así que los middlewares globales y de router se ejecutan sobre ellos como siempre;
+- el handshake recibe un `200 OK` en lugar de un `101` (sobre HTTP/2 no hay `Sec-WebSocket-Key`), y después el handler recibe el mismo `WebSocket` que sobre HTTP/1.1;
+- en el handler, `req.version()` es `HTTP/2.0`, y `HTTP/1.1` cuando el cliente eligió una conexión aparte.
+
+```rust
+app.ws("/echo", |req, mut socket| async move {
+    // "conectado por HTTP/2.0" en un navegador reciente, en un sitio HTTPS con HTTP/2
+    let _ = socket.send(format!("conectado por {:?}", req.version())).await;
+    while let Some(Ok(message)) = socket.recv().await {
+        if socket.send(message).await.is_err() {
+            break;
+        }
+    }
+});
+```
+
+En el lado del navegador tampoco cambia nada: `new WebSocket("wss://example.com/echo")` elige por sí solo HTTP/2 o HTTP/1.1. También funciona sin cifrar, con h2c «prior knowledge», para los clientes que lo admiten; los navegadores nunca usan h2c.
+
+Detrás de un proxy inverso, el navegador abre el WebSocket hacia el proxy (sobre HTTP/2 o HTTP/1.1, según lo que permita el proxy), y el proxy suele hablar HTTP/1.1 con Vitesse: la configuración de [Detrás de un proxy inverso](#detrás-de-un-proxy-inverso) no cambia.
+
+WebSocket sobre HTTP/3 (RFC 9220) no se admite: el crate h3 no lo implementa, y los navegadores no dependen de él. Cuando una página llegó por [HTTP/3](http3.md), los navegadores abren sus WebSockets sobre HTTP/2 o HTTP/1.1, en TCP, que Vitesse sirve junto a HTTP/3.
+
 ## Detrás de un proxy inverso
 
 El proxy debe dejar pasar el `Upgrade` y después mantener la conexión abierta:
@@ -371,8 +410,8 @@ Los proxies y las plataformas cierran las conexiones que pasan demasiado tiempo 
 
 ## Límites
 
-- **Solo HTTP/1.1.** WebSocket no está disponible sobre [HTTP/3](http3.md): los clientes abren sus conexiones WebSocket sobre una conexión TCP normal, aunque el resto del sitio use HTTP/3.
-- **Apagado ordenado.** Con `Ctrl+C` o `SIGTERM`, el servidor no espera a las conexiones WebSocket abiertas: se cortan en cuanto terminan las peticiones HTTP en curso, y como muy tarde al final del periodo de gracia de 10 segundos (ver [Configuración del servidor](server.md#apagado-ordenado)). Se cortan sin cierre ordenado, y los clientes ven un cierre anómalo (código `1006`). Haz que tus clientes se reconecten automáticamente, algo que necesitan de todos modos para los cortes de red.
+- **HTTP/1.1 y HTTP/2, no HTTP/3.** WebSocket funciona sobre HTTP/1.1 y, con la feature `http2`, [sobre HTTP/2](#websocket-sobre-http2), pero no sobre [HTTP/3](http3.md): los navegadores abren entonces sus WebSockets sobre TCP, aunque el resto del sitio use HTTP/3.
+- **Apagado ordenado.** Con `Ctrl+C` o `SIGTERM`, el servidor no espera a las conexiones WebSocket abiertas: se cortan en cuanto terminan las peticiones HTTP en curso, y como muy tarde al final del periodo de gracia (10 segundos por defecto, `app.shutdown_timeout`; ver [Configuración del servidor](server.md#apagado-ordenado)). Se cortan sin cierre ordenado, y los clientes ven un cierre anómalo (código `1006`). Haz que tus clientes se reconecten automáticamente, algo que necesitan de todos modos para los cortes de red.
 - **Tamaño de los mensajes.** 16 MiB por mensaje por defecto; redúcelo con `Upgrade::max_message_size` en los endpoints públicos.
 - **Hilos.** En el modo de un hilo por núcleo, una conexión se queda en el hilo que la aceptó: como en cualquier handler, no lo bloquees (ver [Rendimiento](performance.md)).
 

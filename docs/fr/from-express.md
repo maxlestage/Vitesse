@@ -22,6 +22,12 @@ Si vous connaissez Express, vous connaissez déjà l'essentiel de Vitesse : les 
 | `process.env.PORT` | `std::env::var("PORT")` |
 | `app.locals.db = db` | `app.state(db)`, lu avec `req.state::<Db>()` |
 | `app.use((req, res) => res.status(404)…)` | `app.fallback(handler)` |
+| `app.set('trust proxy', 'loopback')` | `app.trust_proxy("loopback")` (ou `true`, un nombre de sauts, des plages d'IP : voir [Derrière un proxy](requests.md#derrière-un-proxy--trust_proxy)) |
+| `app.set('views', './views')` + `app.set('view engine', 'ejs')` | `app.views("views")`, feature `templates` : minijinja, avec la syntaxe Jinja2, et des noms de gabarits qui incluent leur extension (voir [Gabarits HTML](templates.md)) |
+| `app.set('case sensitive routing', true)` | Rien à faire : Vitesse est sensible à la casse par défaut. `app.case_sensitive(false)` donne le comportement par défaut d'Express, où `/Users` correspond à `/users` |
+| `https.createServer({ key, cert }, app).listen(443)` | `app.tls(Tls::from_pem_files("fullchain.pem", "privkey.pem")?)` puis `app.run(443)`, feature `tls` (voir [HTTPS et HTTP/2](https.md)) |
+| `server.keepAliveTimeout = 5000` | `app.keep_alive(Duration::from_secs(5))` |
+| `server.headersTimeout = 10000` | `app.header_timeout(Duration::from_secs(10))` |
 
 ### Routage
 
@@ -32,9 +38,15 @@ Si vous connaissez Express, vous connaissez déjà l'essentiel de Vitesse : les 
 | `app.route('/todos').get(a).post(b)` | `app.get("/todos", a).post("/todos", b)` (les appels s'enchaînent) |
 | Toute autre méthode | `app.route(Method::from_bytes(b"PURGE").unwrap(), "/cache", handler)` |
 | `/files/*path` (Express 5) | `/files/*path`, lu avec `req.param("path")` |
+| `'/flights/:from-:to'`, `'/files/:name.:ext'` | La même chose : plusieurs paramètres dans un segment, séparés par du texte (voir [Routage](routing.md#plusieurs-paramètres-dans-un-segment)) |
+| `'/user/:id(\\d+)'` (Express 4) | `r"/user/:id(\d+)"` : la même contrainte, dans une chaîne brute pour que `\d` n'ait pas besoin d'une barre oblique inverse de plus (voir [Contraintes](routing.md#contraintes-avec-des-expressions-régulières)) |
+| `'/archive/:year?'` (Express 4), `'/archive{/:year}'` (Express 5) | `"/archive/:year?"` : des paramètres optionnels, à la fin du chemin seulement (voir [Paramètres optionnels](routing.md#paramètres-optionnels)) |
+| Pas d'équivalent intégré | `.name("user")` après une route, puis `req.path_for("user", &[&42])?` pour construire son URL (voir [Routes nommées](routing.md#routes-nommées-et-génération-durl)) |
 | `express.Router()` | `Router::new()` |
 | `app.use('/api', router)` | `app.mount("/api", router)` |
 | `router.use(mw)` | `router.middleware(mw)`, qui s'exécute aussi pour les `404` sous le préfixe du routeur |
+| Un dernier `router.use((req, res) => res.status(404)…)` | `router.fallback(handler)` (voir [Le fallback d'un routeur](routers.md#le-fallback-dun-routeur)) |
+| `method-override` | `req.set_method(...)` dans un middleware global (voir [Surcharger la méthode](requests.md#surcharger-la-méthode)) |
 | `app.ws('/echo', (ws, req) => …)` (express-ws) | `app.ws("/echo", \|req, socket\| async move { … })` : la requête vient en premier, et une boucle remplace `ws.on('message')` (voir [WebSocket](websocket.md)) |
 
 ### Requête
@@ -46,11 +58,22 @@ Si vous connaissez Express, vous connaissez déjà l'essentiel de Vitesse : les 
 | `express.json()` + `req.body` | `req.json::<T>().await?` |
 | `express.urlencoded()` + `req.body` | `req.form::<T>().await?` |
 | `express.text()` / `express.raw()` | `req.text().await?` / `req.bytes().await?` |
+| `express.json({ limit: '10mb' })` | `handler.with(middleware::body_limit(10 * 1024 * 1024))` pour une route, `app.body_limit(...)` pour toute l'application |
+| `multer` + `req.file` / `req.files` | `req.multipart()?`, puis `form.next_field().await?`, feature `multipart` (voir [Envois de fichiers](requests.md#envois-de-fichiers-multipart)) |
 | `req.get('host')` | `req.header("host")` |
 | `req.cookies.session` (cookie-parser) | `req.cookie("session")`, intégré |
-| `req.ip` / `req.hostname` | `req.ip()` / `req.hostname()` |
+| `req.signedCookies.theme` (cookie-parser avec un secret) | `req.signed_cookie("theme")`, une `Option<String>`, feature `session` (voir [Cookies signés](sessions.md#cookies-signés)) |
+| `req.session.userId` (express-session) | `req.session().get::<u64>("user_id")`, une `Option` |
+| `req.session.userId = id` | `req.session().insert("user_id", id)?` |
+| `req.session.regenerate(cb)` / `req.session.destroy(cb)` | `req.session().regenerate()` / `req.session().destroy()`, sans callback |
+| `req.ip` | `req.ip()`, qui suit `app.trust_proxy` comme Express |
+| `req.host` / `req.hostname` | `req.host()` / `req.hostname()` |
+| `req.protocol` / `req.secure` | `req.protocol()` / `req.secure()` |
 | `req.method` / `req.path` / `req.originalUrl` | `req.method()` / `req.path()` / `req.uri()` |
+| `req.route.path` | `req.route()` |
 | `req.is('json')` | `req.is("json")` |
+| `req.accepts(['html', 'json'])` | `req.accepts(&["html", "json"])`, une `Option` (`None` : répondre `406`) |
+| `req.acceptsLanguages('en', 'fr')` | `req.accepts_language(&["en", "fr"])` |
 | `res.locals.user = user` | `req.set(user)`, lu avec `req.get::<User>()` |
 
 ### Réponse
@@ -66,10 +89,14 @@ Si vous connaissez Express, vous connaissez déjà l'essentiel de Vitesse : les 
 | `res.set('X-Foo', 'bar')` | `Response::new().header("x-foo", "bar")` |
 | `res.type('text/csv')` | `.content_type("text/csv")` |
 | `res.cookie('theme', 'dark', { httpOnly: true })` | `.cookie(Cookie::new("theme", "dark").http_only(true))` |
+| `res.cookie('theme', 'dark', { signed: true })` | `.cookie(req.sign_cookie(Cookie::new("theme", "dark")))`, feature `session` |
+| `res.render('users', { users })` | Renvoyer `req.render("users.html", json!({ "users": users }))`, feature `templates` (voir [Gabarits HTML](templates.md)) |
 | `res.clearCookie('theme')` | `.clear_cookie("theme")` |
 | `res.attachment('rapport.csv')` | `.attachment("rapport.csv")` |
 | `res.sendFile(path)` | `res::file(path).await` |
 | `res.download(path, 'rapport.pdf')` | `res::download(path, "rapport.pdf").await` |
+| `res.write('data: …\n\n')` sur une réponse `text/event-stream` (SSE) | `let (tx, stream) = sse::channel(16);`, renvoyer `stream`, puis `tx.send(Event::new().data("…")).await` depuis une tâche (voir [Server-Sent Events](responses.md#server-sent-events)) |
+| `req.on('close', …)` pendant un flux SSE | `tx.send(…)` renvoie une erreur, ou `tx.closed().await` |
 
 ### Middlewares et erreurs
 
@@ -85,6 +112,13 @@ Si vous connaissez Express, vous connaissez déjà l'essentiel de Vitesse : les 
 | `cors()` | `middleware::cors()` |
 | `helmet()` | `middleware::helmet()` |
 | `connect-timeout` | `middleware::timeout(durée)` |
+| `compression()` | `middleware::compress()`, feature `compress` |
+| `express-rate-limit` | `middleware::rate_limit(100, Duration::from_secs(15 * 60))` |
+| `express-basic-auth` | `middleware::basic_auth(("admin", "secret"))` |
+| `express-request-id` | `middleware::request_id()` |
+| `cookieParser()` | Rien : `req.cookie(nom)` est intégré |
+| `cookieParser(secret)` | `app.cookie_secret(secret)`, feature `session`, pour `req.sign_cookie` et `req.signed_cookie` |
+| `session({ secret, resave: false, saveUninitialized: false })` (express-session) | `app.middleware(middleware::session(MemoryStore::new()))`, feature `session` ; ces deux options sont son comportement par défaut (voir [Cookies signés et sessions](sessions.md)) |
 | `express.static('public')` | `app.middleware(ServeDir::new("public"))` |
 | `app.use('/static', express.static('public'))` | `app.static_dir("/static", "public")` |
 
@@ -358,6 +392,83 @@ app.on_error(|err: Error| {
 
 `Error` porte un statut HTTP et un message destiné au client. Toute autre erreur (base de données, entrées-sorties, parsing…) se convertit automatiquement avec `?` en une `500` dont le détail est seulement journalisé, jamais envoyé au client. `app.on_error` s'applique à toutes les réponses d'erreur, quel que soit l'endroit où il est enregistré : vos erreurs, les 404, les 405, les corps invalides et les paniques. Voir [Erreurs](errors.md).
 
+## Pages et sessions, côte à côte
+
+Un formulaire de connexion rendu avec un gabarit, et une session qui se souvient de l'utilisateur :
+
+```js
+const session = require('express-session');
+
+app.set('views', './views');
+app.set('view engine', 'ejs');
+app.use(express.urlencoded({ extended: false }));
+app.use(session({ secret: process.env.SESSION_SECRET, resave: false, saveUninitialized: false }));
+
+app.post('/login', async (req, res, next) => {
+  const userId = await checkPassword(req.body.email, req.body.password);
+  if (!userId) return res.status(401).render('login', { error: 'E-mail ou mot de passe incorrect' });
+  req.session.regenerate((err) => {
+    if (err) return next(err);
+    req.session.userId = userId;
+    res.redirect(303, '/account');
+  });
+});
+
+app.get('/account', (req, res) => {
+  if (!req.session.userId) return res.redirect('/login');
+  res.render('account', { userId: req.session.userId });
+});
+```
+
+```rust
+use serde::Deserialize;
+use vitesse::prelude::*;
+use vitesse::session::MemoryStore;
+
+#[derive(Deserialize)]
+struct Login {
+    email: String,
+    password: String,
+}
+
+async fn login(req: Request) -> vitesse::Result<Response> {
+    let form: Login = req.form().await?;
+    let Some(user_id) = check_password(&form.email, &form.password).await else {
+        let page = req.render("login.html", json!({ "error": "E-mail ou mot de passe incorrect" }))?;
+        return Ok((401, page).into_response());
+    };
+    let session = req.session();
+    session.regenerate();
+    session.insert("user_id", user_id)?;
+    Ok(Redirect::see_other("/account").into_response())
+}
+
+async fn account(req: Request) -> vitesse::Result<Response> {
+    let Some(user_id) = req.session().get::<u64>("user_id") else {
+        return Ok(Redirect::to("/login").into_response());
+    };
+    Ok(req.render("account.html", json!({ "user_id": user_id }))?.into_response())
+}
+
+fn app() -> App {
+    let mut app = App::new();
+    app.views("views");
+    app.cookie_secret(std::env::var("SESSION_SECRET").expect("SESSION_SECRET n'est pas défini"));
+    app.middleware(middleware::session(MemoryStore::new()));
+    app.post("/login", login);
+    app.get("/account", account);
+    app
+}
+```
+
+Ce qui a changé :
+
+- **Les gabarits sont en Jinja2**, pas en EJS ni en Pug, et leurs noms incluent l'extension (`login.html`) : il n'y a pas de réglage `view engine`. `req.render` renvoie la page, que le handler renvoie à son tour.
+- **Pas de callbacks.** `regenerate()` et `insert()` modifient la session sur place ; le middleware l'enregistre une fois que le handler a rendu la main.
+- **`resave: false` et `saveUninitialized: false` sont le comportement normal** : une session n'est enregistrée, et son cookie envoyé, que lorsqu'un handler la modifie.
+- **Le secret est facultatif.** L'identifiant de session est déjà aléatoire ; avec `app.cookie_secret`, son cookie est en plus signé, comme le fait express-session.
+- **`MemoryStore` est fait pour le développement**, comme avec Express : en production, utilisez un stockage qui survit aux redémarrages (voir [Stockages](sessions.md#stockages)).
+
 ## Tests, côte à côte
 
 ```js
@@ -425,13 +536,14 @@ Les requêtes sont traitées en parallèle sur plusieurs threads : pas de variab
 ## Les pièges
 
 - **Les middlewares globaux s'exécutent avant le routage, pour chaque requête.** Que `app.middleware(...)` soit appelé avant ou après vos routes ne change rien : tous les middlewares globaux s'exécutent, dans l'ordre d'ajout, avant le routage, 404 comprises. Pour ne cibler que certaines routes, utilisez un [routeur](routers.md) (dont les middlewares couvrent tout le préfixe, comme `router.use`) ou `handler.with(mw)`.
-- **Les routes sont sensibles à la casse.** `/Users` ne correspond pas à `/users` (Express ignore la casse par défaut). Une barre oblique finale est ignorée : `/users/` correspond à `/users`, comme en Express.
+- **Les routes sont sensibles à la casse.** `/Users` ne correspond pas à `/users`, alors qu'Express ignore la casse par défaut : appelez `app.case_sensitive(false)` pour retrouver le comportement d'Express. Une barre oblique finale est ignorée : `/users/` correspond à `/users`, comme en Express.
 - **Une mauvaise méthode répond `405`, pas `404`,** avec un en-tête `Allow`. `HEAD` utilise la route `GET` et `OPTIONS` répond `204` automatiquement.
 - **Un seul handler par méthode et par chemin.** Définir deux fois la même route fait paniquer au démarrage ; l'habitude d'Express d'enchaîner plusieurs handlers sur une même route avec `next()` devient un middleware.
 - **`req.json()` ne vérifie pas le `Content-Type`.** `express.json()` ignore les corps qui ne sont pas du JSON ; Vitesse analyse ce qu'il reçoit. Pour exiger l'en-tête, vérifiez `req.is("json")` et renvoyez une `415`.
 - **Les query strings sont plates.** `?user[name]=ada` ne devient pas un objet imbriqué. Pour une clé répétée comme `?tag=a&tag=b`, parcourez `req.query_pairs()`.
-- **Pas de paramètres facultatifs ni d'expressions régulières,** ni de paramètres partiels dans un segment (`/:id?`, `/:id(\d+)`, `/vols/:de-:vers`) : déclarez des routes distinctes, ou analysez le segment vous-même.
+- **Les motifs de route suivent Express 4.** `/:id(\d+)`, `/:id?` et `/flights/:from-:to` fonctionnent comme dans Express 4, alors qu'Express 5 a abandonné les deux premiers au profit des accolades (`{/:id}`), que Vitesse ne lit pas. Écrivez les motifs qui contiennent une barre oblique inverse sous forme de chaînes brutes (`r"/users/:id(\d+)"`). Une contrainte doit correspondre à la valeur entière et ne peut pas contenir de `/`, et seuls les derniers paramètres peuvent être optionnels.
 - **Les erreurs sont en JSON par défaut** (`{"error": "..."}`), et les détails internes n'atteignent jamais le client, même en développement. Utilisez `app.on_error` pour un autre format.
+- **Derrière un proxy, déclarez-le.** Comme avec Express sans `trust proxy`, `req.ip()` et `req.protocol()` décrivent le proxy tant que vous n'appelez pas `app.trust_proxy(...)`.
 - **`req.set(valeur)` exige `Clone`.** Ajoutez `#[derive(Clone)]` aux types que vous attachez à une requête.
 - **Le corps est lu à la demande, et une seule fois depuis le réseau.** Le résultat est mis en cache : appeler `req.text()` puis `req.bytes()` fonctionne.
 - **Recharger à chaque modification.** `cargo run` recompile ce qui a changé ; pour une boucle à la `nodemon`, utilisez un outil comme [cargo-watch](https://crates.io/crates/cargo-watch) (`cargo watch -x run`). Compilez avec `cargo build --release` pour la production.

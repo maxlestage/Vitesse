@@ -210,6 +210,9 @@ struct Inner {
     remote: Option<SocketAddr>,
     /// Received over TLS (HTTPS, HTTP/3).
     secure: bool,
+    /// Maximum size of the body read into memory (`app.body_limit` unless a
+    /// middleware changed it).
+    body_limit: usize,
     /// The request carries `Range`, `If-Range`, `If-None-Match` or
     /// `If-Modified-Since` (spotted while parsing, at no extra cost).
     conditional: bool,
@@ -239,6 +242,7 @@ impl Inner {
             route: None,
             remote: None,
             secure: false,
+            body_limit: shared.body_limit,
             conditional: false,
             shared,
         }
@@ -250,6 +254,7 @@ impl Inner {
         match pool::take() {
             Some(mut inner) => {
                 inner.shared = shared;
+                inner.body_limit = shared.body_limit;
                 inner
             }
             None => Box::new(Inner::new(shared)),
@@ -588,6 +593,43 @@ impl Request {
         self.header(header::CONTENT_TYPE)
     }
 
+    /// The preferred type among `types`, according to the `Accept` header
+    /// (`req.accepts()` in Express): the highest quality wins, then the most
+    /// specific match. Types can be extensions (`"json"`, `"html"`) or MIME
+    /// types (`"application/json"`, `"image/*"`). Without `Accept`, the
+    /// first type; `None` if none is acceptable (answer `406`).
+    ///
+    /// ```
+    /// use vitesse::prelude::*;
+    ///
+    /// async fn show(req: Request) -> Response {
+    ///     match req.accepts(&["html", "json"]) {
+    ///         Some("html") => res::html("<h1>Ada</h1>"),
+    ///         Some(_) => res::json(json!({ "name": "Ada" })),
+    ///         None => res::send_status(406),
+    ///     }
+    /// }
+    /// ```
+    pub fn accepts<'a>(&self, types: &[&'a str]) -> Option<&'a str> {
+        crate::negotiation::accepts(self.header_all("accept"), types)
+    }
+
+    /// The preferred language among `languages`, according to the
+    /// `Accept-Language` header (`req.acceptsLanguages()` in Express): `"fr"`
+    /// matches `fr-FR`, and the other way round. Without the header, the
+    /// first language.
+    ///
+    /// ```
+    /// # use vitesse::prelude::*;
+    /// async fn home(req: Request) -> Redirect {
+    ///     let lang = req.accepts_language(&["en", "fr", "es"]).unwrap_or("en");
+    ///     Redirect::to(format!("/{lang}/"))
+    /// }
+    /// ```
+    pub fn accepts_language<'a>(&self, languages: &[&'a str]) -> Option<&'a str> {
+        crate::negotiation::accepts_language(self.header_all("accept-language"), languages)
+    }
+
     /// Checks the type of the body (`req.is('json')`): accepts a full type
     /// (`application/json`), a subtype (`json`) or a wildcard (`text/*`).
     pub fn is(&self, ty: &str) -> bool {
@@ -882,11 +924,27 @@ impl Request {
             .unwrap_or_else(PoisonError::into_inner)
     }
 
-    /// Reads the whole body (limited by `app.body_limit`, `413` beyond that).
+    /// The maximum size of the body read into memory: [`App::body_limit`](crate::App::body_limit),
+    /// unless a middleware such as [`middleware::body_limit`](crate::middleware::body_limit)
+    /// changed it for this request.
+    #[inline]
+    pub fn body_limit(&self) -> usize {
+        self.inner.body_limit
+    }
+
+    /// Changes the maximum size of the body read into memory, for this
+    /// request only (a route that receives large uploads, for example).
+    #[inline]
+    pub fn set_body_limit(&mut self, bytes: usize) {
+        self.inner.body_limit = bytes;
+    }
+
+    /// Reads the whole body (limited by [`Request::body_limit`], `413`
+    /// beyond that).
     ///
     /// The result is cached, so this can be called several times.
     pub async fn bytes(&self) -> Result<Bytes, Error> {
-        let limit = self.inner.shared.body_limit;
+        let limit = self.inner.body_limit;
         let body = {
             let mut guard = self.lock_body();
             match &*guard {
@@ -931,6 +989,14 @@ impl Request {
         let bytes = self.bytes().await?;
         serde_urlencoded::from_bytes(&bytes)
             .map_err(|e| Error::bad_request(format!("invalid form data: {e}")))
+    }
+
+    /// Reads a `multipart/form-data` body (file uploads) field by field, as
+    /// it arrives; `415` if the body is not multipart. Needs the `multipart`
+    /// feature: see [`multipart`](crate::multipart).
+    #[cfg(feature = "multipart")]
+    pub fn multipart(&self) -> Result<crate::multipart::Multipart, Error> {
+        crate::multipart::Multipart::from_request(self)
     }
 
     /// Takes the raw body as a stream, without reading it (uploads,

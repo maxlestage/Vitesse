@@ -56,6 +56,43 @@ pub fn timeout(duration: Duration) -> impl Middleware {
     }
 }
 
+/// Changes the maximum size of the request body read into memory for the
+/// routes it covers (`express.json({ limit })`, axum's `DefaultBodyLimit`,
+/// actix-web's `PayloadConfig`): use it on a route with
+/// [`.with()`](crate::HandlerExt::with) or on a [`Router`](crate::Router).
+/// Beyond the limit, reading the body fails with `413 Payload Too Large`.
+///
+/// ```
+/// use vitesse::prelude::*;
+///
+/// async fn upload(req: Request) -> vitesse::Result<String> {
+///     let bytes = req.bytes().await?;
+///     Ok(format!("{} bytes", bytes.len()))
+/// }
+///
+/// let mut app = App::new(); // 1 MiB by default
+/// app.post("/upload", upload.with(middleware::body_limit(50 * 1024 * 1024)));
+/// ```
+///
+/// Over HTTP/3, request bodies are read before routing, within
+/// [`App::body_limit`](crate::App::body_limit): raise that one if HTTP/3
+/// clients upload large files.
+pub fn body_limit(bytes: usize) -> BodyLimit {
+    BodyLimit(bytes)
+}
+
+/// The middleware returned by [`body_limit`].
+#[derive(Debug, Clone, Copy)]
+pub struct BodyLimit(usize);
+
+impl Middleware for BodyLimit {
+    #[inline]
+    fn handle(&'static self, mut req: Request, next: Next) -> BoxFuture<Response> {
+        req.set_body_limit(self.0);
+        next.run(req)
+    }
+}
+
 /// Serves the files of a directory, letting requests for files that don't
 /// exist fall through to the routes (`app.use(express.static('public'))`).
 pub fn serve_static(dir: impl Into<PathBuf>) -> ServeDir {

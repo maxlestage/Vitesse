@@ -137,3 +137,31 @@ async fn limits_and_errors() {
         .await;
     assert_eq!(r.status(), 400);
 }
+
+#[tokio::test]
+async fn a_failed_save_leaves_no_partial_file() {
+    let dir = std::env::temp_dir().join(format!("vitesse-partial-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("upload.bin");
+    let mut app = App::new();
+    app.body_limit(10_000);
+    app.state(path.clone());
+    app.post("/save", |req: Request| async move {
+        let path = req.state::<std::path::PathBuf>();
+        let mut form = req.multipart()?;
+        let field = form
+            .next_field()
+            .await?
+            .ok_or(Error::bad_request("no file"))?;
+        field.save(path).await.map(|size| size.to_string())
+    });
+    let body = form(&[("file", Some("big.bin"), &[1u8; 50_000])]);
+    let r = TestClient::new(app)
+        .post("/save")
+        .header("content-type", &content_type())
+        .body(body)
+        .await;
+    assert_eq!(r.status(), 413);
+    assert!(!path.exists());
+    std::fs::remove_dir_all(&dir).unwrap();
+}

@@ -296,7 +296,7 @@ data: 1 s
 
 - `buffer` is the number of events that can wait while the connection is slow; when it's full, `send` waits.
 - The response ends when every `Sender` is dropped: here, when the task ends. `Sender` is `Clone`, so several tasks can feed the same response.
-- `tx.try_send(event)` sends without waiting (and fails if the buffer is full), and `tx.is_closed()` tells you whether the browser is still there.
+- `tx.try_send(event)` sends without waiting. It fails with `sse::TrySendError::Full` when the buffer is full (a slow connection: skip the event, or send it later) and with `TrySendError::Closed` once the browser has gone away; both hand the event back. `tx.is_closed()` tells you whether the browser is still there.
 
 ### From a stream
 

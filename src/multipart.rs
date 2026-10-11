@@ -141,15 +141,26 @@ impl Field {
     }
 
     /// Writes the content to a file, chunk by chunk, and returns its size.
-    /// The file is created, or truncated if it exists.
+    /// The file is created, or truncated if it exists; if the upload fails
+    /// halfway (`413`, client gone), the partial file is removed.
     pub async fn save(mut self, path: impl AsRef<Path>) -> Result<u64, Error> {
+        let path = path.as_ref();
         let mut file = tokio::fs::File::create(path).await?;
         let mut size = 0;
-        while let Some(chunk) = self.chunk().await? {
-            file.write_all(&chunk).await?;
-            size += chunk.len() as u64;
+        let written: Result<(), Error> = async {
+            while let Some(chunk) = self.chunk().await? {
+                file.write_all(&chunk).await?;
+                size += chunk.len() as u64;
+            }
+            file.flush().await?;
+            Ok(())
         }
-        file.flush().await?;
+        .await;
+        if let Err(e) = written {
+            drop(file);
+            let _ = tokio::fs::remove_file(path).await;
+            return Err(e);
+        }
         Ok(size)
     }
 }

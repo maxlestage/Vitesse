@@ -523,7 +523,7 @@ while let Some(mut field) = form.next_field().await? {
 - The whole body is limited by the [body limit](#body-size-limit-and-413), 1 MiB by default: raise it on the upload routes with `middleware::body_limit`, as above. Beyond it, reading fails with a `413`.
 - A body that isn't `multipart/form-data` gets a `415 Unsupported Media Type`, and a malformed form a `400`.
 - `req.multipart()` takes the body: the other body methods can't read it afterwards.
-- If the upload fails halfway (`413`, client gone), `save` leaves the partial file on disk: delete it if needed.
+- If the upload fails halfway (`413`, client gone), `save` removes the partial file and returns the error.
 - The repository's `examples/live.rs` has a complete upload page (`cargo run --example live --features multipart`).
 
 > [!WARNING]

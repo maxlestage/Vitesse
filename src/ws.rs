@@ -49,7 +49,7 @@ use tokio_tungstenite::tungstenite::protocol::{Role, WebSocketConfig};
 use crate::handler::BoxFuture;
 use crate::request::Request;
 use crate::response::Response;
-use crate::upgrade::{BoxIo, UpgradeHandle, Upgraded};
+use crate::upgrade::{BoxIo, ExtendedConnect, UpgradeHandle, Upgraded};
 
 /// Default maximum size of a message (and of a frame): 16 MiB.
 pub const DEFAULT_MAX_MESSAGE_SIZE: usize = 16 * 1024 * 1024;
@@ -366,7 +366,8 @@ impl Stream for WebSocketReceiver {
 /// });
 /// ```
 pub struct Upgrade {
-    accept: HeaderValue,
+    /// `Sec-WebSocket-Accept`, absent over HTTP/2.
+    accept: Option<HeaderValue>,
     offered: Vec<String>,
     protocol: Option<String>,
     config: WebSocketConfig,
@@ -389,19 +390,24 @@ fn has_token(req: &Request, name: &str, token: &str) -> bool {
 
 impl Upgrade {
     /// Checks that `req` is a WebSocket handshake (`GET` with
-    /// `Upgrade: websocket`, `Sec-WebSocket-Version: 13` and a valid key).
+    /// `Upgrade: websocket`, `Sec-WebSocket-Version: 13` and a valid key),
+    /// or its HTTP/2 form (an extended `CONNECT`, RFC 8441, which browsers
+    /// use on an HTTPS connection in HTTP/2).
     ///
     /// Otherwise the error is `426 Upgrade Required` (a plain HTTP request,
     /// or another version of the protocol), `400` (invalid key) or `405`
     /// (not a `GET`).
     pub fn new(req: &Request) -> Result<Upgrade, crate::Error> {
+        let http2 = req.get::<ExtendedConnect>().is_some();
         if *req.method() != Method::GET {
             return Err(crate::Error::new(
                 StatusCode::METHOD_NOT_ALLOWED,
                 "a WebSocket handshake must use GET",
             ));
         }
-        if !has_token(req, "upgrade", "websocket") || !has_token(req, "connection", "upgrade") {
+        if !http2
+            && (!has_token(req, "upgrade", "websocket") || !has_token(req, "connection", "upgrade"))
+        {
             return Err(crate::Error::new(
                 StatusCode::UPGRADE_REQUIRED,
                 "this route only accepts WebSocket connections",
@@ -414,13 +420,20 @@ impl Upgrade {
             ));
         }
         // La clé : 16 octets aléatoires encodés en base64 (24 caractères).
-        let key = req
-            .header("sec-websocket-key")
-            .map(str::trim)
-            .filter(|k| k.len() == 24 && k.ends_with("=="))
-            .ok_or_else(|| crate::Error::bad_request("invalid Sec-WebSocket-Key"))?;
-        let accept = HeaderValue::from_str(&derive_accept_key(key.as_bytes()))
-            .map_err(|_| crate::Error::bad_request("invalid Sec-WebSocket-Key"))?;
+        // HTTP/2 n'en a pas : le flux appartient déjà à cette requête.
+        let accept = if http2 {
+            None
+        } else {
+            let key = req
+                .header("sec-websocket-key")
+                .map(str::trim)
+                .filter(|k| k.len() == 24 && k.ends_with("=="))
+                .ok_or_else(|| crate::Error::bad_request("invalid Sec-WebSocket-Key"))?;
+            Some(
+                HeaderValue::from_str(&derive_accept_key(key.as_bytes()))
+                    .map_err(|_| crate::Error::bad_request("invalid Sec-WebSocket-Key"))?,
+            )
+        };
         let offered = req
             .header_all("sec-websocket-protocol")
             .flat_map(|v| v.split(','))
@@ -484,11 +497,13 @@ impl Upgrade {
             config,
             ..
         } = self;
-        let mut res = Response::new()
-            .status(StatusCode::SWITCHING_PROTOCOLS)
-            .header(header::UPGRADE, HeaderValue::from_static("websocket"))
-            .header(header::CONNECTION, HeaderValue::from_static("upgrade"))
-            .header(header::SEC_WEBSOCKET_ACCEPT, accept);
+        let mut res = Response::new().status(StatusCode::SWITCHING_PROTOCOLS);
+        if let Some(accept) = accept {
+            res = res
+                .header(header::UPGRADE, HeaderValue::from_static("websocket"))
+                .header(header::CONNECTION, HeaderValue::from_static("upgrade"))
+                .header(header::SEC_WEBSOCKET_ACCEPT, accept);
+        }
         if let Some(value) = protocol
             .as_deref()
             .and_then(|p| HeaderValue::from_str(p).ok())

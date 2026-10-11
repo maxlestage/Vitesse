@@ -30,6 +30,7 @@ use crate::app::AppService;
 use crate::body::Body;
 use crate::http1::{Busy, ServerState};
 use crate::request::{ReqBody, Request};
+use crate::response::Response;
 use crate::server::ResponseFuture;
 use crate::upgrade::Io;
 use crate::util::http_date;
@@ -59,6 +60,10 @@ pub(crate) async fn serve<IO: Io>(
         .initial_window_size(STREAM_WINDOW)
         .initial_connection_window_size(CONNECTION_WINDOW)
         .max_header_list_size(MAX_HEADER_LIST);
+    // WebSocket sur HTTP/2 (RFC 8441) : les navigateurs l'utilisent quand le
+    // serveur l'annonce.
+    #[cfg(feature = "ws")]
+    builder.enable_connect_protocol();
     let handshake = builder.handshake::<_, Bytes>(io);
     let Ok(Ok(mut conn)) = tokio::time::timeout(HANDSHAKE_TIMEOUT, handshake).await else {
         return;
@@ -110,13 +115,13 @@ pub(crate) async fn serve<IO: Io>(
 /// Answers one request (one stream).
 async fn respond_to(
     req: http::Request<RecvStream>,
-    mut respond: SendResponse<Bytes>,
+    respond: SendResponse<Bytes>,
     peer: Option<SocketAddr>,
     secure: bool,
     app: &'static AppService,
     state: &'static ServerState,
 ) {
-    let _busy = Busy::new(state);
+    let busy = Busy::new(state);
     let (mut parts, body) = req.into_parts();
     // En HTTP/2, l'hôte est dans `:authority` : on le remet dans `Host` pour
     // que `req.header("host")` fonctionne comme en HTTP/1.1.
@@ -130,22 +135,52 @@ async fn respond_to(
         parts.headers.insert(header::HOST, host);
     }
     let is_head = parts.method == Method::HEAD;
-    let body = if body.is_end_stream() {
-        ReqBody::Empty
-    } else {
-        let length = parts
-            .headers
-            .get(header::CONTENT_LENGTH)
-            .and_then(|v| v.to_str().ok())
-            .and_then(|v| v.parse().ok());
-        ReqBody::Stream(Body::wrap(IncomingBody {
-            stream: body,
-            remaining: length,
-        }))
+    // Une poignée de main WebSocket (CONNECT étendu, `:protocol websocket`)
+    // devient un `GET` pour le routage ; le flux servira ensuite au WebSocket.
+    #[cfg_attr(not(feature = "ws"), allow(unused_mut))]
+    let mut tunnel = None;
+    #[cfg_attr(not(feature = "ws"), allow(unused_mut))]
+    let mut body = Some(body);
+    #[cfg(feature = "ws")]
+    if parts.method == Method::CONNECT
+        && parts
+            .extensions
+            .get::<h2::ext::Protocol>()
+            .is_some_and(|p| p.as_str().eq_ignore_ascii_case("websocket"))
+    {
+        parts.method = Method::GET;
+        parts.extensions.insert(crate::upgrade::ExtendedConnect);
+        tunnel = body.take();
+    }
+    let body = match body {
+        Some(body) if !body.is_end_stream() => {
+            let length = parts
+                .headers
+                .get(header::CONTENT_LENGTH)
+                .and_then(|v| v.to_str().ok())
+                .and_then(|v| v.parse().ok());
+            ReqBody::Stream(Body::wrap(IncomingBody {
+                stream: body,
+                remaining: length,
+            }))
+        }
+        _ => ReqBody::Empty,
     };
     let req = Request::from_parts(parts, body, peer, secure, &app.shared);
     let res = ResponseFuture::new(app, req).await;
+    respond_with(res, respond, is_head, app, busy, tunnel).await;
+}
 
+/// Sends the response of a stream (or, for an accepted WebSocket
+/// handshake, opens the WebSocket on it).
+async fn respond_with(
+    res: Response,
+    mut respond: SendResponse<Bytes>,
+    is_head: bool,
+    #[cfg_attr(not(feature = "http3"), allow(unused_variables))] app: &'static AppService,
+    busy: Busy,
+    tunnel: Option<RecvStream>,
+) {
     let (mut head, body) = res.into_http().into_parts();
     // En-têtes propres à une connexion HTTP/1.1, interdits en HTTP/2.
     for name in [
@@ -158,9 +193,39 @@ async fn respond_to(
         head.headers.remove(name);
     }
     if head.status == StatusCode::SWITCHING_PROTOCOLS {
-        // Pas de changement de protocole en HTTP/2 (WebSocket passe par HTTP/1.1).
-        head.status = StatusCode::HTTP_VERSION_NOT_SUPPORTED;
+        let upgrade = head
+            .extensions
+            .get::<crate::upgrade::UpgradeHandle>()
+            .and_then(crate::upgrade::UpgradeHandle::take);
+        match (upgrade, tunnel) {
+            // Poignée de main WebSocket acceptée : `200`, puis le WebSocket
+            // sur ce flux.
+            (Some(on_upgrade), Some(recv)) => {
+                head.status = StatusCode::OK;
+                head.headers.remove(header::SEC_WEBSOCKET_ACCEPT);
+                let Ok(send) = respond.send_response(http::Response::from_parts(head, ()), false)
+                else {
+                    return;
+                };
+                // Le WebSocket ne retarde pas l'arrêt propre, comme en HTTP/1.1.
+                drop(busy);
+                let io = H2Io {
+                    send,
+                    recv,
+                    pending: Bytes::new(),
+                };
+                on_upgrade(crate::upgrade::Upgraded {
+                    io: Box::new(io),
+                    read: Vec::new(),
+                })
+                .await;
+                return;
+            }
+            // Pas d'autre changement de protocole en HTTP/2.
+            _ => head.status = StatusCode::HTTP_VERSION_NOT_SUPPORTED,
+        }
     }
+    drop(busy);
     if let Ok(date) = HeaderValue::from_str(&http_date(SystemTime::now())) {
         head.headers.insert(header::DATE, date);
     }
@@ -258,6 +323,86 @@ impl http_body::Body for IncomingBody {
             Some(n) => SizeHint::with_exact(n),
             None => SizeHint::default(),
         }
+    }
+}
+
+/// A WebSocket over an HTTP/2 stream (RFC 8441): the DATA frames carry the
+/// WebSocket frames in both directions.
+struct H2Io {
+    send: SendStream<Bytes>,
+    recv: RecvStream,
+    /// Received bytes not read yet.
+    pending: Bytes,
+}
+
+impl AsyncRead for H2Io {
+    fn poll_read(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &mut ReadBuf<'_>,
+    ) -> Poll<io::Result<()>> {
+        let this = &mut *self;
+        if this.pending.is_empty() {
+            match std::task::ready!(this.recv.poll_data(cx)) {
+                Some(Ok(data)) => {
+                    let _ = this.recv.flow_control().release_capacity(data.len());
+                    this.pending = data;
+                }
+                Some(Err(e)) => return Poll::Ready(Err(h2_to_io(e))),
+                // Fin du flux : fin de lecture.
+                None => return Poll::Ready(Ok(())),
+            }
+        }
+        let n = this.pending.len().min(buf.remaining());
+        buf.put_slice(&this.pending[..n]);
+        this.pending.advance(n);
+        Poll::Ready(Ok(()))
+    }
+}
+
+impl AsyncWrite for H2Io {
+    fn poll_write(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &[u8],
+    ) -> Poll<io::Result<usize>> {
+        if buf.is_empty() {
+            return Poll::Ready(Ok(0));
+        }
+        let send = &mut self.send;
+        loop {
+            let capacity = send.capacity();
+            if capacity > 0 {
+                let n = capacity.min(buf.len());
+                send.send_data(Bytes::copy_from_slice(&buf[..n]), false)
+                    .map_err(h2_to_io)?;
+                return Poll::Ready(Ok(n));
+            }
+            send.reserve_capacity(buf.len());
+            match std::task::ready!(send.poll_capacity(cx)) {
+                Some(Ok(_)) => continue,
+                Some(Err(e)) => return Poll::Ready(Err(h2_to_io(e))),
+                None => return Poll::Ready(Err(io::ErrorKind::BrokenPipe.into())),
+            }
+        }
+    }
+
+    fn poll_flush(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        // La connexion HTTP/2 envoie les trames d'elle-même.
+        Poll::Ready(Ok(()))
+    }
+
+    fn poll_shutdown(mut self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        let _ = self.send.send_data(Bytes::new(), true);
+        Poll::Ready(Ok(()))
+    }
+}
+
+fn h2_to_io(e: h2::Error) -> io::Error {
+    if e.is_io() {
+        e.into_io().unwrap_or_else(|| io::ErrorKind::Other.into())
+    } else {
+        io::Error::other(e)
     }
 }
 

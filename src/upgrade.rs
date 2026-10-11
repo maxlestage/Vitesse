@@ -28,6 +28,12 @@ pub(crate) struct Upgraded {
 
 pub(crate) type OnUpgrade = Box<dyn FnOnce(Upgraded) -> BoxFuture<()> + Send>;
 
+/// Put in the extensions of a WebSocket handshake made over HTTP/2 (an
+/// "extended CONNECT", RFC 8441), turned into a `GET` for routing: the
+/// handshake has no `Sec-WebSocket-Key`, and is accepted with a `200`.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct ExtendedConnect;
+
 /// Put in the extensions of a `101` response: what to do with the
 /// connection afterwards.
 #[derive(Clone)]

@@ -175,6 +175,11 @@ async fn every_page_ends_with_the_signature_footer() {
             footer.contains("cargo add vitesse --git https://github.com/maxlestage/Vitesse"),
             "{lang}"
         );
+        // Sur un téléphone, la commande se coupe après les barres obliques de son URL.
+        assert!(
+            footer.contains("https://github.com/<wbr/>maxlestage/<wbr/>Vitesse</code>"),
+            "{lang}"
+        );
         assert!(footer.contains(&format!("v{}", vitesse::VERSION)), "{lang}");
         // Les sept projets de l'écosystème, celui-ci marqué comme la page courante.
         for project in [

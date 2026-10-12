@@ -19,6 +19,8 @@ First public release.
   projects of the ecosystem.
 - Credits: Solidify joins the projects linked by the README, the license and
   the website's footer.
+- Website: every card of a shared link gives the size and description of its
+  image, so that it shows large from the first share.
 - `app.bind("…:0")` with HTTP/3 picks another port when the UDP port of the
   TCP port the system chose is taken or reserved (Windows reserves port ranges
   per protocol), instead of failing now and then.

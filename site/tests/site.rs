@@ -87,6 +87,11 @@ async fn every_page_renders_with_its_seo_and_policy() {
                 r#"property="og:image" content="https://example.org/assets/og-image.png""#
             )
         );
+        // La fiche d'un lien partagé : l'image, sa taille et sa description.
+        assert!(html.contains(r#"<meta property="og:image:width" content="1200"/>"#));
+        assert!(html.contains(r#"<meta property="og:image:height" content="630"/>"#));
+        assert!(html.contains(r#"<meta property="og:image:alt" content="#));
+        assert!(html.contains(r#"<meta name="twitter:card" content="summary_large_image"/>"#));
         // PWA : le manifeste de la langue, la couleur du thème, le service worker.
         assert!(
             html.contains(&format!(

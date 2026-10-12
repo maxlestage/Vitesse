@@ -107,6 +107,12 @@ fn site_seo(origin: &str, lang: Lang) -> Seo {
         .site_name("Vitesse")
         .base_url(origin)
         .image("/assets/og-image.png")
+        .meta_property("og:image:width", "1200")
+        .meta_property("og:image:height", "630")
+        .meta_property(
+            "og:image:alt",
+            "Vitesse: the comfort of Express, the speed of Rust.",
+        )
         .og_type("website")
         .locale(lang.og_locale())
 }

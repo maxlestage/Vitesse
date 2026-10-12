@@ -427,8 +427,30 @@ impl App {
     /// Opens the port without starting the server: handy to find out which
     /// port was picked when listening on port `0`.
     pub async fn bind(self, addr: impl ListenAddr) -> io::Result<Server> {
-        let listener = server::bind(&addr.socket_addrs()?, false)?;
-        Server::new(self.build(), tokio::net::TcpListener::from_std(listener)?)
+        let addrs = addr.socket_addrs()?;
+        let app = self.build();
+        // On port 0, HTTP/3 takes the UDP port of the TCP port the system picked, which may
+        // be taken or reserved for UDP (Windows reserves ranges per protocol): pick again.
+        let mut attempts = if addrs.iter().all(|a| a.port() == 0) {
+            20
+        } else {
+            1
+        };
+        loop {
+            let listener = server::bind(&addrs, false)?;
+            match Server::new(app, tokio::net::TcpListener::from_std(listener)?) {
+                Err(e)
+                    if attempts > 1
+                        && matches!(
+                            e.kind(),
+                            io::ErrorKind::AddrInUse | io::ErrorKind::PermissionDenied
+                        ) =>
+                {
+                    attempts -= 1;
+                }
+                result => return result,
+            }
+        }
     }
 
     /// Opens a Unix domain socket instead of a TCP port (actix-web's

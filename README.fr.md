@@ -1,3 +1,5 @@
+[![Vitesse : le confort d'Express, la vitesse de Rust](https://raw.githubusercontent.com/maxlestage/Vitesse/master/site/assets/og-image.png)](https://maxlestage.github.io/Vitesse/)
+
 [English](README.md) · **Français** · [Español](README.es.md)
 
 # Vitesse ⚡

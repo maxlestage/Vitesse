@@ -221,6 +221,26 @@ fn window_bar(file: &str) -> Element {
         .child(em().text(file.to_owned()))
 }
 
+/// Une commande dans `<code>`, dont l'URL peut se couper après ses barres obliques sur un
+/// écran étroit : `<wbr>` n'ajoute rien à ce qui est sélectionné et copié.
+fn command(text: &str) -> Element {
+    let mut code = code();
+    let mut part = String::new();
+    let mut chars = text.chars().peekable();
+    let mut previous = ' ';
+    while let Some(c) = chars.next() {
+        part.push(c);
+        let next = chars.peek().copied();
+        if c == '/' && previous != '/' && next.is_some_and(|n| n != '/') {
+            code = code
+                .child(Node::from(std::mem::take(&mut part)))
+                .child(wbr());
+        }
+        previous = c;
+    }
+    code.child(Node::from(part))
+}
+
 /// Un bouton « Copier » : le navigateur copie `data-copy`.
 fn copy_button(lang: Lang, text: &str) -> Element {
     let l = labels(lang);
@@ -420,7 +440,7 @@ fn site_footer(ctx: &Ctx<'_>) -> Element {
                         .class("install")
                         .attr("aria-label", format!("{}: {INSTALL}", t.footer_install))
                         .child(span().class("install__prompt").text("$"))
-                        .child(code().text(INSTALL))
+                        .child(command(INSTALL))
                         .child(copy_button(lang, INSTALL)),
                 ),
         )
@@ -689,7 +709,7 @@ fn hero(ctx: &Ctx<'_>) -> Element {
                         .class("install intro")
                         .style("--d:1350ms")
                         .child(span().class("install__prompt").text("$"))
-                        .child(code().text(INSTALL))
+                        .child(command(INSTALL))
                         .child(copy_button(lang, INSTALL)),
                 ),
         )

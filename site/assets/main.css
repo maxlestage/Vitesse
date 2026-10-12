@@ -521,6 +521,8 @@ body.has-cursor .cursor {
 
 .nav__burger {
   display: none;
+  /* Un rond, jamais écrasé quand la barre manque de place. */
+  flex: none;
   width: 44px;
   height: 44px;
   border-radius: 50%;
@@ -1061,11 +1063,12 @@ body.has-cursor .cursor {
   font-size: 14px;
 }
 
+/* Sur une ligne quand il y a la place, sinon coupée après les barres obliques de l'URL. */
 .install code {
-  overflow-x: auto;
-  white-space: nowrap;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  text-align: left;
   color: var(--muted);
-  scrollbar-width: none;
 }
 
 .install__prompt {
@@ -2117,7 +2120,8 @@ body.has-cursor .cursor {
 .footer__top {
   position: relative;
   display: grid;
-  grid-template-columns: 1.2fr 2fr;
+  /* Des colonnes jamais plus larges que l'écran, même avec la commande d'installation. */
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 2fr);
   gap: 60px;
   max-width: var(--max);
   margin: 0 auto;
@@ -3341,6 +3345,7 @@ body.has-cursor .cursor {
   position: relative;
   z-index: 5;
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   justify-items: center;
   gap: 18px;
   max-width: 760px;
@@ -3362,7 +3367,8 @@ body.has-cursor .cursor {
 }
 
 .docs-home__title {
-  font-size: clamp(48px, 9vw, 104px);
+  /* « Documentation » tient sur un écran de 320 px. */
+  font-size: clamp(34px, 12vw, 104px);
   letter-spacing: -0.05em;
   background: linear-gradient(180deg, #fff 30%, #bdbdcc);
   -webkit-background-clip: text;
@@ -3758,7 +3764,7 @@ body.has-cursor .cursor {
   }
 
   .footer__top {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
     gap: 50px;
   }
 
@@ -3815,6 +3821,11 @@ body.has-cursor .cursor {
 @media (max-width: 600px) {
   body {
     font-size: 16px;
+  }
+
+  /* Le logo, les langues et le menu tiennent sur une ligne jusqu'à 320 px. */
+  .nav {
+    gap: 12px;
   }
 
   .stats,

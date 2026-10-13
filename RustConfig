@@ -1,12 +1,14 @@
 # Heroku with the emk/rust buildpack
-# (https://elements.heroku.com/buildpacks/emk/heroku-buildpack-rust): the demo app
-# (examples/demo.rs). heroku.yml (the "container" stack, with the Dockerfile)
-# remains the other way to deploy it.
+# (https://elements.heroku.com/buildpacks/emk/heroku-buildpack-rust): the website
+# (site/), served by Vitesse itself, with its documentation (docs/). heroku.yml (the
+# "container" stack, with the Dockerfile) remains the other way to deploy, with the
+# demo app (examples/demo.rs).
 #
 # The buildpack sources this file, installs Rust, then would run a plain `cargo
-# build --release`. The version published on Heroku ignores RUST_CARGO_BUILD_FLAGS
-# (and only copies the binaries of target/release), so its build is skipped:
-# heroku-build.sh builds the demo example instead, once Rust is installed.
+# build --release` at the root. The version published on Heroku ignores
+# RUST_CARGO_BUILD_FLAGS (and only copies the binaries of target/release), so its
+# build is skipped: heroku-build.sh builds the server and the islands (WebAssembly)
+# of site/ instead, once Rust is installed.
 VERSION=stable
 RUST_SKIP_BUILD=1
 trap 'status=$?; if [ "$status" -eq 0 ]; then bash "$BUILD_DIR/heroku-build.sh" || exit 1; fi' EXIT

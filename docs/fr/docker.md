@@ -144,7 +144,7 @@ La plupart des plateformes de conteneurs donnent le port dans la variable `PORT`
 
 | Plateforme | En bref |
 |---|---|
-| Heroku | Voir [Déployer sur Heroku depuis un téléphone](heroku-mobile.md). Par défaut, Heroku compile l'application avec le buildpack `emk/rust` ; sur la pile container (`HEROKU_BUILD` à `docker` dans le workflow), il construit lui-même cette image à partir de `heroku.yml`. |
+| Heroku | Voir [Déployer sur Heroku depuis un téléphone](heroku-mobile.md). Par défaut, Heroku compile le site de Vitesse avec le buildpack `emk/rust` ; sur la pile container (`HEROKU_BUILD` à `docker` dans le workflow), il construit lui-même cette image à partir de `heroku.yml`, avec l'application de démonstration ou l'exemple de `ARG EXAMPLE`. |
 | Render | Créez un service web à partir de votre dépôt avec l'environnement Docker ; Render construit le `Dockerfile` et définit `PORT`. |
 | Railway | Détecte le `Dockerfile` et fournit `PORT`. |
 | Fly.io | `fly launch` détecte le `Dockerfile` ; vérifiez que `internal_port` dans `fly.toml` correspond au port écouté par votre application (`8080` avec cette image). |

@@ -10,7 +10,7 @@
     "express",
     "http"
   ],
-  "stack": "heroku-24",
+  "stack": "heroku-26",
   "buildpacks": [
     {
       "url": "emk/rust"

@@ -1,12 +1,12 @@
-# Heroku with the emk/rust buildpack (https://elements.heroku.com/buildpacks/emk/heroku-buildpack-rust):
-# the demo app (examples/demo.rs). heroku.yml (the "container" stack, with the
-# Dockerfile) remains the other way to deploy it.
+# Heroku with the emk/rust buildpack
+# (https://elements.heroku.com/buildpacks/emk/heroku-buildpack-rust): the demo app
+# (examples/demo.rs). heroku.yml (the "container" stack, with the Dockerfile)
+# remains the other way to deploy it.
 #
-# The buildpack sources this file, then runs `cargo build $RUST_CARGO_BUILD_FLAGS`
-# and copies the binaries of target/release, but not those of its examples/ folder:
-# once that build has succeeded, heroku-build.sh copies the example there too.
-# To deploy another example, change EXAMPLE (and the Procfile).
+# The buildpack sources this file, installs Rust, then would run a plain `cargo
+# build --release`. The version published on Heroku ignores RUST_CARGO_BUILD_FLAGS
+# (and only copies the binaries of target/release), so its build is skipped:
+# heroku-build.sh builds the demo example instead, once Rust is installed.
 VERSION=stable
-EXAMPLE=demo
-RUST_CARGO_BUILD_FLAGS="--release --example $EXAMPLE"
-trap 'status=$?; if [ "$status" -eq 0 ]; then bash "$BUILD_DIR/heroku-build.sh" "$EXAMPLE" || exit 1; fi' EXIT
+RUST_SKIP_BUILD=1
+trap 'status=$?; if [ "$status" -eq 0 ]; then bash "$BUILD_DIR/heroku-build.sh" || exit 1; fi' EXIT

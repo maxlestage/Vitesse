@@ -404,14 +404,20 @@ vont dans [`CHANGELOG.md`](CHANGELOG.md).
 
 ### Publier une version (mainteneurs)
 
-1. Augmentez `version` dans `Cargo.toml` et mettez à jour `CHANGELOG.md`.
-2. Sur GitHub, ouvrez **Releases** → **Draft a new release**, créez un tag
-   `vX.Y.Z` qui correspond à la version, et publiez la release.
-3. Le workflow `Release` lance les tests et publie la crate sur crates.io.
-   Il a besoin du secret de dépôt `CARGO_REGISTRY_TOKEN` (un jeton d'API
-   crates.io avec les portées `publish-new` et `publish-update`). Il peut
-   aussi être lancé à la main depuis l'onglet **Actions**, en mode « dry
-   run » (vérification seule) par défaut.
+1. Augmentez `version` dans `Cargo.toml` et écrivez sa section dans
+   `CHANGELOG.md`.
+2. Poussez sur `master`. Une fois la CI au vert, le workflow `Release` pose
+   le tag de la nouvelle version (`vX.Y.Z`), crée sa release GitHub avec
+   cette section de `CHANGELOG.md` comme notes, lance les tests et publie la
+   crate sur crates.io. Aucun formulaire à remplir.
+3. La publication a besoin du secret de dépôt `CARGO_REGISTRY_TOKEN` (un
+   jeton d'API crates.io avec les portées `publish-new` et
+   `publish-update`). Sans lui, le tag et la release GitHub sont quand même
+   créés, et la publication attend : ajoutez le secret, puis lancez le
+   workflow à la main depuis l'onglet **Actions**, case **Only check the
+   package** décochée. Une release rédigée à la main (**Releases** →
+   **Draft a new release**) publie aussi, et un lancement manuel est en
+   mode « dry run » (vérification seule) par défaut.
 
 ## Licence
 

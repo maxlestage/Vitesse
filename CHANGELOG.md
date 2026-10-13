@@ -115,5 +115,8 @@ or actix-web"):
   documentation rendered on the server with its search, and a static export
   for GitHub Pages. It is a Progressive Web App: installable on a phone's
   home screen, and readable offline.
+- Automatic releases: once CI is green on `master`, a new `version` in
+  `Cargo.toml` is tagged (`v0.1.0` for `0.1.0`), released on GitHub with its
+  section of `CHANGELOG.md` as notes, and published on crates.io.
 
 [0.1.0]: https://crates.io/crates/vitesse/0.1.0

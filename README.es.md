@@ -406,14 +406,19 @@ indícalo en tu pull request. Los cambios importantes se anotan en
 
 ### Publicar una versión (mantenedores)
 
-1. Sube `version` en `Cargo.toml` y actualiza `CHANGELOG.md`.
-2. En GitHub, abre **Releases** → **Draft a new release**, crea un tag
-   `vX.Y.Z` que coincida con la versión y publica la release.
-3. El workflow `Release` ejecuta los tests y publica el crate en crates.io.
-   Necesita el secreto de repositorio `CARGO_REGISTRY_TOKEN` (un token de la
-   API de crates.io con los permisos `publish-new` y `publish-update`).
-   También se puede lanzar a mano desde la pestaña **Actions**, por defecto
-   en modo de prueba («dry run»).
+1. Sube `version` en `Cargo.toml` y escribe su sección en `CHANGELOG.md`.
+2. Haz push a `master`. Cuando la CI está en verde, el workflow `Release`
+   crea el tag de la nueva versión (`vX.Y.Z`) y su release de GitHub con esa
+   sección de `CHANGELOG.md` como notas, ejecuta los tests y publica el
+   crate en crates.io. No hay ningún formulario que rellenar.
+3. La publicación necesita el secreto de repositorio `CARGO_REGISTRY_TOKEN`
+   (un token de la API de crates.io con los permisos `publish-new` y
+   `publish-update`). Sin él, el tag y la release de GitHub se crean igual,
+   y la publicación espera: añade el secreto y lanza el workflow a mano
+   desde la pestaña **Actions**, con la casilla **Only check the package**
+   desmarcada. Una release redactada a mano (**Releases** → **Draft a new
+   release**) también publica, y un lanzamiento manual es por defecto en
+   modo de prueba («dry run»).
 
 ## Licencia
 

@@ -18,13 +18,16 @@ Le dépôt contient déjà tout ce dont Heroku a besoin, rien n'est donc compil�
 
 | Fichier | Rôle |
 |---|---|
-| `app.json` | Décrit l'application pour le bouton Deploy (pile « container », basée sur Docker). |
-| `heroku.yml` | Indique à Heroku de construire l'image à partir du `Dockerfile`. |
+| `app.json` | Décrit l'application pour le bouton Deploy (pile heroku-24, buildpack Rust `emk/rust`). |
+| `RustConfig` | Configure le buildpack : compile en mode release l'exemple nommé par `EXAMPLE` (`demo`). |
+| `Procfile` | Indique à Heroku comment démarrer l'application : `web: exec target/release/demo`. |
+| `heroku-build.sh` | Copie l'exemple compilé dans `target/release`, le seul dossier dont le buildpack garde les binaires. |
+| `heroku.yml` | L'autre voie : indique à Heroku de construire une image Docker à partir du `Dockerfile` (pile « container »). |
 | `Dockerfile` | Compile un exemple (`demo` par défaut) en mode release et l'emballe dans une petite image. |
 | `examples/demo.rs` | L'application de démonstration : une page d'accueil, `/health` et une petite API JSON. |
 | `.github/workflows/heroku.yml` | Le workflow **Deploy to Heroku**, pour les déploiements automatiques. |
 
-Heroku construit l'image Docker sur ses propres serveurs, puis la démarre en indiquant à l'application le port sur lequel écouter.
+Heroku compile l'application sur ses propres serveurs avec le [buildpack emk/rust](https://elements.heroku.com/buildpacks/emk/heroku-buildpack-rust), puis la démarre avec le `Procfile` en lui indiquant le port sur lequel écouter. Construire plutôt l'image Docker reste possible : voir « Docker plutôt que le buildpack » plus bas.
 
 ## 1. Le plus rapide : le bouton Deploy
 
@@ -34,7 +37,7 @@ Heroku construit l'image Docker sur ses propres serveurs, puis la démarre en in
 2. Heroku affiche un formulaire de création d'application :
    - **App name** : par exemple `ma-demo-vitesse`. Les noms sont uniques sur tout Heroku et ne contiennent que des minuscules, des chiffres et des tirets. Vous pouvez aussi laisser le champ vide : Heroku en choisira un.
    - **Choose a region** : États-Unis ou Europe.
-3. Touchez **Deploy app**. Heroku récupère le code et construit l'image Docker ; vous pouvez suivre le journal de construction sur la page. Comptez quelques minutes : le code Rust est compilé avec toutes les optimisations.
+3. Touchez **Deploy app**. Heroku récupère le code et le compile avec le buildpack Rust ; vous pouvez suivre le journal de construction sur la page. Comptez quelques minutes : le code Rust est compilé avec toutes les optimisations.
 4. Une fois la construction terminée, touchez **View** pour ouvrir votre application. Vous devriez voir « ⚡ Vitesse is running. ». L'adresse exacte (`https://….herokuapp.com`) figure dans l'onglet **Settings** de l'application sur Heroku.
 
 Essayez ensuite ces chemins, en les ajoutant après l'adresse de votre application dans la barre du navigateur :
@@ -72,8 +75,8 @@ Objectif : chaque commit sur la branche `master` de votre fork reconstruit et re
 À chaque exécution, il :
 
 1. vérifie qu'il est configuré (sinon il s'arrête, sans échec lors d'un push) ;
-2. crée l'application Heroku si elle n'existe pas encore (avec la pile Docker « container ») ;
-3. envoie votre code à Heroku, qui construit l'image à partir de `heroku.yml` et la met en ligne ; le journal de construction s'affiche en direct dans GitHub ;
+2. crée l'application Heroku si elle n'existe pas encore (sur la pile heroku-24) et règle son buildpack sur `emk/rust` ;
+3. envoie votre code à Heroku, qui le compile avec le buildpack et le met en ligne ; le journal de construction s'affiche en direct dans GitHub ;
 4. écrit l'adresse de l'application dans le résumé de l'exécution.
 
 Il vous faut votre propre fork (voir « Déployer votre propre copie » plus haut).
@@ -102,12 +105,14 @@ Il vous faut votre propre fork (voir « Déployer votre propre copie » plus hau
    - **Value** : le nom de votre application (celle créée avec le bouton, ou un nouveau nom : le workflow crée l'application si besoin)
    - touchez **Add variable**.
 5. Facultatif : ajoutez une variable `HEROKU_REGION` avec la valeur `eu` pour créer l'application en Europe. Elle ne sert que lorsque le workflow crée l'application.
+6. Facultatif : ajoutez une variable `HEROKU_BUILD` avec la valeur `docker` pour construire l'image Docker au lieu d'utiliser le buildpack (voir « Docker plutôt que le buildpack » plus bas).
 
 | Nom | Type | Obligatoire | Valeur |
 |---|---|---|---|
 | `HEROKU_API_KEY` | Secret | Oui | Votre jeton Heroku |
 | `HEROKU_APP_NAME` | Variable | Oui | Par exemple `ma-demo-vitesse` |
 | `HEROKU_REGION` | Variable | Non | `us` (par défaut) ou `eu` |
+| `HEROKU_BUILD` | Variable | Non | `buildpack` (par défaut) ou `docker` |
 
 ### Étape 3 : activer Actions sur votre fork
 
@@ -120,10 +125,25 @@ GitHub désactive les workflows d'un fork tout juste créé. Ouvrez l'onglet **A
 3. Touchez l'exécution qui apparaît pour la suivre. La première construction prend quelques minutes.
 4. Quand elle passe au vert, l'adresse de l'application s'affiche dans le résumé de l'exécution.
 
-Désormais, **chaque commit sur `master` qui touche au code** redéploie l'application : `src/`, `examples/`, `Cargo.toml`, `Cargo.lock`, `Dockerfile`, `heroku.yml` ou le workflow lui-même. Modifier le README ou la documentation ne déclenche pas de déploiement.
+Désormais, **chaque commit sur `master` qui touche au code** redéploie l'application : `src/`, `examples/`, `Cargo.toml`, `Cargo.lock`, `RustConfig`, `Procfile`, `heroku-build.sh`, `Dockerfile`, `heroku.yml` ou le workflow lui-même. Modifier le README ou la documentation ne déclenche pas de déploiement.
 
 > [!NOTE]
 > Tant que le secret ou la variable manque, les pushs sautent simplement le déploiement (l'exécution affiche une notification, pas un échec). Une exécution manuelle, en revanche, échoue avec un message qui indique ce qui manque.
+
+### Docker plutôt que le buildpack
+
+Par défaut, le workflow utilise le buildpack : si l'application est sur la pile Docker « container » (une application créée par une version précédente du bouton, par exemple), il la passe sur la pile heroku-24. Pour construire plutôt l'image Docker à partir de `heroku.yml` et du `Dockerfile`, comme avant, ajoutez la variable de dépôt `HEROKU_BUILD` avec la valeur `docker` (étape 2) : le workflow met alors l'application sur la pile container. Supprimez la variable, ou donnez-lui la valeur `buildpack`, pour revenir en arrière.
+
+### Depuis un ordinateur, sans GitHub Actions
+
+Avec la [CLI Heroku](https://devcenter.heroku.com/articles/heroku-cli), dans votre copie du dépôt :
+
+```sh
+heroku create ma-demo-vitesse --stack heroku-24 --buildpack emk/rust
+git push heroku master
+```
+
+Pour une application existante, lancez d'abord `heroku stack:set heroku-24` (si elle est sur la pile container), puis `heroku buildpacks:set emk/rust`. Sur le tableau de bord Heroku, le buildpack se règle dans **Settings** → **Buildpacks** → **Add buildpack** de l'application : saisissez `emk/rust` (l'application ne doit pas être sur la pile container).
 
 ## 3. Personnaliser votre application
 
@@ -178,15 +198,26 @@ Vous pouvez laisser `demo.rs` tranquille et écrire votre application dans un no
    ```
 
 3. Faites un commit du fichier.
-4. Ouvrez le `Dockerfile`, touchez le crayon et remplacez la ligne `ARG EXAMPLE=demo` par `ARG EXAMPLE=mon_app` (le nom du fichier sans `.rs`). Faites un commit : le workflow construit et déploie votre exemple.
+4. Ouvrez `RustConfig`, touchez le crayon et remplacez la ligne `EXAMPLE=demo` par `EXAMPLE=mon_app` (le nom du fichier sans `.rs`). Faites un commit.
+5. Ouvrez `Procfile` et remplacez `target/release/demo` par `target/release/mon_app`. Faites un commit : le workflow construit et déploie votre exemple (le déploiement du commit précédent peut échouer, tant qu'un seul des deux fichiers est modifié).
 
-L'argument de construction `EXAMPLE` choisit le fichier de `examples/` à compiler ; c'est en modifiant sa valeur par défaut dans le `Dockerfile` que Heroku utilise votre exemple. Votre code peut utiliser les crates déjà déclarées dans `Cargo.toml` : `vitesse`, `serde` (avec `derive`) et `tokio`.
+`EXAMPLE` dans `RustConfig` choisit le fichier de `examples/` à compiler, et le `Procfile` démarre ce binaire : les deux doivent nommer le même exemple. Avec la construction Docker (`HEROKU_BUILD` à `docker`), remplacez plutôt la ligne `ARG EXAMPLE=demo` du `Dockerfile`. Votre code peut utiliser les crates déjà déclarées dans `Cargo.toml` : `vitesse`, `serde` (avec `derive`) et `tokio`.
 
 > [!IMPORTANT]
 > Votre application doit écouter sur **`0.0.0.0:$PORT`**. Heroku choisit le port au démarrage et le transmet dans la variable d'environnement `PORT`. `app.run(port)` avec un simple numéro de port (ou une chaîne qui ne contient que des chiffres) écoute déjà sur toutes les interfaces. N'écrivez jamais `3000` en dur et n'écoutez jamais uniquement sur `127.0.0.1`, sinon Heroku ne peut pas joindre votre application.
 
 > [!TIP]
 > Besoin d'une autre crate ? Ouvrez `Cargo.toml` avec l'icône crayon, ajoutez une ligne sous `[dev-dependencies]` (la section que les exemples peuvent utiliser sans changer les dépendances de la bibliothèque elle-même), par exemple `chrono = "0.4"`, et faites un commit. La construction résout la nouvelle crate toute seule, tandis que les autres gardent les versions fixées dans `Cargo.lock`. Plus tard, committer un `Cargo.lock` à jour depuis un ordinateur (n'importe quel `cargo build` le rafraîchit) reste une bonne pratique pour des constructions reproductibles.
+
+### Votre propre projet
+
+Le même buildpack déploie n'importe quelle application Vitesse qui est une crate ordinaire (avec un `src/main.rs`) dans son propre dépôt. Ajoutez un `Procfile` à sa racine, en remplaçant `mon-app` par le nom de votre paquet :
+
+```text
+web: ./target/release/mon-app
+```
+
+Le buildpack lance `cargo build --release` par défaut : aucun `RustConfig` n'est nécessaire, sauf si vous voulez d'autres options de Cargo (`RUST_CARGO_BUILD_FLAGS`) ou une version de Rust fixée (`VERSION`) : voir la [page du buildpack](https://elements.heroku.com/buildpacks/emk/heroku-buildpack-rust). Créez l'application sur la pile heroku-24 avec le buildpack `emk/rust`, comme dans « Depuis un ordinateur, sans GitHub Actions » ou depuis le tableau de bord. Vous préférez Docker ? Utilisez le `Dockerfile` de [Docker](docker.md#votre-propre-projet) avec un `heroku.yml` comme celui de ce dépôt, sur la pile container.
 
 ### Réglages : variables d'environnement
 
@@ -222,7 +253,7 @@ Ouvrez le journal de construction : dans GitHub (onglet **Actions**, exécution 
 | Message | Cause | Solution |
 |---|---|---|
 | `error[E…]` avec un fichier et une ligne | Erreur de compilation Rust | Corrigez le code à cette ligne et refaites un commit. |
-| `no example target named …` | `ARG EXAMPLE` ne correspond à aucun fichier de `examples/` | Utilisez le nom du fichier sans `.rs`. |
+| `no example target named …` | `EXAMPLE` dans `RustConfig` (ou `ARG EXAMPLE` dans le `Dockerfile`) ne correspond à aucun fichier de `examples/` | Utilisez le nom du fichier sans `.rs`. |
 | `no matching package named …` ou `failed to select a version …` | Un nom ou une version de crate est faux dans `Cargo.toml` | Vérifiez le nom exact et une version existante sur https://crates.io, puis refaites un commit. |
 
 ### Le workflow échoue avant la construction
@@ -242,7 +273,7 @@ La construction a réussi, mais l'application ne répond pas. Ouvrez les journau
 | Code | Signification | Que faire |
 |---|---|---|
 | `R10` Boot timeout | L'application n'écoutait pas sur `$PORT` dans les 60 secondes suivant son démarrage. | Écoutez sur `$PORT` (voir plus haut), jamais sur un port fixe ni sur `127.0.0.1`. |
-| `H10` App crashed | Le processus s'est arrêté. | Lisez les lignes juste au-dessus dans les journaux : une panique dans `main`, une route invalide ou en double (Vitesse panique au démarrage en nommant la route fautive), un port fixe… |
+| `H10` App crashed | Le processus s'est arrêté. | Lisez les lignes juste au-dessus dans les journaux : une panique dans `main`, une route invalide ou en double (Vitesse panique au démarrage en nommant la route fautive), un `Procfile` qui ne nomme pas l'exemple compilé, un port fixe… |
 | `H14` No web dynos running | Aucun dyno ne tourne pour le processus `web`. | Dans **Resources**, vérifiez que le dyno `web` est allumé. |
 | `H12` Request timeout | Une requête a pris plus de 30 secondes. | Heroku coupe les requêtes au bout de 30 secondes : accélérez le handler, ou utilisez `middleware::timeout(...)` pour répondre plus tôt par une `503` propre. |
 
@@ -252,12 +283,12 @@ Une panique dans un handler ne fait pas planter l'application : Vitesse la trans
 
 - **La première requête est lente** : un dyno Eco dormait ; il se réveille à la première visite.
 - **Mes données ont disparu** : les données en mémoire sont perdues à chaque redémarrage. Utilisez une base de données.
-- **`PORT=8080` dans le `Dockerfile`** : ce n'est que la valeur par défaut pour les autres plateformes. Sur Heroku, la variable `PORT` définie au démarrage l'emporte.
+- **`PORT=8080` dans le `Dockerfile`** (construction Docker) : ce n'est que la valeur par défaut pour les autres plateformes. Sur Heroku, la variable `PORT` définie au démarrage l'emporte.
 - **WebSocket fonctionne** : le routeur de Heroku prend en charge les connexions [WebSocket](websocket.md) (utilisez `wss://` avec l'adresse HTTPS de votre application). Il ferme une connexion qui reste silencieuse pendant environ 55 secondes : faites envoyer régulièrement un message ou un `Message::Ping` par le serveur (toutes les 30 secondes, par exemple).
 - **HTTP/3, non** : le routeur de Heroku ne transmet pas l'UDP aux dynos, [HTTP/3](http3.md) ne peut donc pas atteindre votre application sur Heroku. Laissez-y la feature `http3` désactivée.
 
 ## Pour aller plus loin
 
-- [Docker](docker.md) : construire et lancer la même image sur votre ordinateur ou sur d'autres plateformes.
+- [Docker](docker.md) : l'image Docker, l'alternative au buildpack, sur votre ordinateur, sur Heroku ou sur d'autres plateformes.
 - [Mise en production](production.md) : limites, journaux, arrêt propre et sécurité.
 - [Configuration du serveur](server.md) : `app.run`, adresses d'écoute, workers.

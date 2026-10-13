@@ -270,8 +270,9 @@ La documentación también está disponible en [inglés](docs/en/README.md) y en
 
 Abre `https://heroku.com/deploy?template=https://github.com/maxlestage/Vitesse` en tu
 móvil para desplegar la aplicación de demostración (`examples/demo.rs`) en tu
-cuenta de Heroku: Heroku lee `app.json` y construye la imagen Docker por sí mismo,
-así que ni siquiera necesitas una computadora (Heroku ya no tiene plan gratuito:
+cuenta de Heroku: Heroku lee `app.json` y compila la aplicación por sí mismo con el
+buildpack de Rust (`emk/rust`; también es posible una construcción Docker), así que
+ni siquiera necesitas una computadora (Heroku ya no tiene plan gratuito:
 hace falta un dyno de pago). La guía paso a paso también explica los
 despliegues automáticos con GitHub Actions:
 [Desplegar en Heroku desde el móvil](docs/es/heroku-mobile.md).

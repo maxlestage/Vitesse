@@ -1,6 +1,6 @@
 # Docker
 
-Une application Vitesse se compile en un seul binaire natif, ce qui la rend facile à livrer dans une petite image Docker. Le dépôt contient un `Dockerfile` multi-étapes prêt à l'emploi (celui qu'utilise Heroku), que vous pouvez lancer sur votre ordinateur ou déployer sur n'importe quelle plateforme de conteneurs.
+Une application Vitesse se compile en un seul binaire natif, ce qui la rend facile à livrer dans une petite image Docker. Le dépôt contient un `Dockerfile` multi-étapes prêt à l'emploi (que Heroku peut utiliser à la place de son buildpack Rust), que vous pouvez lancer sur votre ordinateur ou déployer sur n'importe quelle plateforme de conteneurs.
 
 ## Construire et lancer en local
 
@@ -144,7 +144,7 @@ La plupart des plateformes de conteneurs donnent le port dans la variable `PORT`
 
 | Plateforme | En bref |
 |---|---|
-| Heroku | Voir [Déployer sur Heroku depuis un téléphone](heroku-mobile.md). Heroku construit lui-même l'image à partir de `heroku.yml`. |
+| Heroku | Voir [Déployer sur Heroku depuis un téléphone](heroku-mobile.md). Par défaut, Heroku compile l'application avec le buildpack `emk/rust` ; sur la pile container (`HEROKU_BUILD` à `docker` dans le workflow), il construit lui-même cette image à partir de `heroku.yml`. |
 | Render | Créez un service web à partir de votre dépôt avec l'environnement Docker ; Render construit le `Dockerfile` et définit `PORT`. |
 | Railway | Détecte le `Dockerfile` et fournit `PORT`. |
 | Fly.io | `fly launch` détecte le `Dockerfile` ; vérifiez que `internal_port` dans `fly.toml` correspond au port écouté par votre application (`8080` avec cette image). |

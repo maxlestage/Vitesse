@@ -266,8 +266,8 @@ The documentation is also available in [French](docs/fr/README.md) and
 
 Open `https://heroku.com/deploy?template=https://github.com/maxlestage/Vitesse` on your
 phone to deploy the demo app (`examples/demo.rs`) to your Heroku account: Heroku
-reads `app.json` and builds the Docker image itself, so you don't even need a
-computer (Heroku has no free plan, so a paid dyno is required). The step-by-step
+reads `app.json` and compiles the app itself with the Rust buildpack (`emk/rust`;
+a Docker build is also available), so you don't even need a computer (Heroku has no free plan, so a paid dyno is required). The step-by-step
 guide also covers automatic deployments with GitHub Actions:
 [Deploy to Heroku from your phone](docs/en/heroku-mobile.md).
 

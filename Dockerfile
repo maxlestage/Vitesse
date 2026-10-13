@@ -1,4 +1,5 @@
-# Production image for a Vitesse app (used by Heroku, and usable as is on
+# Production image for a Vitesse app (used by Heroku on the container stack,
+# through heroku.yml, instead of the emk/rust buildpack; usable as is on
 # Render, Fly.io, Cloud Run…).
 #
 #   docker build -t vitesse-demo .

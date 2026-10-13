@@ -10,6 +10,11 @@
     "express",
     "http"
   ],
-  "stack": "container",
+  "stack": "heroku-24",
+  "buildpacks": [
+    {
+      "url": "emk/rust"
+    }
+  ],
   "success_url": "/"
 }

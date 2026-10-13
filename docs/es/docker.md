@@ -1,6 +1,6 @@
 # Docker
 
-Una aplicación Vitesse se compila en un único binario nativo, lo que facilita distribuirla en una imagen Docker pequeña. El repositorio incluye un `Dockerfile` multietapa listo para usar (el mismo que usa Heroku), que puedes ejecutar en tu computadora o desplegar en cualquier plataforma de contenedores.
+Una aplicación Vitesse se compila en un único binario nativo, lo que facilita distribuirla en una imagen Docker pequeña. El repositorio incluye un `Dockerfile` multietapa listo para usar (que Heroku puede usar en lugar de su buildpack de Rust), que puedes ejecutar en tu computadora o desplegar en cualquier plataforma de contenedores.
 
 ## Construir y ejecutar en local
 
@@ -144,7 +144,7 @@ La mayoría de las plataformas de contenedores indican el puerto en la variable 
 
 | Plataforma | En resumen |
 |---|---|
-| Heroku | Consulta [Desplegar en Heroku desde el móvil](heroku-mobile.md). Heroku construye la imagen por sí mismo a partir de `heroku.yml`. |
+| Heroku | Consulta [Desplegar en Heroku desde el móvil](heroku-mobile.md). Por defecto, Heroku compila la aplicación con el buildpack `emk/rust`; en el stack container (`HEROKU_BUILD` en `docker` en el workflow), construye él mismo esta imagen a partir de `heroku.yml`. |
 | Render | Crea un servicio web a partir de tu repositorio con el entorno Docker; Render construye el `Dockerfile` y define `PORT`. |
 | Railway | Detecta el `Dockerfile` y proporciona `PORT`. |
 | Fly.io | `fly launch` detecta el `Dockerfile`; comprueba que `internal_port` en `fly.toml` coincide con el puerto en el que escucha tu aplicación (`8080` con esta imagen). |

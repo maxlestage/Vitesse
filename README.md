@@ -1,4 +1,4 @@
-[![Vitesse: the comfort of Express, the speed of Rust](https://raw.githubusercontent.com/maxlestage/Vitesse/master/site/assets/og-image.png)](https://maxlestage.github.io/Vitesse/)
+[![Vitesse: the comfort of Express, the speed of Rust](https://raw.githubusercontent.com/maxlestage/Vitesse/master/site/assets/og-image.png)](https://vitesse-f16135654c3d.herokuapp.com/)
 
 **English** · [Français](README.fr.md) · [Español](README.es.md)
 
@@ -251,7 +251,7 @@ app.get("/clock", |_| async {
 
 ## Documentation
 
-- **Website**: https://maxlestage.github.io/Vitesse/en/docs/
+- **Website**: https://vitesse-f16135654c3d.herokuapp.com/en/docs/
 - **In this repository**: [docs/en/README.md](docs/en/README.md), from
   [your first app](docs/en/first-app.md) to
   [going to production](docs/en/production.md), including a guide for
@@ -348,7 +348,7 @@ docker build -t vitesse-demo . && docker run --rm -p 8080:8080 vitesse-demo
 The [`site/`](site) folder contains the project's website, in English,
 French and Spanish, with the documentation of [`docs/`](docs). It is served
 by Vitesse itself: the server is a Vitesse app whose pages are written with
-[Active](https://maxlestage.github.io/Active/) (server-rendered, with
+[Active](https://active-c1883a966650.herokuapp.com/) (server-rendered, with
 complete SEO tags), and the interactive parts are active islands compiled to
 WebAssembly. It is a Progressive Web App: it can be installed on a phone's
 home screen and keeps working offline. The `Site` workflow exports it to
@@ -427,4 +427,4 @@ to the author, as the license states.
 ## Credits
 
 Designed and developed by Maxime Nathan Lestage,
-as part of one family of Rust projects: [Active](https://maxlestage.github.io/Active/), [Vitesse](https://maxlestage.github.io/Vitesse/), [Securite](https://maxlestage.github.io/Securite/), [Memoire](https://maxlestage.github.io/Memoire/), [Paquets](https://maxlestage.github.io/Paquets/), [FerroSwift](https://maxlestage.github.io/FerroSwift/) and [Solidify](https://maxlestage.github.io/Solidify/).
+as part of one family of Rust projects: [Active](https://active-c1883a966650.herokuapp.com/), [Vitesse](https://vitesse-f16135654c3d.herokuapp.com/), [Securite](https://securite-2db4c1994be7.herokuapp.com/), [Memoire](https://memoire-7f4525f1fdaf.herokuapp.com/) and [Paquets](https://paquets-90dfc06b6fea.herokuapp.com/).

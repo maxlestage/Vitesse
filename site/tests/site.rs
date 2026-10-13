@@ -186,23 +186,19 @@ async fn every_page_ends_with_the_signature_footer() {
             "{lang}"
         );
         assert!(footer.contains(&format!("v{}", vitesse::VERSION)), "{lang}");
-        // Les sept projets de l'écosystème, celui-ci marqué comme la page courante.
-        for project in [
-            "Active",
-            "Vitesse",
-            "Securite",
-            "Memoire",
-            "Paquets",
-            "FerroSwift",
-            "Solidify",
+        // Les cinq projets de l'écosystème, sur leurs sites Heroku, celui-ci marqué comme la
+        // page courante.
+        for url in [
+            "https://active-c1883a966650.herokuapp.com/",
+            "https://vitesse-f16135654c3d.herokuapp.com/",
+            "https://securite-2db4c1994be7.herokuapp.com/",
+            "https://memoire-7f4525f1fdaf.herokuapp.com/",
+            "https://paquets-90dfc06b6fea.herokuapp.com/",
         ] {
-            assert!(
-                footer.contains(&format!(
-                    r#"href="https://maxlestage.github.io/{project}/""#
-                )),
-                "{lang} {project}"
-            );
+            assert!(footer.contains(&format!(r#"href="{url}""#)), "{lang} {url}");
         }
+        assert_eq!(footer.matches("eco__name").count(), 5, "{lang}");
+        assert!(!footer.contains("github.io"), "{lang}");
         assert!(footer.contains(r#"aria-current="page""#), "{lang}");
         assert!(footer.contains(here), "{lang}");
     }

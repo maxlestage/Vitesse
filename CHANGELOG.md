@@ -19,6 +19,13 @@ First public release.
   projects of the ecosystem.
 - Credits: Solidify joins the projects linked by the README, the license and
   the website's footer.
+- Links: the websites of Vitesse and its sibling projects are now their
+  Heroku apps (README, documentation, crate `homepage`, `app.json`, rustdoc
+  logo, the demo and the website's footer) instead of GitHub Pages; the
+  static export for GitHub Pages is unchanged.
+- Credits: the ecosystem is now five projects (Active, Vitesse, Securite,
+  Memoire, Paquets): FerroSwift and Solidify are no longer listed in the
+  README, the publishing guide or the website's footer.
 - Website: every card of a shared link gives the size and description of its
   image, so that it shows large from the first share.
 - `app.bind("…:0")` with HTTP/3 picks another port when the UDP port of the
@@ -123,8 +130,8 @@ or actix-web"):
   one-click deployment to Heroku.
 - A 100% Rust repository: the website and the benchmark runner
   (`bench/runner`) are Rust.
-- The website (https://maxlestage.github.io/Vitesse/) is served by Vitesse
-  itself and written with [Active](https://maxlestage.github.io/Active/):
+- The website (https://vitesse-f16135654c3d.herokuapp.com/) is served by Vitesse
+  itself and written with [Active](https://active-c1883a966650.herokuapp.com/):
   pages rendered on the server with complete SEO tags, interactive parts
   hydrated as WebAssembly islands, real addresses per language (`/en/`,
   `/fr/docs/routing/`…, the old `#/docs/…` links lead to them), the

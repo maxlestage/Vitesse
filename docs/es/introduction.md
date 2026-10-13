@@ -112,4 +112,4 @@ Las [preguntas frecuentes](faq.md#límites-actuales) explican los motivos en det
 > [!TIP]
 > Si ya conoces bien Express, haz [Tu primera aplicación](first-app.md) y luego ten a mano [Viniendo de Express](from-express.md) mientras escribes tus propias rutas.
 
-La referencia completa de la API se genera a partir del código fuente. Ejecuta `cargo doc --open` en un proyecto que dependa de Vitesse, o explora el código en [GitHub](https://maxlestage.github.io/Vitesse/).
+La referencia completa de la API se genera a partir del código fuente. Ejecuta `cargo doc --open` en un proyecto que dependa de Vitesse, o explora el código en [GitHub](https://github.com/maxlestage/Vitesse).

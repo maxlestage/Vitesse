@@ -12,7 +12,7 @@ Hasta la versión 1.0, la API todavía puede cambiar entre versiones menores. De
 
 ### ¿El proyecto es realmente 100 % Rust?
 
-Sí: el framework, los ejemplos, la herramienta de benchmark (`bench/runner`) y el sitio web (servido por el propio Vitesse, con páginas e islas WebAssembly escritas con [Active](https://maxlestage.github.io/Active/)) están en Rust, y el repositorio no contiene JavaScript ni TypeScript. Dos matices, para ser precisos:
+Sí: el framework, los ejemplos, la herramienta de benchmark (`bench/runner`) y el sitio web (servido por el propio Vitesse, con páginas e islas WebAssembly escritas con [Active](https://active-c1883a966650.herokuapp.com/)) están en Rust, y el repositorio no contiene JavaScript ni TypeScript. Dos matices, para ser precisos:
 
 - los navegadores no pueden arrancar WebAssembly sin unas pocas líneas de JavaScript, y solo ejecutan un service worker (lo que hace que el sitio funcione sin conexión) en forma de script: la compilación del sitio (wasm-bindgen) genera un pequeño archivo de carga, y el servidor del sitio genera su service worker; ninguno de los dos se escribe a mano ni se guarda en el repositorio;
 - la documentación muestra fragmentos de Express (JavaScript), pero solo como comparaciones de antes y después para quienes vienen de Express.
@@ -253,7 +253,7 @@ La documentación está en `docs/`, en inglés, francés y español: cuando camb
 
 ### ¿Cuál es la licencia?
 
-Vitesse es software propietario: © Maxime Nathan Lestage, todos los derechos reservados. Su código fuente se publica en crates.io y GitHub para que puedas leerlo, auditarlo y compilarlo, y puedes usarlo libremente como dependencia de tus propios programas, también comerciales. Modificarlo o redistribuir su código fuente requiere el permiso escrito del autor. Las condiciones completas están en el archivo [LICENSE](https://maxlestage.github.io/Vitesse/LICENSE.txt) del repositorio.
+Vitesse es software propietario: © Maxime Nathan Lestage, todos los derechos reservados. Su código fuente se publica en crates.io y GitHub para que puedas leerlo, auditarlo y compilarlo, y puedes usarlo libremente como dependencia de tus propios programas, también comerciales. Modificarlo o redistribuir su código fuente requiere el permiso escrito del autor. Las condiciones completas están en el archivo [LICENSE](https://vitesse-f16135654c3d.herokuapp.com/assets/LICENSE.txt) del repositorio.
 
 ## Límites actuales
 

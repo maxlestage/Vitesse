@@ -12,7 +12,7 @@ Until version 1.0, the API may still change between minor versions. Depend on `v
 
 ### Is the project really 100% Rust?
 
-Yes: the framework, the examples, the benchmark runner (`bench/runner`) and the website (served by Vitesse itself, with pages and WebAssembly islands written with [Active](https://maxlestage.github.io/Active/)) are all Rust, and the repository contains no JavaScript or TypeScript. Two caveats, to be precise:
+Yes: the framework, the examples, the benchmark runner (`bench/runner`) and the website (served by Vitesse itself, with pages and WebAssembly islands written with [Active](https://active-c1883a966650.herokuapp.com/)) are all Rust, and the repository contains no JavaScript or TypeScript. Two caveats, to be precise:
 
 - browsers cannot start WebAssembly without a few lines of JavaScript, and they only run service workers (what makes the website work offline) as scripts: the website build (wasm-bindgen) generates a small loader file, and the website's server generates its service worker; neither is written by hand nor stored in the repository;
 - the documentation shows Express (JavaScript) snippets, but only as before/after comparisons for people coming from Express.
@@ -253,7 +253,7 @@ The documentation lives in `docs/` in English, French and Spanish: when you chan
 
 ### What is the license?
 
-Vitesse is proprietary software: © Maxime Nathan Lestage, all rights reserved. Its source is published on crates.io and GitHub so that you can read, audit and build it, and you may use it freely as a dependency of your own programs, commercial ones included. Modifying it or redistributing its source needs the author's written permission. The full terms are in the repository's [LICENSE](https://maxlestage.github.io/Vitesse/LICENSE.txt).
+Vitesse is proprietary software: © Maxime Nathan Lestage, all rights reserved. Its source is published on crates.io and GitHub so that you can read, audit and build it, and you may use it freely as a dependency of your own programs, commercial ones included. Modifying it or redistributing its source needs the author's written permission. The full terms are in the repository's [LICENSE](https://vitesse-f16135654c3d.herokuapp.com/assets/LICENSE.txt).
 
 ## Current limitations
 

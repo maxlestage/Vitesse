@@ -1,6 +1,6 @@
 # Documentation de Vitesse
 
-Tout ce qu'il faut pour créer des applications web rapides avec Vitesse, le framework à la Express.js pour Rust : de votre première route jusqu'au déploiement en production. Vous pouvez aussi lire ces pages sur le site : https://maxlestage.github.io/Vitesse/fr/docs/
+Tout ce qu'il faut pour créer des applications web rapides avec Vitesse, le framework à la Express.js pour Rust : de votre première route jusqu'au déploiement en production. Vous pouvez aussi lire ces pages sur le site : https://vitesse-f16135654c3d.herokuapp.com/fr/docs/
 
 ## Premiers pas
 
@@ -46,5 +46,5 @@ Tout ce qu'il faut pour créer des applications web rapides avec Vitesse, le fra
 ## Autres ressources
 
 - Référence de l'API générée à partir du code source : https://docs.rs/vitesse
-- Code source, issues et exemples : https://maxlestage.github.io/Vitesse/
-- Aussi disponible en [anglais](https://maxlestage.github.io/Vitesse/en/docs/README/) et en [espagnol](https://maxlestage.github.io/Vitesse/es/docs/README/).
+- Code source, issues et exemples : https://github.com/maxlestage/Vitesse
+- Aussi disponible en [anglais](https://vitesse-f16135654c3d.herokuapp.com/en/docs/) et en [espagnol](https://vitesse-f16135654c3d.herokuapp.com/es/docs/).

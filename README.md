@@ -397,14 +397,18 @@ it in your pull request. Notable changes go in
 
 ### Publishing a release (maintainers)
 
-1. Bump `version` in `Cargo.toml` and update `CHANGELOG.md`.
-2. On GitHub, open **Releases** → **Draft a new release**, create a tag
-   `vX.Y.Z` matching the version, and publish the release.
-3. The `Release` workflow runs the tests and publishes the crate to
-   crates.io. It needs the repository secret `CARGO_REGISTRY_TOKEN` (a
+1. Bump `version` in `Cargo.toml` and write its section in `CHANGELOG.md`.
+2. Push to `master`. Once CI is green, the `Release` workflow tags the new
+   version (`vX.Y.Z`), creates its GitHub release with that section of
+   `CHANGELOG.md` as notes, runs the tests and publishes the crate to
+   crates.io. There is no form to fill in.
+3. Publishing needs the repository secret `CARGO_REGISTRY_TOKEN` (a
    crates.io API token with the `publish-new` and `publish-update` scopes).
-   It can also be started by hand from the **Actions** tab, as a dry run by
-   default.
+   Without it, the tag and the GitHub release are still created, and the
+   publication waits: add the secret, then run the workflow by hand from
+   the **Actions** tab with **Only check the package** unticked. A release drafted by hand
+   (**Releases** → **Draft a new release**) publishes too, and a manual run
+   is a dry run by default.
 
 ## License
 

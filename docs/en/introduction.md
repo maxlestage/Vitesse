@@ -112,4 +112,4 @@ The [FAQ](faq.md#current-limitations) gives the reasons in detail.
 > [!TIP]
 > If you already know Express well, do [Your first app](first-app.md) and then keep [Coming from Express](from-express.md) open while you write your own routes.
 
-The full API reference is generated from the source code. Run `cargo doc --open` in a project that depends on Vitesse, or browse the code on [GitHub](https://maxlestage.github.io/Vitesse/).
+The full API reference is generated from the source code. Run `cargo doc --open` in a project that depends on Vitesse, or browse the code on [GitHub](https://github.com/maxlestage/Vitesse).

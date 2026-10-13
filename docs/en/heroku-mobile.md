@@ -47,7 +47,7 @@ Your app serves the whole website: the home page, the documentation (`/en/docs`,
 
 To change the code, you need your own copy of the repository on GitHub:
 
-1. Open https://maxlestage.github.io/Vitesse/, tap **Fork**, then **Create fork**.
+1. Open https://github.com/maxlestage/Vitesse, tap **Fork**, then **Create fork**.
 2. Open the Deploy link with your GitHub username instead of `maxlestage`, by typing it in the address bar:
 
    ```text

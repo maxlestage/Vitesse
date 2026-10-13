@@ -2,7 +2,7 @@
 //! documentation.
 //!
 //! - côté serveur (natif) : une application Vitesse qui rend chaque page avec
-//!   [active](https://maxlestage.github.io/Active/), sert les fichiers statiques, le
+//!   [active](https://active-c1883a966650.herokuapp.com/), sert les fichiers statiques, le
 //!   manifeste et le service worker, et exporte tout le site en fichiers statiques
 //!   pour GitHub Pages ;
 //! - côté navigateur (wasm32) : les îlots interactifs, hydratés par active, et les

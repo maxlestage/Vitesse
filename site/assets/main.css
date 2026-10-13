@@ -2236,7 +2236,7 @@ body.has-cursor .cursor {
   color: var(--hot-1);
 }
 
-/* L'écosystème : les sept projets de l'auteur, une grille à filets, le projet courant marqué. */
+/* L'écosystème : les cinq projets de l'auteur, une grille à filets, le projet courant marqué. */
 .footer__eco {
   position: relative;
   max-width: var(--max);

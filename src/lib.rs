@@ -70,12 +70,12 @@
 //! ## Guide
 //!
 //! This page is the API reference. The full guide is available on the
-//! [Vitesse website](https://maxlestage.github.io/Vitesse/en/docs/), in English, French and
+//! [Vitesse website](https://vitesse-f16135654c3d.herokuapp.com/en/docs/), in English, French and
 //! Spanish.
 
 #![doc(
-    html_logo_url = "https://maxlestage.github.io/Vitesse/assets/favicon.svg",
-    html_favicon_url = "https://maxlestage.github.io/Vitesse/assets/favicon.svg"
+    html_logo_url = "https://vitesse-f16135654c3d.herokuapp.com/assets/favicon.svg",
+    html_favicon_url = "https://vitesse-f16135654c3d.herokuapp.com/assets/favicon.svg"
 )]
 #![warn(missing_docs)]
 

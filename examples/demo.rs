@@ -51,7 +51,7 @@ const INDEX: &str = r#"<!doctype html>
       <li><code>GET</code> and <code>DELETE /api/todos/:id</code></li>
       <li><a href="/health"><code>GET /health</code></a></li>
     </ul>
-    <p><a href="https://maxlestage.github.io/Vitesse/en/docs/">Read the documentation</a></p>
+    <p><a href="https://vitesse-f16135654c3d.herokuapp.com/en/docs/">Read the documentation</a></p>
   </main>
 </body>
 </html>

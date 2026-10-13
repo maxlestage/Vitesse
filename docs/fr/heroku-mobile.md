@@ -47,7 +47,7 @@ Votre application sert tout le site : la page d'accueil, la documentation (`/fr/
 
 Pour modifier le code, il vous faut votre propre copie du dépôt sur GitHub :
 
-1. Ouvrez https://maxlestage.github.io/Vitesse/, touchez **Fork**, puis **Create fork**.
+1. Ouvrez https://github.com/maxlestage/Vitesse, touchez **Fork**, puis **Create fork**.
 2. Ouvrez le lien de déploiement avec votre nom d'utilisateur GitHub à la place de `maxlestage`, en le tapant dans la barre d'adresse :
 
    ```text

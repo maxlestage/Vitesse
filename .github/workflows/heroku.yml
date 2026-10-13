@@ -3,7 +3,7 @@
 # set up and triggered from a phone. Heroku builds the app itself, in one of
 # two ways:
 #   - buildpack (default): the emk/rust buildpack, configured by RustConfig and
-#     Procfile, on the heroku-24 stack, like the "Deploy to Heroku" button;
+#     Procfile, on the heroku-26 stack, like the "Deploy to Heroku" button;
 #   - docker: the Dockerfile, through heroku.yml, on the container stack.
 #
 # Setup (see docs/en/heroku-mobile.md):
@@ -84,7 +84,7 @@ jobs:
         run: |
           set -euo pipefail
           case "$BUILD" in
-            buildpack) stack=heroku-24 ;;
+            buildpack) stack=heroku-26 ;;
             docker) stack=container ;;
             *) echo "::error::HEROKU_BUILD must be buildpack or docker, not \"$BUILD\"."; exit 1 ;;
           esac

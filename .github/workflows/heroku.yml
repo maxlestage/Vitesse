@@ -1,12 +1,16 @@
 # Deploys the app to Heroku on every push to master (and on demand), without
 # the Heroku CLI: everything goes through the Heroku Platform API, so it can be
-# set up and triggered from a phone. Heroku builds the Docker image itself
-# from heroku.yml, exactly like the "Deploy to Heroku" button.
+# set up and triggered from a phone. Heroku builds the app itself, in one of
+# two ways:
+#   - buildpack (default): the emk/rust buildpack, configured by RustConfig and
+#     Procfile, on the heroku-24 stack, like the "Deploy to Heroku" button;
+#   - docker: the Dockerfile, through heroku.yml, on the container stack.
 #
 # Setup (see docs/en/heroku-mobile.md):
 #   - repository secret   HEROKU_API_KEY   a Heroku API key or authorization token
 #   - repository variable HEROKU_APP_NAME  the app name (created if missing)
 #   - optional variable   HEROKU_REGION    us (default) or eu
+#   - optional variable   HEROKU_BUILD     buildpack (default) or docker
 # Without the secret, pushes simply skip the deployment.
 
 name: Deploy to Heroku
@@ -21,6 +25,9 @@ on:
       - "Cargo.lock"
       - "Dockerfile"
       - "heroku.yml"
+      - "RustConfig"
+      - "Procfile"
+      - "heroku-build.sh"
       - ".github/workflows/heroku.yml"
   workflow_dispatch:
     inputs:
@@ -68,6 +75,7 @@ jobs:
       HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}
       APP: ${{ inputs.app || vars.HEROKU_APP_NAME }}
       REGION: ${{ vars.HEROKU_REGION || 'us' }}
+      BUILD: ${{ vars.HEROKU_BUILD || 'buildpack' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -75,6 +83,11 @@ jobs:
         name: Build and release on Heroku
         run: |
           set -euo pipefail
+          case "$BUILD" in
+            buildpack) stack=heroku-24 ;;
+            docker) stack=container ;;
+            *) echo "::error::HEROKU_BUILD must be buildpack or docker, not \"$BUILD\"."; exit 1 ;;
+          esac
           api() {
             curl -fsS -H "Accept: application/vnd.heroku+json; version=3" \
               -H "Authorization: Bearer $HEROKU_API_KEY" \
@@ -92,14 +105,22 @@ jobs:
             404)
               echo "Creating the app in region $REGION…"
               api -X POST https://api.heroku.com/apps \
-                -d "{\"name\":\"$APP\",\"region\":\"$REGION\",\"stack\":\"container\"}" > "$info" ;;
+                -d "{\"name\":\"$APP\",\"region\":\"$REGION\",\"stack\":\"$stack\"}" > "$info" ;;
             401) echo "::error::Heroku rejected the API key (HEROKU_API_KEY)."; exit 1 ;;
             403) echo "::error::This Heroku account cannot access the app \"$APP\" (the name may belong to someone else)."; exit 1 ;;
             *) echo "::error::Unexpected Heroku response ($status): $(cat "$info")"; exit 1 ;;
           esac
-          if [ "$(jq -r '.build_stack.name' "$info")" != "container" ]; then
-            echo "Switching the app to the container stack (Docker)…"
-            api -X PATCH "https://api.heroku.com/apps/$APP" -d '{"build_stack":"container"}' > /dev/null
+          current=$(jq -r '.build_stack.name' "$info")
+          # A buildpack app keeps its heroku-NN stack; only the container stack changes.
+          if { [ "$BUILD" = docker ] && [ "$current" != container ]; } ||
+             { [ "$BUILD" = buildpack ] && [ "$current" = container ]; }; then
+            echo "Switching the app from the $current stack to $stack…"
+            api -X PATCH "https://api.heroku.com/apps/$APP" -d "{\"build_stack\":\"$stack\"}" > /dev/null
+          fi
+          if [ "$BUILD" = buildpack ]; then
+            echo "Buildpack: emk/rust"
+            api -X PUT "https://api.heroku.com/apps/$APP/buildpack-installations" \
+              -d '{"updates":[{"buildpack":"emk/rust"}]}' > /dev/null
           fi
           echo "::endgroup::"
 

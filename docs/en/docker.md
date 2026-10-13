@@ -144,7 +144,7 @@ Most container platforms give the port in the `PORT` variable, so the image usua
 
 | Platform | In short |
 |---|---|
-| Heroku | See [Deploy to Heroku from your phone](heroku-mobile.md). By default Heroku compiles the app with the `emk/rust` buildpack; on the container stack (`HEROKU_BUILD` set to `docker` in the workflow), it builds this image itself from `heroku.yml`. |
+| Heroku | See [Deploy to Heroku from your phone](heroku-mobile.md). By default Heroku compiles the Vitesse website with the `emk/rust` buildpack; on the container stack (`HEROKU_BUILD` set to `docker` in the workflow), it builds this image itself from `heroku.yml`, with the demo app or the example of `ARG EXAMPLE`. |
 | Render | Create a web service from your repository with the Docker runtime; Render builds the `Dockerfile` and sets `PORT`. |
 | Railway | Detects the `Dockerfile` and provides `PORT`. |
 | Fly.io | `fly launch` detects the `Dockerfile`; check that `internal_port` in `fly.toml` matches the port your app listens on (`8080` with this image). |

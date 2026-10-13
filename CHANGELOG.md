@@ -32,6 +32,14 @@ First public release.
   stack) remains available: set the repository variable `HEROKU_BUILD` to `docker`. The
   Heroku guide explains both, how to deploy another example, and how to
   deploy your own project with the buildpack and a `Procfile`.
+- Heroku: the buildpack now deploys the Vitesse website (`site/`, served by
+  Vitesse itself, with its documentation, its islands and the PWA) instead of
+  the demo app: `heroku-build.sh` builds `vitesse-site` and the islands, the
+  `Procfile` starts it with `SITE_DIR` and `DOCS_DIR`, and the "Deploy to
+  Heroku" workflow also runs on changes to `site/` and `docs/`. The Docker
+  build (`HEROKU_BUILD` set to `docker`) still deploys the demo app, or the
+  example named by `ARG EXAMPLE` in the `Dockerfile`. The Heroku guide, the
+  READMEs and the Docker guide say so, in English, French and Spanish.
 
 ### Added
 

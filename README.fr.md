@@ -267,9 +267,10 @@ La documentation existe aussi en [anglais](docs/en/README.md) et en
 ## Déployer sur Heroku
 
 Ouvrez `https://heroku.com/deploy?template=https://github.com/maxlestage/Vitesse` sur votre
-téléphone pour déployer l'application de démonstration (`examples/demo.rs`) sur
-votre compte Heroku : Heroku lit `app.json` et compile lui-même l'application avec
-le buildpack Rust (`emk/rust` ; une construction Docker reste possible), vous n'avez
+téléphone pour déployer le site de Vitesse (`site/`, servi par Vitesse lui-même, avec
+sa documentation) sur votre compte Heroku : Heroku lit `app.json` et le compile lui-même
+avec le buildpack Rust (`emk/rust` ; une construction Docker de l'application de
+démonstration, `examples/demo.rs`, reste possible), vous n'avez
 même pas besoin d'un ordinateur (Heroku n'a plus d'offre gratuite : un
 dyno payant est nécessaire). Le guide pas à pas couvre
 aussi les déploiements automatiques avec GitHub Actions :
@@ -339,7 +340,7 @@ dans la [FAQ](docs/fr/faq.md).
 ```sh
 cargo run --release --example hello      # Hello World
 cargo run --release --example rest_api   # API CRUD complète
-cargo run --release --example demo       # l'application déployée sur Heroku (lit $PORT)
+cargo run --release --example demo       # la démo, construction Docker d'Heroku (lit $PORT)
 cargo run --release --example chat       # salon de discussion WebSocket (websocat ws://localhost:3000/chat/ada)
 cargo run --release --example http3 --features http3   # HTTP/1.1 + HTTP/3 sur le port 4433, certificat auto-signé
 cargo run --release --example https --features tls,http2   # HTTPS + HTTP/2 sur le port 3443, certificat auto-signé

@@ -265,9 +265,10 @@ The documentation is also available in [French](docs/fr/README.md) and
 ## Deploy to Heroku
 
 Open `https://heroku.com/deploy?template=https://github.com/maxlestage/Vitesse` on your
-phone to deploy the demo app (`examples/demo.rs`) to your Heroku account: Heroku
-reads `app.json` and compiles the app itself with the Rust buildpack (`emk/rust`;
-a Docker build is also available), so you don't even need a computer (Heroku has no free plan, so a paid dyno is required). The step-by-step
+phone to deploy the Vitesse website (`site/`, served by Vitesse itself, with its
+documentation) to your Heroku account: Heroku reads `app.json` and compiles it itself
+with the Rust buildpack (`emk/rust`; a Docker build of the demo app,
+`examples/demo.rs`, is also available), so you don't even need a computer (Heroku has no free plan, so a paid dyno is required). The step-by-step
 guide also covers automatic deployments with GitHub Actions:
 [Deploy to Heroku from your phone](docs/en/heroku-mobile.md).
 
@@ -332,7 +333,7 @@ may change until 1.0. The full list is in the [FAQ](docs/en/faq.md).
 ```sh
 cargo run --release --example hello      # Hello World
 cargo run --release --example rest_api   # complete CRUD API
-cargo run --release --example demo       # the demo app deployed on Heroku (reads $PORT)
+cargo run --release --example demo       # the demo app, Heroku's Docker build (reads $PORT)
 cargo run --release --example chat       # WebSocket chat room (websocat ws://localhost:3000/chat/ada)
 cargo run --release --example http3 --features http3   # HTTP/1.1 + HTTP/3 on port 4433, self-signed certificate
 cargo run --release --example https --features tls,http2   # HTTPS + HTTP/2 on port 3443, self-signed certificate

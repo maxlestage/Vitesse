@@ -25,10 +25,11 @@ First public release.
   TCP port the system chose is taken or reserved (Windows reserves port ranges
   per protocol), instead of failing now and then.
 - Heroku: the demo app is now built with the Rust buildpack `emk/rust` on the
-  heroku-24 stack (`RustConfig`, `Procfile` and `heroku-build.sh`), by the
-  Deploy button and by the "Deploy to Heroku" workflow. The Docker build
-  (`heroku.yml` and the `Dockerfile`, on the container stack) remains
-  available: set the repository variable `HEROKU_BUILD` to `docker`. The
+  heroku-26 stack (`RustConfig` sets the Rust version and skips the
+  buildpack's own build, `heroku-build.sh` builds the example, the `Procfile`
+  starts it), by the Deploy button and by the "Deploy to Heroku" workflow.
+  The Docker build (`heroku.yml` and the `Dockerfile`, on the container
+  stack) remains available: set the repository variable `HEROKU_BUILD` to `docker`. The
   Heroku guide explains both, how to deploy another example, and how to
   deploy your own project with the buildpack and a `Procfile`.
 

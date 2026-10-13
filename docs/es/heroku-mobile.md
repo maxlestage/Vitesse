@@ -18,10 +18,10 @@ El repositorio ya contiene todo lo que Heroku necesita, así que no hay que comp
 
 | Archivo | Función |
 |---|---|
-| `app.json` | Describe la aplicación para el botón Deploy (stack heroku-24, buildpack de Rust `emk/rust`). |
-| `RustConfig` | Configura el buildpack: compila en modo release el ejemplo indicado por `EXAMPLE` (`demo`). |
+| `app.json` | Describe la aplicación para el botón Deploy (stack heroku-26, buildpack de Rust `emk/rust`). |
+| `RustConfig` | Configura el buildpack: la versión de Rust, y `heroku-build.sh` en lugar de su propia compilación. |
 | `Procfile` | Le indica a Heroku cómo arrancar la aplicación: `web: exec target/release/demo`. |
-| `heroku-build.sh` | Copia el ejemplo compilado en `target/release`, la única carpeta cuyos binarios conserva el buildpack. |
+| `heroku-build.sh` | La compilación, que se ejecuta una vez que el buildpack ha instalado Rust: compila en modo release el ejemplo indicado en su línea `example=demo` y luego lo copia en `target/release`. |
 | `heroku.yml` | La otra vía: le indica a Heroku que construya una imagen Docker a partir del `Dockerfile` (stack «container»). |
 | `Dockerfile` | Compila un ejemplo (`demo` por defecto) en modo release y lo empaqueta en una imagen pequeña. |
 | `examples/demo.rs` | La aplicación de demostración: una página de inicio, `/health` y una pequeña API JSON. |
@@ -75,7 +75,7 @@ Objetivo: cada commit en la rama `master` de tu fork reconstruye y redespliega l
 En cada ejecución:
 
 1. comprueba que está configurado (si no, se detiene sin fallar cuando se trata de un push);
-2. crea la aplicación de Heroku si todavía no existe (en el stack heroku-24) y configura su buildpack como `emk/rust`;
+2. crea la aplicación de Heroku si todavía no existe (en el stack heroku-26) y configura su buildpack como `emk/rust`;
 3. envía tu código a Heroku, que lo compila con el buildpack y lo publica; el registro de construcción se muestra en directo en GitHub;
 4. escribe la dirección de la aplicación en el resumen de la ejecución.
 
@@ -132,18 +132,18 @@ A partir de ahora, **cada commit en `master` que toque el código** redespliega 
 
 ### Docker en lugar del buildpack
 
-Por defecto, el workflow usa el buildpack: si la aplicación está en el stack Docker «container» (una aplicación creada con una versión anterior del botón, por ejemplo), la pasa al stack heroku-24. Para construir en su lugar la imagen Docker a partir de `heroku.yml` y del `Dockerfile`, como antes, añade la variable de repositorio `HEROKU_BUILD` con el valor `docker` (paso 2): el workflow pone entonces la aplicación en el stack container. Borra la variable, o dale el valor `buildpack`, para volver atrás.
+Por defecto, el workflow usa el buildpack: si la aplicación está en el stack Docker «container» (una aplicación creada con una versión anterior del botón, por ejemplo), la pasa al stack heroku-26. Para construir en su lugar la imagen Docker a partir de `heroku.yml` y del `Dockerfile`, como antes, añade la variable de repositorio `HEROKU_BUILD` con el valor `docker` (paso 2): el workflow pone entonces la aplicación en el stack container. Borra la variable, o dale el valor `buildpack`, para volver atrás.
 
 ### Desde una computadora, sin GitHub Actions
 
 Con la [CLI de Heroku](https://devcenter.heroku.com/articles/heroku-cli), en tu copia del repositorio:
 
 ```sh
-heroku create mi-demo-vitesse --stack heroku-24 --buildpack emk/rust
+heroku create mi-demo-vitesse --stack heroku-26 --buildpack emk/rust
 git push heroku master
 ```
 
-Para una aplicación existente, ejecuta primero `heroku stack:set heroku-24` (si está en el stack container) y después `heroku buildpacks:set emk/rust`. En el panel de Heroku, el buildpack se configura en **Settings** → **Buildpacks** → **Add buildpack** de la aplicación: escribe `emk/rust` (la aplicación no debe estar en el stack container).
+Para una aplicación existente, ejecuta primero `heroku stack:set heroku-26` (si está en el stack container) y después `heroku buildpacks:set emk/rust`. En el panel de Heroku, el buildpack se configura en **Settings** → **Buildpacks** → **Add buildpack** de la aplicación: escribe `emk/rust` (la aplicación no debe estar en el stack container).
 
 ## 3. Personaliza tu aplicación
 
@@ -198,10 +198,10 @@ Puedes dejar `demo.rs` como está y escribir tu aplicación en un archivo nuevo:
    ```
 
 3. Haz commit del archivo.
-4. Abre `RustConfig`, toca el lápiz y sustituye la línea `EXAMPLE=demo` por `EXAMPLE=mi_app` (el nombre del archivo sin `.rs`). Haz commit.
+4. Abre `heroku-build.sh`, toca el lápiz y sustituye la línea `example=demo` por `example=mi_app` (el nombre del archivo sin `.rs`). Haz commit.
 5. Abre `Procfile` y sustituye `target/release/demo` por `target/release/mi_app`. Haz commit: el workflow construye y despliega tu ejemplo (el despliegue del commit anterior puede fallar mientras solo uno de los dos archivos esté cambiado).
 
-`EXAMPLE` en `RustConfig` elige qué archivo de `examples/` se compila, y el `Procfile` arranca ese binario: los dos deben nombrar el mismo ejemplo. Con la construcción Docker (`HEROKU_BUILD` en `docker`), sustituye en su lugar la línea `ARG EXAMPLE=demo` del `Dockerfile`. Tu código puede usar los crates ya declarados en `Cargo.toml`: `vitesse`, `serde` (con `derive`) y `tokio`.
+`example` en `heroku-build.sh` elige qué archivo de `examples/` se compila, y el `Procfile` arranca ese binario: los dos deben nombrar el mismo ejemplo. Con la construcción Docker (`HEROKU_BUILD` en `docker`), sustituye en su lugar la línea `ARG EXAMPLE=demo` del `Dockerfile`. Tu código puede usar los crates ya declarados en `Cargo.toml`: `vitesse`, `serde` (con `derive`) y `tokio`.
 
 > [!IMPORTANT]
 > Tu aplicación debe escuchar en **`0.0.0.0:$PORT`**. Heroku elige el puerto al arrancar y lo pasa en la variable de entorno `PORT`. `app.run(port)` con un simple número de puerto (o una cadena que solo contenga dígitos) ya escucha en todas las interfaces. Nunca escribas `3000` a fuego y nunca escuches solo en `127.0.0.1`: Heroku no podría llegar a tu aplicación.
@@ -217,7 +217,7 @@ El mismo buildpack despliega cualquier aplicación Vitesse que sea un crate norm
 web: ./target/release/mi-app
 ```
 
-El buildpack ejecuta `cargo build --release` por defecto, así que no hace falta ningún `RustConfig`, salvo si quieres otras opciones de Cargo (`RUST_CARGO_BUILD_FLAGS`) o una versión de Rust fija (`VERSION`): consulta la [página del buildpack](https://elements.heroku.com/buildpacks/emk/heroku-buildpack-rust). Crea la aplicación en el stack heroku-24 con el buildpack `emk/rust`, como en «Desde una computadora, sin GitHub Actions» o desde el panel. ¿Prefieres Docker? Usa el `Dockerfile` de [Docker](docker.md#tu-propio-proyecto) con un `heroku.yml` como el de este repositorio, en el stack container.
+El buildpack ejecuta un simple `cargo build --release` y conserva los binarios de `target/release`: para un único crate cuyo binario es la aplicación, eso y el `Procfile` bastan. Un `RustConfig` es opcional: una línea como `VERSION=1.90` fija la versión de Rust. Si hace falta más (un paquete de un workspace, un ejemplo, un bundle WebAssembly), haz como este repositorio: en `RustConfig`, `RUST_SKIP_BUILD=1` omite la compilación del propio buildpack, y un `trap` ejecuta tu script de compilación una vez instalado Rust (consulta el `RustConfig` y el `heroku-build.sh` de este repositorio). Crea la aplicación en el stack heroku-26 con el buildpack `emk/rust`, como en «Desde una computadora, sin GitHub Actions» o desde el panel. ¿Prefieres Docker? Usa el `Dockerfile` de [Docker](docker.md#tu-propio-proyecto) con un `heroku.yml` como el de este repositorio, en el stack container.
 
 ### Configuración: variables de entorno
 
@@ -253,7 +253,7 @@ Abre el registro de construcción: en GitHub (pestaña **Actions**, ejecución f
 | Mensaje | Causa | Solución |
 |---|---|---|
 | `error[E…]` con un archivo y una línea | Error de compilación de Rust | Corrige el código en esa línea y vuelve a hacer commit. |
-| `no example target named …` | `EXAMPLE` en `RustConfig` (o `ARG EXAMPLE` en el `Dockerfile`) no coincide con ningún archivo de `examples/` | Usa el nombre del archivo sin `.rs`. |
+| `no example target named …` | `example` en `heroku-build.sh` (o `ARG EXAMPLE` en el `Dockerfile`) no coincide con ningún archivo de `examples/` | Usa el nombre del archivo sin `.rs`. |
 | `no matching package named …` o `failed to select a version …` | El nombre o la versión de un crate en `Cargo.toml` es incorrecto | Comprueba el nombre exacto y una versión existente en https://crates.io y vuelve a hacer commit. |
 
 ### El workflow falla antes de construir

@@ -9,4 +9,4 @@
 VERSION=stable
 EXAMPLE=demo
 RUST_CARGO_BUILD_FLAGS="--release --example $EXAMPLE"
-trap 'status=$?; if [ "$status" -eq 0 ]; then "$BUILD_DIR/heroku-build.sh" "$EXAMPLE" || exit 1; fi' EXIT
+trap 'status=$?; if [ "$status" -eq 0 ]; then bash "$BUILD_DIR/heroku-build.sh" "$EXAMPLE" || exit 1; fi' EXIT

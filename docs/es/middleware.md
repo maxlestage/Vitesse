@@ -142,6 +142,22 @@ app.on_response(|res: &mut Response| {
 - Los hooks de un mismo tipo se ejecutan en el orden en que se añadieron; un pánico en un hook se convierte en un `500`.
 - Sin hooks, no se añade nada al recorrido de la petición. Para ejecutar código *alrededor* del handler (medir la duración, `tokio::time::timeout`…), o de forma asíncrona, usa un middleware.
 
+### Hooks asíncronos
+
+`app.on_request_async` y `app.pre_handler_async` son las versiones de `on_request` y `pre_handler` para los hooks que esperan algo (una caché, una base de datos, otro servicio). Reciben la petición y la devuelven, o la detienen con un error:
+
+```rust
+app.pre_handler_async(|mut req: Request| async move {
+    if let Some(slug) = req.param("tenant").map(str::to_owned) {
+        let tenant = load_tenant(&slug).await.ok_or_else(|| Error::not_found("inquilino desconocido"))?;
+        req.set(tenant);
+    }
+    Ok(req)
+});
+```
+
+Los hooks asíncronos se ejecutan después de los hooks simples del mismo tipo, en el orden en que se añadieron. Los routers y los grupos tienen sus propios hooks, que solo los cubren a ellos: consulta [Routers](routers.md).
+
 ## Un middleware solo para algunas rutas
 
 Hay tres formas de limitar un middleware a algunas rutas:
@@ -185,6 +201,41 @@ app.middleware(|req: Request, next: Next| async move {
 });
 ```
 
+## Grupos de middlewares: `Stack` y `middleware::group`
+
+Una `Stack` reúne varios middlewares en uno solo, para usarlos juntos en la aplicación, un router, un grupo o una sola ruta:
+
+```rust
+use std::time::Duration;
+use vitesse::middleware::Stack;
+
+let api = Stack::new()
+    .with(middleware::cors())
+    .with(middleware::rate_limit(100, Duration::from_secs(60)));
+
+app.group("/api", |r| {
+    r.middleware(api.clone());
+    r.get("/users", list_users);
+});
+app.post("/webhook", webhook.with(api));
+```
+
+Como los grupos `web` y `api` de Laravel, una pila puede tener nombre con `app.middleware_group`, y usarse por su nombre con `middleware::group`, incluso en un módulo que no tiene acceso a la aplicación:
+
+```rust
+app.middleware_group("web", Stack::new().with(middleware::helmet()).with(middleware::request_id()));
+app.middleware_group("api", Stack::new().with(middleware::cors()).with(middleware::bearer_auth("secret")));
+app.group("/admin", admin::routes);
+
+// src/admin.rs
+pub fn routes(r: &mut Router) {
+    r.middleware(middleware::group("web"));
+    r.get("/dashboard", dashboard);
+}
+```
+
+Los middlewares de una pila se ejecutan en orden, exactamente como si se hubieran añadido uno a uno. El nombre se busca en la primera petición y luego se recuerda; un nombre desconocido responde `500` y queda registrado.
+
 ## Middlewares incluidos
 
 El módulo `vitesse::middleware` (accesible como `middleware::` con el preludio) trae los clásicos:
@@ -202,6 +253,8 @@ El módulo `vitesse::middleware` (accesible como `middleware::` con el preludio)
 | `middleware::session(almacén)` | `express-session` | sesiones del lado del servidor, que se leen con `req.session()` (feature `session`) |
 | `middleware::concurrency_limit(max)` | | limita el número de peticiones atendidas a la vez |
 | `middleware::rate_limit(max, periodo)` | `express-rate-limit` | peticiones por cliente y periodo, `429` por encima |
+| `middleware::etag()` | el ajuste `etag` de Express | `ETag` y `304 Not Modified` para las respuestas en memoria |
+| `middleware::cache(duración)` | `apicache` | una caché de respuestas completas en el servidor, con un tiempo de vida |
 | `middleware::serve_static(carpeta)` | `express.static(carpeta)` | archivos estáticos, ver [Archivos estáticos](static-files.md) |
 | `middleware::compress()` | `compression()` | respuestas en Brotli o gzip (feature `compress`) |
 | `middleware::decompress()` | | cuerpos de petición comprimidos (feature `compress`) |
@@ -435,6 +488,42 @@ api.middleware(
 ```
 
 Los contadores viven en la memoria del proceso y se limpian automáticamente. Con varias instancias de la aplicación (varios servidores o contenedores), cada una cuenta por su cuenta.
+
+### `etag`
+
+Añade un `ETag` a las respuestas `200` de las peticiones `GET` y `HEAD` cuyo cuerpo está en memoria (texto, JSON, HTML…), y responde `304 Not Modified`, sin cuerpo, cuando el navegador ya tiene esa versión (`If-None-Match`). Es el ajuste `etag` de Express, aquí opcional:
+
+```rust
+app.middleware(middleware::etag());
+```
+
+El handler se ejecuta igualmente: se ahorra ancho de banda, no trabajo. Los cuerpos en flujo se dejan tal cual, y los archivos servidos con `res::file` o `ServeDir` ya tienen su propio `ETag`.
+
+### `cache`
+
+Guarda respuestas completas en memoria durante un tiempo de vida, como `apicache` o el `responsecache` de Laravel: el primer `GET` de una URL ejecuta el handler, los siguientes, hasta que la entrada caduca, se responden desde la memoria sin ejecutarlo.
+
+```rust
+use std::time::Duration;
+
+let cache = middleware::cache(Duration::from_secs(60)).max_entries(1_000);
+app.get("/posts", list_posts.with(cache.clone()));
+app.post("/posts", move |req: Request| {
+    let cache = cache.clone();
+    async move {
+        let post = create_post(req).await?;
+        cache.invalidate("/posts"); // la lista ha cambiado
+        Ok::<_, Error>((201, Json(post)))
+    }
+});
+```
+
+- Las respuestas en caché llevan un `ETag` (y reciben `304` cuando el navegador tiene la misma versión), `Age`, `X-Cache: HIT` o `MISS`, y `Cache-Control: public, max-age=…` salvo que el handler haya puesto uno (`.cache_control(false)` para no decir nada a los navegadores).
+- Solo se guardan las respuestas `200` con el cuerpo en memoria, de 1 MiB como máximo por defecto (`.max_body(bytes)`), y nunca las que ponen una cookie o dicen `Cache-Control: no-store`, `private` o `no-cache`. Las peticiones con una cabecera `Authorization` no se guardan.
+- La clave es la ruta y la query string. `.key(|req| …)` añade aquello de lo que depende la respuesta (el idioma, el usuario), o devuelve `None` para no guardar una petición.
+- Los clones comparten sus entradas: `cache.invalidate(clave)`, `cache.invalidate_prefix("/posts")` y `cache.clear()` las eliminan. Por encima de `.max_entries(n)` (10 000 por defecto), primero se van las entradas caducadas y luego las más antiguas.
+
+Las entradas viven en la memoria del proceso: con varias instancias de la aplicación, cada una tiene su propia caché.
 
 ### `compress`
 

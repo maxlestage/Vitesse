@@ -26,7 +26,9 @@ Todo lo que necesitas para crear aplicaciones web rápidas con Vitesse, el frame
 ## Profundizando
 
 - [Pruebas](testing.md): probar tu aplicación en memoria con `TestClient`, sin red.
-- [OpenAPI y Swagger UI](openapi.md): genera el documento OpenAPI 3.1 de tus rutas, descríbelas y sirve Swagger UI.
+- [OpenAPI y Swagger UI](openapi.md): genera el documento OpenAPI 3.1 de tus rutas, descríbelas (con esquemas derivados de tus tipos) y sirve Swagger UI, Scalar o Redoc.
+- [PubSub y canales](pubsub.md): temas y salas para WebSocket, Server-Sent Events y tareas en segundo plano, como los canales de Phoenix.
+- [Tareas en segundo plano y programadas](background.md): una cola de tareas con reintentos y límite de ritmo, y un planificador de tareas recurrentes.
 - [Configuración del servidor](server.md): `run`, `listen` y `bind`, direcciones de escucha y sockets Unix, workers, tiempos de espera, límites y apagado.
 - [HTTPS y HTTP/2](https.md): servir tú mismo HTTPS y HTTP/2 con rustls, certificados, redirecciones y h2c.
 - [HTTP/3 y QUIC](http3.md): servir tu aplicación en HTTP/3 junto a HTTP/1.1, certificados y despliegue.

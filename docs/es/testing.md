@@ -233,6 +233,50 @@ async fn rechaza_entradas_incorrectas() {
 
 Cada llamada a `app()` crea un estado nuevo: cada prueba empieza con una «base de datos» vacía y las pruebas nunca se pisan entre sí, aunque se ejecuten en paralelo.
 
+## Aserciones encadenadas
+
+`TestResponse` tiene aserciones que se encadenan, como las pruebas HTTP de Laravel o el `expect` de supertest. Cuando una falla, el mensaje del pánico muestra el código de estado y el cuerpo de la respuesta:
+
+```rust
+client
+    .post("/users")
+    .json(&json!({ "name": "Ada" }))
+    .await
+    .assert_status(201)
+    .assert_header("content-type", "application/json")
+    .assert_json_path("user.name", "Ada") // claves e índices ("data.0.name"), o un puntero JSON
+    .assert_json_includes(json!({ "user": { "id": 7 } }))
+    .assert_json_missing("user.password");
+```
+
+| Aserción | Comprueba |
+|---|---|
+| `assert_status(201)`, `assert_ok()`, `assert_not_found()` | El código de estado (`assert_ok`: cualquier `2xx`) |
+| `assert_redirect("/login")` | Un `3xx` hacia este `Location` |
+| `assert_header(nombre, valor)`, `assert_header_missing(nombre)` | Una cabecera (`content-type` ignora sus parámetros) |
+| `assert_text(texto)`, `assert_see(texto)`, `assert_dont_see(texto)` | Todo el cuerpo, o una parte |
+| `assert_json(valor)`, `assert_json_includes(fragmento)` | El cuerpo JSON, exacto o en parte |
+| `assert_json_path(ruta, valor)`, `assert_json_missing(ruta)`, `assert_json_count(ruta, n)` | Un valor del cuerpo JSON |
+| `assert_validation_errors(&["email"])` | Un `422` cuyos detalles nombran estos campos |
+| `assert_cookie(nombre, valor)` | Una cookie puesta por la respuesta |
+
+`res.json_path("data.0.name")` y `res.cookie("sid")` leen los valores sin comprobar nada. El constructor de peticiones también tiene `.query(&parámetros)`, `.cookie(nombre, valor)` y `.bearer(token)`.
+
+## Conservar las cookies entre peticiones: `client.agent()`
+
+`client.agent()` devuelve un cliente con un tarro de cookies, como el `agent` de supertest: las cookies puestas por una respuesta se envían con las peticiones siguientes, y se retiran cuando la aplicación las borra. Inicia sesión una vez y prueba las páginas protegidas:
+
+```rust
+let agent = TestClient::new(my_api::app()).agent();
+
+agent.post("/login").form(&[("user", "ada"), ("password", "secret")]).await.assert_ok();
+agent.get("/dashboard").await.assert_ok().assert_see("Bienvenida Ada");
+agent.post("/logout").await;
+agent.get("/dashboard").await.assert_redirect("/login");
+```
+
+`agent.cookie(nombre)` lee el tarro, `agent.set_cookie(nombre, valor)` lo llena y `agent.clear_cookies()` lo vacía. Cada agente tiene su propio tarro; sus clones lo comparten.
+
 ## Probar los errores
 
 Los errores son respuestas como cualquier otra: comprueba el estado y el cuerpo `{"error": "..."}`. Los pánicos y los errores internos también merecen una prueba, para asegurarte de que no se filtra nada al cliente:

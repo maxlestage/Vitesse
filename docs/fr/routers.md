@@ -194,6 +194,25 @@ app.mount("/docs/:lang(en|fr|es)", docs);
 
 `req.route()` donne le motif complet, préfixe compris : `/docs/:lang(en|fr|es)/:page?`. Les paramètres optionnels doivent rester à la fin du chemin complet, préfixe et route compris : avec un préfixe comme `/:lang?`, toute route autre que le `/` du routeur fait paniquer `mount`. Placez plutôt le paramètre optionnel dans les routes du routeur, comme ci-dessus.
 
+## Les hooks d'un routeur
+
+Les routeurs et les groupes ont leurs propres hooks, qui ne s'exécutent que pour eux (l'encapsulation de Fastify) : `on_request` et `on_response`, des fonctions simples exécutées avant les middlewares du routeur, et `on_request_async`, qui s'exécute là où il a été ajouté parmi les middlewares :
+
+```rust
+app.group("/admin", |admin| {
+    admin.on_request(|req: &mut Request| match req.header("x-admin") {
+        Some(_) => Ok(()),
+        None => Err(Error::forbidden("réservé aux administrateurs")),
+    });
+    admin.on_response(|res: &mut Response| {
+        res.set_header("cache-control", "no-store");
+    });
+    admin.get("/stats", stats);
+});
+```
+
+Comme les middlewares du routeur, ils couvrent aussi les réponses `404` et `405` sous son préfixe, et `on_response` voit les erreurs de ses propres hooks `on_request`. Les hooks de l'application (voir [Middlewares](middleware.md)) s'exécutent pour toutes les requêtes.
+
 ## Routes WebSocket
 
 `router.ws(chemin, handler)` déclare une route [WebSocket](websocket.md), exactement comme `app.ws`. Le préfixe du routeur s'applique, et ses middlewares s'exécutent sur la requête de poignée de main, avant que la connexion ne soit acceptée : un middleware qui répond `401` refuse la connexion.

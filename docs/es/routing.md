@@ -413,6 +413,28 @@ Los nombres se comprueban en dos momentos:
 
 Las rutas declaradas en un [router](routers.md#rutas-con-nombre-en-los-routers) también pueden tener nombre. El nombre pertenece a toda la aplicación, y la ruta incluye el prefijo de montaje: sus parámetros van primero en la lista de valores.
 
+## Rutas tipadas: `TypedRoute`
+
+Una `TypedRoute` declara un patrón una sola vez, con los tipos de sus parámetros, y luego sirve para registrar la ruta, leer sus parámetros con sus tipos y construir sus enlaces (el `route()` de Laravel, las *verified routes* de Phoenix): ningún nombre que repetir, ningún parámetro que olvidar, y un error de compilación cuando un enlace pasa tipos equivocados.
+
+```rust
+use vitesse::TypedRoute;
+
+static COMMENT: TypedRoute<(String, u32)> = TypedRoute::new("/blog/:slug/comments/:id(\\d+)");
+
+app.get(COMMENT.pattern(), |req: Request| async move {
+    let (slug, id) = COMMENT.params(&req)?; // (String, u32); 400 si un valor no se puede leer
+    Ok::<_, Error>(format!("comentario {id} de {slug}"))
+});
+app.get("/", |_| async {
+    Html(format!("<a href=\"{}\">primer comentario</a>", COMMENT.path(("hello".into(), 1))))
+});
+```
+
+- Los parámetros son una tupla, en el orden del patrón: `TypedRoute<()>`, `TypedRoute<(u32,)>`, hasta seis tipos que implementan `Display` y `FromStr`.
+- `path(parámetros)` codifica los valores (`"a b"` pasa a ser `a%20b`) y entra en pánico si uno incumple su restricción; `try_path` devuelve en su lugar un error `500`, y `url(&req, parámetros)` la URL absoluta.
+- El patrón se comprueba en el primer uso: un patrón que no tiene tantos parámetros como la tupla falla.
+
 ## HEAD, OPTIONS y 405
 
 Vitesse se encarga del comportamiento HTTP estándar:

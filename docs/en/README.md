@@ -26,7 +26,9 @@ Everything you need to build fast web apps with Vitesse, the Express.js-style fr
 ## Going further
 
 - [Testing](testing.md): test your app in memory with `TestClient`, without any network.
-- [OpenAPI and Swagger UI](openapi.md): generate the OpenAPI 3.1 document of your routes, describe them, and serve Swagger UI.
+- [OpenAPI and Swagger UI](openapi.md): generate the OpenAPI 3.1 document of your routes, describe them (with schemas derived from your types), and serve Swagger UI, Scalar or Redoc.
+- [PubSub and channels](pubsub.md): topics and rooms for WebSocket, Server-Sent Events and background tasks, like Phoenix channels.
+- [Background jobs and scheduled tasks](background.md): a job queue with retries and rate limits, and a scheduler for recurring tasks.
 - [Server configuration](server.md): `run`, `listen` and `bind`, listening addresses and Unix sockets, workers, timeouts, limits and shutdown.
 - [HTTPS and HTTP/2](https.md): serve HTTPS and HTTP/2 yourself with rustls, certificates, redirects and h2c.
 - [HTTP/3 and QUIC](http3.md): serve your app over HTTP/3 next to HTTP/1.1, certificates and deployment.

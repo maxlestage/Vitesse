@@ -158,6 +158,32 @@ impl Next {
     }
 }
 
+/// A [`Next`] that can be stored in the request (for
+/// [`Stack`](crate::middleware::Stack)).
+#[derive(Clone, Copy)]
+pub(crate) struct RawNext {
+    chain: &'static Chain,
+    index: usize,
+}
+
+impl RawNext {
+    pub(crate) fn into_next(self) -> Next {
+        Next {
+            chain: self.chain,
+            index: self.index,
+        }
+    }
+}
+
+impl Next {
+    pub(crate) fn into_raw(self) -> RawNext {
+        RawNext {
+            chain: self.chain,
+            index: self.index,
+        }
+    }
+}
+
 /// A handler preceded by middlewares, created by [`HandlerExt::with`].
 pub struct Chained {
     chain: Chain,

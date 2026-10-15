@@ -65,6 +65,15 @@ impl Body {
         self.kind
     }
 
+    /// The content, when it is already in memory (not a stream).
+    pub(crate) fn in_memory(&self) -> Option<Bytes> {
+        match &self.kind {
+            Kind::Empty => Some(Bytes::new()),
+            Kind::Full(bytes) => Some(bytes.clone()),
+            Kind::Stream(_) => None,
+        }
+    }
+
     /// The number of bytes, if the size is known in advance.
     pub fn size(&self) -> Option<u64> {
         http_body::Body::size_hint(self).exact()

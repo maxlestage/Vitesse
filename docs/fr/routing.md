@@ -413,6 +413,28 @@ Les noms sont vérifiés à deux moments :
 
 Les routes déclarées dans un [routeur](routers.md#routes-nommées-dans-les-routeurs) peuvent aussi être nommées. Le nom appartient à toute l'application, et le chemin inclut le préfixe de montage : ses paramètres viennent en premier dans la liste des valeurs.
 
+## Routes typées : `TypedRoute`
+
+Une `TypedRoute` déclare un motif une seule fois, avec les types de ses paramètres, puis sert à enregistrer la route, à lire ses paramètres avec leurs types et à construire ses liens (le `route()` de Laravel, les *verified routes* de Phoenix) : aucun nom à répéter, aucun paramètre à oublier, et une erreur de compilation quand un lien passe de mauvais types.
+
+```rust
+use vitesse::TypedRoute;
+
+static COMMENT: TypedRoute<(String, u32)> = TypedRoute::new("/blog/:slug/comments/:id(\\d+)");
+
+app.get(COMMENT.pattern(), |req: Request| async move {
+    let (slug, id) = COMMENT.params(&req)?; // (String, u32) ; 400 si une valeur ne se lit pas
+    Ok::<_, Error>(format!("commentaire {id} de {slug}"))
+});
+app.get("/", |_| async {
+    Html(format!("<a href=\"{}\">premier commentaire</a>", COMMENT.path(("hello".into(), 1))))
+});
+```
+
+- Les paramètres sont un tuple, dans l'ordre du motif : `TypedRoute<()>`, `TypedRoute<(u32,)>`, jusqu'à six types qui implémentent `Display` et `FromStr`.
+- `path(paramètres)` encode les valeurs (`"a b"` devient `a%20b`) et panique si l'une viole sa contrainte ; `try_path` renvoie plutôt une erreur `500`, et `url(&req, paramètres)` l'URL absolue.
+- Le motif est vérifié au premier usage : un motif qui n'a pas autant de paramètres que le tuple échoue.
+
 ## HEAD, OPTIONS et 405
 
 Vitesse se charge des comportements HTTP standard :

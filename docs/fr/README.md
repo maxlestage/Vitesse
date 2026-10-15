@@ -26,7 +26,9 @@ Tout ce qu'il faut pour créer des applications web rapides avec Vitesse, le fra
 ## Aller plus loin
 
 - [Tests](testing.md) : tester votre application en mémoire avec `TestClient`, sans réseau.
-- [OpenAPI et Swagger UI](openapi.md) : générer le document OpenAPI 3.1 de vos routes, les décrire, et servir Swagger UI.
+- [OpenAPI et Swagger UI](openapi.md) : générer le document OpenAPI 3.1 de vos routes, les décrire (avec des schémas tirés de vos types), et servir Swagger UI, Scalar ou Redoc.
+- [PubSub et canaux](pubsub.md) : des sujets et des salons pour les WebSockets, les Server-Sent Events et les tâches de fond, comme les canaux de Phoenix.
+- [Tâches de fond et planifiées](background.md) : une file de tâches avec nouvelles tentatives et limite de débit, et un planificateur de tâches récurrentes.
 - [Configuration du serveur](server.md) : `run`, `listen` et `bind`, adresses d'écoute et sockets Unix, workers, délais, limites et arrêt.
 - [HTTPS et HTTP/2](https.md) : servir vous-même HTTPS et HTTP/2 avec rustls, certificats, redirections et h2c.
 - [HTTP/3 et QUIC](http3.md) : servir votre application en HTTP/3 à côté de HTTP/1.1, certificats et déploiement.

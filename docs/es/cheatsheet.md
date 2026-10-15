@@ -35,6 +35,7 @@ fn main() -> std::io::Result<()> {
 | `compress` | Desactivada | `middleware::compress()` y `middleware::decompress()` |
 | `session` | Desactivada | `app.cookie_secret`, las cookies firmadas, `middleware::session` y el módulo `vitesse::session` |
 | `templates` | Desactivada | `app.views`, `app.templates`, `req.render` y el módulo `vitesse::templates` (minijinja) |
+| `schemars` | Desactivada | `Operation::body_type::<T>()`, `validated_body`, `response_type`, `query_type` y `OpenApi::schema_type` |
 | `tower` | Desactivada | `middleware::layer`, `app.into_service()` y el módulo `vitesse::tower` |
 
 ```toml
@@ -307,6 +308,9 @@ La respuesta lleva `content-type: text/event-stream` y `cache-control: no-cache`
 | `vitesse::Result<T>` | Alias de `Result<T, vitesse::Error>` |
 | `?` sobre cualquier error estándar | `500 {"error":"Internal Server Error"}`; la causa solo va al log |
 | Pánico en un handler o en un middleware | `500`; el servidor sigue funcionando |
+| `app.problem_details()` | Todos los errores como `application/problem+json` (RFC 9457), con `instance` y `details` |
+| `app.problem_details_with(\|err, problem\| problem.type_uri(…))` | Lo mismo, completado para cada error |
+| `Problem::new(403).type_uri(…).title(…).detail(…).extension(k, v)` | Un documento de problema como respuesta (`vitesse::problem`) |
 
 Consulta [Errores](errors.md).
 
@@ -367,6 +371,11 @@ Consulta [Validación](validation.md) y [OpenAPI](openapi.md).
 | `middleware::decompress()` | | Descomprime los cuerpos de petición `gzip`, `br` y `deflate` (feature `compress`) |
 | `middleware::layer(capa_tower)` | | Cualquier `Layer` de tower / tower-http (feature `tower`) |
 | `middleware::serve_static(carpeta)` | `express.static()` | Equivale a `ServeDir::new(carpeta)` |
+| `middleware::etag()` | ajuste `etag` | `ETag` + `304 Not Modified` para las respuestas en memoria |
+| `middleware::cache(duración)` | `apicache` | Caché de respuestas en el servidor: `.max_entries(n)`, `.key(…)`, `cache.invalidate(ruta)`; `X-Cache: HIT`/`MISS` |
+| `Stack::new().with(a).with(b)` | | Varios middlewares en uno (`vitesse::middleware::Stack`) |
+| `app.middleware_group("api", pila)`, `middleware::group("api")` | grupos de Laravel | Una pila con nombre, usada por su nombre |
+| `app.on_request_async(\|req\| async { Ok(req) })`, `app.pre_handler_async(…)` | hooks async de Fastify | Hooks que esperan; `Err(error)` detiene la petición |
 
 Consulta [Middlewares](middleware.md).
 
@@ -381,6 +390,8 @@ Consulta [Middlewares](middleware.md).
 | `router.middleware(mw)` | Middleware del router: sus rutas y cualquier otra petición bajo su prefijo (`router.use`) |
 | `router.fallback(handler)` | Responde a las rutas bajo el prefijo del router que no coinciden con ninguna ruta, en lugar del fallback de la aplicación |
 | `app.mount("/api", router)` | Lo monta; el prefijo puede contener parámetros (`/users/:id/posts`) |
+| `router.on_request(…)`, `router.on_response(…)`, `router.on_request_async(…)` | Hooks solo para este router (la encapsulación de Fastify) |
+| `static R: TypedRoute<(u32,)> = TypedRoute::new("/users/:id")` | Una ruta tipada: `app.get(R.pattern(), …)`, `R.params(&req)?`, `R.path((42,))` |
 
 Consulta [Routers](routers.md).
 
@@ -538,10 +549,27 @@ La capa puede cambiar el método, la URI, las cabeceras, las extensiones y el cu
 | `res.status()`, `res.header(nombre)`, `res.headers()` | Estado y cabeceras |
 | `res.text()`, `res.bytes()`, `res.json::<T>()` | El cuerpo |
 | `client.get("/ruta-ws")` | En una ruta WebSocket: solo la respuesta al handshake (`426` para HTTP normal); prueba las conversaciones en un puerto real |
-| `.header("cookie", "vitesse.sid=…")` | Devuelve una cookie leída de `res.header("set-cookie")`: el cliente no guarda las cookies (sesiones, cookies firmadas) |
+| `.cookie(nombre, valor)`, `.bearer(token)`, `.query(&parámetros)` | Una cookie, `Authorization: Bearer`, una query string |
+| `client.agent()` | Un cliente con tarro de cookies (sesiones, inicios de sesión): `agent.cookie(nombre)`, `agent.clear_cookies()` |
+| `res.assert_status(201).assert_json_path("user.name", "Ada")` | Aserciones encadenadas: `assert_ok`, `assert_header`, `assert_see`, `assert_json`, `assert_json_includes`, `assert_validation_errors`, `assert_cookie`, `assert_redirect`… |
 | `app.into_service().oneshot(request).await` | Pruebas a través de tower (feature `tower` y `ServiceExt` de tower) |
 
 Consulta [Pruebas](testing.md).
+
+## PubSub, cola de tareas y planificador
+
+| Uso | Descripción |
+|---|---|
+| `PubSub::<String>::new()` | Temas compartidos por sus clones (`vitesse::pubsub`); ponlo en `app.state` |
+| `pubsub.subscribe(tema)`, `sub.recv().await` | Se suscribe, lee el siguiente mensaje |
+| `pubsub.publish(tema, msg)`, `sub.publish(msg)` | A todos los suscriptores; solo a los demás |
+| `pubsub.relay(socket, tema).await` | Un WebSocket entra en una sala (feature `ws`) |
+| `sub.sse(\|msg\| Event::new().data(msg))` | Una suscripción como Server-Sent Events |
+| `Queue::builder().workers(4).retries(3).rate_limit(10, periodo).start()` | Una cola de tareas (`vitesse::queue`) |
+| `queue.dispatch(\|\| async { … })`, `queue.dispatch_after(retraso, tarea)`, `queue.idle().await` | Añade tareas; espera a que no quede ninguna |
+| `Scheduler::new().every(d, nombre, tarea).daily_at(3, 30, nombre, tarea).start()` | Tareas programadas (`vitesse::schedule`), `.stop()` en el manejador |
+
+Consulta [PubSub y canales](pubsub.md) y [Tareas en segundo plano y programadas](background.md).
 
 ## Reexportaciones
 

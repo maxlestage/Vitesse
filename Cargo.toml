@@ -69,6 +69,9 @@ minijinja = { version = "2", features = ["loader", "json"], optional = true }
 tower-layer = { version = "0.3", optional = true }
 tower-service = { version = "0.3", optional = true }
 
+# Schémas OpenAPI dérivés des types (`schemars`) : `Operation::body_type::<T>()`.
+schemars = { version = "1", optional = true }
+
 # Formulaires `multipart/form-data` (`multipart`).
 multer = { version = "3", optional = true }
 
@@ -90,6 +93,9 @@ templates = ["dep:minijinja"]
 tower = ["dep:tower-layer", "dep:tower-service"]
 # `req.multipart()` et le module `vitesse::multipart` : envois de fichiers.
 multipart = ["dep:multer"]
+# `Operation::body_type::<T>()`, `response_type::<T>()`… : schémas OpenAPI
+# dérivés des types avec schemars (`#[derive(JsonSchema)]`).
+schemars = ["dep:schemars"]
 # `middleware::compress()` : réponses en Brotli ou gzip.
 compress = ["dep:brotli", "dep:flate2"]
 

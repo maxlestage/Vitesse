@@ -68,6 +68,17 @@ pub struct OpenApi {
     security: Vec<Value>,
     extra: Option<Value>,
     pub(crate) swagger_ui: Option<String>,
+    /// Other documentation pages: (kind, path).
+    pub(crate) pages: Vec<(DocsUi, String)>,
+    /// Where Swagger UI's files are served from (the CDN by default).
+    pub(crate) assets: Option<String>,
+}
+
+/// The documentation pages [`OpenApi`] can serve.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum DocsUi {
+    Scalar,
+    Redoc,
 }
 
 impl OpenApi {
@@ -86,6 +97,8 @@ impl OpenApi {
             security: Vec::new(),
             extra: None,
             swagger_ui: None,
+            pages: Vec::new(),
+            assets: None,
         }
     }
 
@@ -143,8 +156,75 @@ impl OpenApi {
         self
     }
 
+    /// Also serves a [Scalar](https://scalar.com) API reference at `path`
+    /// (Hono's and Elysia's favourite): a modern page to read the API and
+    /// send requests from the browser. The page loads Scalar from the
+    /// jsDelivr CDN.
+    ///
+    /// ```
+    /// use vitesse::openapi::OpenApi;
+    ///
+    /// let spec = OpenApi::new("Pets", "1.0.0")
+    ///     .swagger_ui("/docs")
+    ///     .scalar("/reference")
+    ///     .redoc("/redoc");
+    /// ```
+    pub fn scalar(mut self, path: impl Into<String>) -> Self {
+        self.pages.push((DocsUi::Scalar, path.into()));
+        self
+    }
+
+    /// Also serves a [Redoc](https://redocly.com/redoc) page at `path`: a
+    /// three-column reference, read-only. The page loads Redoc from the
+    /// jsDelivr CDN.
+    pub fn redoc(mut self, path: impl Into<String>) -> Self {
+        self.pages.push((DocsUi::Redoc, path.into()));
+        self
+    }
+
+    /// Loads Swagger UI's files (`swagger-ui.css` and
+    /// `swagger-ui-bundle.js`) from `base` instead of the CDN: for a
+    /// network without Internet access, or a strict
+    /// `Content-Security-Policy`. Serve the `dist` folder of the
+    /// `swagger-ui-dist` npm package there, with
+    /// [`static_dir`](crate::App::static_dir).
+    ///
+    /// ```
+    /// use vitesse::prelude::*;
+    /// use vitesse::openapi::OpenApi;
+    ///
+    /// let mut app = App::new();
+    /// app.static_dir("/vendor/swagger-ui", "vendor/swagger-ui-dist");
+    /// app.openapi(
+    ///     "/openapi.json",
+    ///     OpenApi::new("Pets", "1.0.0")
+    ///         .swagger_ui("/docs")
+    ///         .swagger_ui_assets("/vendor/swagger-ui"),
+    /// );
+    /// ```
+    pub fn swagger_ui_assets(mut self, base: impl Into<String>) -> Self {
+        self.assets = Some(base.into().trim_end_matches('/').to_owned());
+        self
+    }
+
+    /// Adds the schema of `T` to the shared schemas (with the `schemars`
+    /// feature), with those of the types it uses: reference it with
+    /// `json!({ "$ref": "#/components/schemas/<name of T>" })`.
+    #[cfg(feature = "schemars")]
+    pub fn schema_type<T: schemars::JsonSchema>(mut self) -> Self {
+        let (schema, definitions) = typed::schema_for::<T>(typed::Contract::Serialize);
+        if let Some(name) = typed::reference_name(&schema) {
+            if !definitions.contains_key(&name) {
+                self.schemas.insert(name, schema);
+            }
+        }
+        self.schemas.extend(definitions);
+        self
+    }
+
     /// Also serves a Swagger UI page at `path`, to read and try the API in
-    /// a browser. The page loads Swagger UI from the jsDelivr CDN.
+    /// a browser. The page loads Swagger UI from the jsDelivr CDN (or from
+    /// [`swagger_ui_assets`](Self::swagger_ui_assets)).
     pub fn swagger_ui(mut self, path: impl Into<String>) -> Self {
         self.swagger_ui = Some(path.into());
         self
@@ -160,6 +240,8 @@ pub struct Operation {
     parameters: Vec<Value>,
     responses: BTreeMap<String, Value>,
     hidden: bool,
+    /// The shared schemas of the types used by the operation.
+    schemas: Map<String, Value>,
 }
 
 impl Operation {
@@ -332,6 +414,151 @@ impl Operation {
         self
     }
 
+    /// The JSON request body is a `T`, described by its schema (with the
+    /// `schemars` feature and `#[derive(JsonSchema)]`, FastAPI-style): the
+    /// schemas of `T` and of the types it uses land in
+    /// `components/schemas`, the body references them.
+    ///
+    /// ```
+    /// use schemars::JsonSchema;
+    /// use serde::{Deserialize, Serialize};
+    /// use vitesse::prelude::*;
+    /// use vitesse::openapi::{OpenApi, Operation};
+    ///
+    /// #[derive(Deserialize, JsonSchema)]
+    /// struct NewPet {
+    ///     /// The pet's name.
+    ///     name: String,
+    ///     age: Option<u8>,
+    /// }
+    ///
+    /// #[derive(Serialize, JsonSchema)]
+    /// struct Pet {
+    ///     id: u64,
+    ///     name: String,
+    /// }
+    ///
+    /// let mut app = App::new();
+    /// app.post("/pets", |_| async { (201, Json(json!({ "id": 1, "name": "Rex" }))) })
+    ///     .doc(
+    ///         Operation::new()
+    ///             .summary("Add a pet")
+    ///             .body_type::<NewPet>()
+    ///             .response_type::<Pet>(201, "The new pet"),
+    ///     );
+    /// let doc = app.openapi_document(&OpenApi::new("Pets", "1.0.0"));
+    /// assert_eq!(doc["components"]["schemas"]["NewPet"]["required"][0], "name");
+    /// ```
+    #[cfg(feature = "schemars")]
+    pub fn body_type<T: schemars::JsonSchema>(self) -> Self {
+        self.body_type_with::<T>("application/json")
+    }
+
+    /// The request body is a `T` sent as an HTML form
+    /// (`application/x-www-form-urlencoded`), read with
+    /// [`req.form()`](crate::Request::form). See
+    /// [`body_type`](Self::body_type).
+    #[cfg(feature = "schemars")]
+    pub fn form_type<T: schemars::JsonSchema>(self) -> Self {
+        self.body_type_with::<T>("application/x-www-form-urlencoded")
+    }
+
+    #[cfg(feature = "schemars")]
+    fn body_type_with<T: schemars::JsonSchema>(mut self, content_type: &str) -> Self {
+        let (schema, definitions) = typed::schema_for::<T>(typed::Contract::Deserialize);
+        self.schemas.extend(definitions);
+        self.body_with(content_type, schema)
+    }
+
+    /// Like [`body_type`](Self::body_type) for a type that also implements
+    /// [`Validate`](crate::validate::Validate), read with
+    /// [`req.valid_json()`](crate::Request::valid_json): adds the `422`
+    /// response and the shape of its validation errors.
+    #[cfg(feature = "schemars")]
+    pub fn validated_body<T>(self) -> Self
+    where
+        T: schemars::JsonSchema + crate::validate::Validate,
+    {
+        self.body_type::<T>().response_json(
+            422,
+            "Validation failed: the messages of each invalid field",
+            json!({
+                "type": "object",
+                "required": ["error", "details"],
+                "properties": {
+                    "error": { "type": "string" },
+                    "details": {
+                        "type": "object",
+                        "additionalProperties": { "type": "array", "items": { "type": "string" } }
+                    }
+                }
+            }),
+        )
+    }
+
+    /// A possible response with a JSON body of type `T` (with the
+    /// `schemars` feature). See [`body_type`](Self::body_type).
+    #[cfg(feature = "schemars")]
+    pub fn response_type<T: schemars::JsonSchema>(
+        mut self,
+        status: u16,
+        description: impl Into<String>,
+    ) -> Self {
+        let (schema, definitions) = typed::schema_for::<T>(typed::Contract::Serialize);
+        self.schemas.extend(definitions);
+        self.response_json(status, description, schema)
+    }
+
+    /// The query string parameters are the fields of `T`, read with
+    /// [`req.query_as()`](crate::Request::query_as) (with the `schemars`
+    /// feature): one parameter per field, in alphabetical order, required
+    /// unless it is an `Option` or has a default, with its schema and doc
+    /// comment.
+    ///
+    /// ```
+    /// use schemars::JsonSchema;
+    /// use serde::Deserialize;
+    /// use vitesse::prelude::*;
+    /// use vitesse::openapi::{OpenApi, Operation};
+    ///
+    /// #[derive(Deserialize, JsonSchema)]
+    /// struct Search {
+    ///     /// Words to look for.
+    ///     q: String,
+    ///     size: Option<u32>,
+    /// }
+    ///
+    /// let mut app = App::new();
+    /// app.get("/search", |_| async { "…" }).doc(Operation::new().query_type::<Search>());
+    /// let doc = app.openapi_document(&OpenApi::new("Search", "1"));
+    /// let params = &doc["paths"]["/search"]["get"]["parameters"];
+    /// assert_eq!(params[0]["name"], "q");
+    /// assert_eq!(params[0]["required"], true);
+    /// assert_eq!(params[1]["name"], "size");
+    /// assert_eq!(params[1]["required"], false);
+    /// ```
+    #[cfg(feature = "schemars")]
+    pub fn query_type<T: schemars::JsonSchema>(mut self) -> Self {
+        let schema = typed::inline_schema_for::<T>();
+        let required: Vec<&str> = schema["required"]
+            .as_array()
+            .map(|list| list.iter().filter_map(Value::as_str).collect())
+            .unwrap_or_default();
+        if let Some(properties) = schema["properties"].as_object() {
+            for (name, property) in properties {
+                let mut property = property.clone();
+                let description = property
+                    .as_object_mut()
+                    .and_then(|p| p.remove("description"))
+                    .and_then(|d| d.as_str().map(str::to_owned))
+                    .unwrap_or_default();
+                let required = required.contains(&name.as_str());
+                self = self.parameter("query", name.clone(), description, property, required);
+            }
+        }
+        self
+    }
+
     /// Merges raw JSON into the operation (`externalDocs`, `callbacks`…).
     pub fn extend(mut self, value: Value) -> Self {
         let mut fields = Value::Object(std::mem::take(&mut self.fields));
@@ -396,8 +623,19 @@ pub(crate) fn document(spec: &OpenApi, routes: &[ApiRoute]) -> Value {
     if !spec.security.is_empty() {
         doc["security"] = spec.security.clone().into();
     }
-    if !spec.schemas.is_empty() {
-        doc["components"]["schemas"] = spec.schemas.clone().into();
+    // The schemas of the types used by the operations, then those of the
+    // spec, which win.
+    let mut schemas = Map::new();
+    for route in routes {
+        if let Some(doc) = &route.doc {
+            if !doc.hidden {
+                schemas.extend(doc.schemas.clone());
+            }
+        }
+    }
+    schemas.extend(spec.schemas.clone());
+    if !schemas.is_empty() {
+        doc["components"]["schemas"] = schemas.into();
     }
     if !spec.security_schemes.is_empty() {
         doc["components"]["securitySchemes"] = spec.security_schemes.clone().into();
@@ -507,18 +745,66 @@ fn merge(target: &mut Value, extra: Value) {
     }
 }
 
-/// The Swagger UI page for the document at `spec_url`.
-pub(crate) fn swagger_page(title: &str, spec_url: &str) -> String {
-    let escape = |s: &str| {
-        s.replace('&', "&amp;")
-            .replace('<', "&lt;")
-            .replace('>', "&gt;")
-            .replace('"', "&quot;")
-    };
-    // The URL ends up in a JavaScript string: JSON escapes it.
-    let url = serde_json::to_string(spec_url)
+fn escape_html(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+}
+
+/// A string for a JavaScript literal, safe in a `<script>`.
+fn js_string(s: &str) -> String {
+    serde_json::to_string(s)
         .unwrap_or_default()
-        .replace('<', "\\u003c");
+        .replace('<', "\\u003c")
+}
+
+/// The Scalar or Redoc page for the document at `spec_url`.
+pub(crate) fn docs_page(ui: DocsUi, title: &str, spec_url: &str) -> String {
+    let title = escape_html(title);
+    let url = escape_html(spec_url);
+    match ui {
+        DocsUi::Scalar => format!(
+            r#"<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{title}</title>
+</head>
+<body>
+<script id="api-reference" data-url="{url}"></script>
+<script src="https://cdn.jsdelivr.net/npm/@scalar/api-reference@1.25.11" crossorigin></script>
+</body>
+</html>
+"#
+        ),
+        DocsUi::Redoc => format!(
+            r#"<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{title}</title>
+<style>body {{ margin: 0; }}</style>
+</head>
+<body>
+<redoc spec-url="{url}"></redoc>
+<script src="https://cdn.jsdelivr.net/npm/redoc@2.1.5/bundles/redoc.standalone.js" crossorigin></script>
+</body>
+</html>
+"#
+        ),
+    }
+}
+
+/// The Swagger UI page for the document at `spec_url`, with Swagger UI's
+/// files from `assets` (the CDN by default).
+pub(crate) fn swagger_page(title: &str, spec_url: &str, assets: Option<&str>) -> String {
+    let escape = escape_html;
+    // The URL ends up in a JavaScript string: JSON escapes it.
+    let url = js_string(spec_url);
+    let assets = escape(assets.unwrap_or("https://cdn.jsdelivr.net/npm/swagger-ui-dist@5.17.14"));
     format!(
         r##"<!doctype html>
 <html lang="en">
@@ -526,11 +812,11 @@ pub(crate) fn swagger_page(title: &str, spec_url: &str) -> String {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{title}</title>
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5.17.14/swagger-ui.css">
+<link rel="stylesheet" href="{assets}/swagger-ui.css">
 </head>
 <body>
 <div id="swagger-ui"></div>
-<script src="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5.17.14/swagger-ui-bundle.js" crossorigin></script>
+<script src="{assets}/swagger-ui-bundle.js" crossorigin></script>
 <script>
 window.onload = () => {{
   window.ui = SwaggerUIBundle({{ url: {url}, dom_id: "#swagger-ui" }});
@@ -549,6 +835,57 @@ impl OpenApi {
             .get("title")
             .and_then(Value::as_str)
             .unwrap_or("API")
+    }
+}
+
+/// Schemas generated from Rust types with schemars.
+#[cfg(feature = "schemars")]
+mod typed {
+    use schemars::JsonSchema;
+    use schemars::generate::SchemaSettings;
+    use serde_json::{Map, Value};
+
+    #[derive(Clone, Copy)]
+    pub(super) enum Contract {
+        Deserialize,
+        Serialize,
+    }
+
+    fn settings(contract: Contract) -> SchemaSettings {
+        let settings = SchemaSettings::draft2020_12().with(|s| {
+            s.definitions_path = "/components/schemas".into();
+            s.meta_schema = None;
+        });
+        match contract {
+            Contract::Deserialize => settings.for_deserialize(),
+            Contract::Serialize => settings.for_serialize(),
+        }
+    }
+
+    /// The schema of `T` (a `$ref` for named types) and the shared schemas
+    /// it needs.
+    pub(super) fn schema_for<T: JsonSchema>(contract: Contract) -> (Value, Map<String, Value>) {
+        let mut generator = settings(contract).into_generator();
+        let schema = generator.subschema_for::<T>();
+        let definitions = generator.take_definitions(true);
+        (schema.into(), definitions)
+    }
+
+    /// The schema of `T`, with nothing referenced.
+    pub(super) fn inline_schema_for<T: JsonSchema>() -> Value {
+        settings(Contract::Deserialize)
+            .with(|s| s.inline_subschemas = true)
+            .into_generator()
+            .into_root_schema_for::<T>()
+            .into()
+    }
+
+    /// `Pet` for `{"$ref": "#/components/schemas/Pet"}`.
+    pub(super) fn reference_name(schema: &Value) -> Option<String> {
+        schema["$ref"]
+            .as_str()?
+            .strip_prefix("#/components/schemas/")
+            .map(str::to_owned)
     }
 }
 
@@ -644,7 +981,7 @@ mod tests {
 
     #[test]
     fn swagger_page_escapes() {
-        let page = swagger_page("<API>", "/spec</script>.json");
+        let page = swagger_page("<API>", "/spec</script>.json", None);
         assert!(page.contains("&lt;API&gt;"));
         assert!(!page.contains("</script>.json"));
     }

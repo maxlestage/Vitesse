@@ -142,6 +142,22 @@ app.on_response(|res: &mut Response| {
 - Hooks of a kind run in the order they were added; a panic in a hook becomes a `500`.
 - Without hooks, nothing is added to the request's path. To run code *around* the handler (timing, a `tokio::time::timeout`…), or asynchronously, use a middleware.
 
+### Async hooks
+
+`app.on_request_async` and `app.pre_handler_async` are the versions of `on_request` and `pre_handler` for hooks that wait on something (a cache, a database, another service). They receive the request and give it back, or stop it with an error:
+
+```rust
+app.pre_handler_async(|mut req: Request| async move {
+    if let Some(slug) = req.param("tenant").map(str::to_owned) {
+        let tenant = load_tenant(&slug).await.ok_or_else(|| Error::not_found("no such tenant"))?;
+        req.set(tenant);
+    }
+    Ok(req)
+});
+```
+
+Async hooks run after the plain hooks of the same kind, in the order they were added. Routers and groups have hooks of their own, which only cover them: see [Routers](routers.md).
+
 ## Middleware for some routes only
 
 There are three ways to limit a middleware to some routes:
@@ -185,6 +201,41 @@ app.middleware(|req: Request, next: Next| async move {
 });
 ```
 
+## Middleware groups: `Stack` and `middleware::group`
+
+A `Stack` bundles several middlewares into one, to use them together on the application, a router, a group or a single route:
+
+```rust
+use std::time::Duration;
+use vitesse::middleware::Stack;
+
+let api = Stack::new()
+    .with(middleware::cors())
+    .with(middleware::rate_limit(100, Duration::from_secs(60)));
+
+app.group("/api", |r| {
+    r.middleware(api.clone());
+    r.get("/users", list_users);
+});
+app.post("/webhook", webhook.with(api));
+```
+
+Like Laravel's `web` and `api` groups, a stack can be named with `app.middleware_group`, then used by its name with `middleware::group`, even in a module that has no access to the application:
+
+```rust
+app.middleware_group("web", Stack::new().with(middleware::helmet()).with(middleware::request_id()));
+app.middleware_group("api", Stack::new().with(middleware::cors()).with(middleware::bearer_auth("secret")));
+app.group("/admin", admin::routes);
+
+// src/admin.rs
+pub fn routes(r: &mut Router) {
+    r.middleware(middleware::group("web"));
+    r.get("/dashboard", dashboard);
+}
+```
+
+The middlewares of a stack run in order, exactly as if they had been added one by one. The name is looked up on the first request, then remembered; an unknown name answers `500` and is logged.
+
 ## Built-in middleware
 
 The `vitesse::middleware` module (available as `middleware::` with the prelude) provides the classics:
@@ -202,6 +253,8 @@ The `vitesse::middleware` module (available as `middleware::` with the prelude) 
 | `middleware::session(store)` | `express-session` | server-side sessions, read with `req.session()` (feature `session`) |
 | `middleware::concurrency_limit(max)` | | caps the number of requests handled at once |
 | `middleware::rate_limit(max, period)` | `express-rate-limit` | requests per client and period, `429` beyond |
+| `middleware::etag()` | Express's `etag` setting | `ETag` and `304 Not Modified` for the responses in memory |
+| `middleware::cache(ttl)` | `apicache` | a server-side cache of whole responses, with a time to live |
 | `middleware::serve_static(dir)` | `express.static(dir)` | static files, see [Static files](static-files.md) |
 | `middleware::compress()` | `compression()` | Brotli or gzip responses (feature `compress`) |
 | `middleware::decompress()` | | compressed request bodies (feature `compress`) |
@@ -435,6 +488,42 @@ api.middleware(
 ```
 
 The counters live in the memory of the process and are cleaned up automatically. With several instances of the application (several servers or containers), each one counts on its own.
+
+### `etag`
+
+Adds an `ETag` to the `200` responses of `GET` and `HEAD` requests whose body is in memory (text, JSON, HTML…), and answers `304 Not Modified`, without a body, when the browser already has that version (`If-None-Match`). It is Express's default `etag` setting, here opt-in:
+
+```rust
+app.middleware(middleware::etag());
+```
+
+The handler still runs: the bandwidth is saved, not the work. Streamed bodies are left alone, and files served with `res::file` or `ServeDir` already have their own `ETag`.
+
+### `cache`
+
+Keeps whole responses in memory for a time to live, like `apicache` or Laravel's `responsecache`: the first `GET` of a URL runs the handler, the next ones, until the entry expires, are answered from memory without running it.
+
+```rust
+use std::time::Duration;
+
+let cache = middleware::cache(Duration::from_secs(60)).max_entries(1_000);
+app.get("/posts", list_posts.with(cache.clone()));
+app.post("/posts", move |req: Request| {
+    let cache = cache.clone();
+    async move {
+        let post = create_post(req).await?;
+        cache.invalidate("/posts"); // the list changed
+        Ok::<_, Error>((201, Json(post)))
+    }
+});
+```
+
+- Cached responses carry an `ETag` (and get `304` when the browser has the same version), `Age`, `X-Cache: HIT` or `MISS`, and `Cache-Control: public, max-age=…` unless the handler set one (`.cache_control(false)` to tell browsers nothing).
+- Only `200` responses with a body in memory are kept, at most 1 MiB by default (`.max_body(bytes)`), and never those that set a cookie or say `Cache-Control: no-store`, `private` or `no-cache`. Requests with an `Authorization` header are not cached.
+- The key is the path and the query string. `.key(|req| …)` adds what the response depends on (the language, the user), or returns `None` not to cache a request.
+- Clones share their entries: `cache.invalidate(key)`, `cache.invalidate_prefix("/posts")` and `cache.clear()` remove them. Beyond `.max_entries(n)` (10,000 by default), the expired entries go first, then the oldest.
+
+The entries live in the memory of the process: with several instances of the application, each one has its own cache.
 
 ### `compress`
 

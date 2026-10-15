@@ -203,6 +203,53 @@ Err(Error::conflict("nombre de usuario ocupado")
 
 Los errores sin detalles mantienen el formato `{"error": "…"}`. Los errores de [validación](validation.md) ponen en este campo los mensajes de cada campo, y `err.details()` lo vuelve a leer, en `app.on_error` por ejemplo.
 
+## Problem Details: `app.problem_details`
+
+Muchas API normalizan sus errores según la RFC 9457, «Problem Details for HTTP APIs» (el formato de ASP.NET Core, Spring y API Platform): un documento JSON enviado como `application/problem+json`, que los clientes y las pasarelas de API saben leer. Una línea pasa toda la aplicación a este formato:
+
+```rust
+app.problem_details();
+```
+
+Cada respuesta producida a partir de un `Error` (handlers, `404`, `405`, `422` de validación, `413`, pánicos…) se envía entonces así:
+
+```json
+{"type":"about:blank","title":"Forbidden","status":403,"detail":"Your balance is too low","instance":"/accounts/12","details":{"balance":30}}
+```
+
+- `title` es la frase del código de estado, `detail` el mensaje del error (se omite cuando solo repite el título), `instance` la ruta de la petición.
+- Los detalles de `with_details`, mensajes de [validación](validation.md) incluidos, van en un miembro `details`.
+- Las cabeceras puestas por el camino (CORS, `Allow`, `Retry-After`) se conservan, y `app.on_error`, si existe, tiene la última palabra.
+
+`app.problem_details_with` completa cada problema, con una URI `type` por tipo de error o miembros de extensión:
+
+```rust
+use vitesse::problem::Problem;
+
+app.problem_details_with(|err: &Error, problem: Problem| {
+    problem
+        .type_uri(format!("https://api.example.com/problems/{}", err.status().as_u16()))
+        .extension("support", "help@example.com")
+});
+```
+
+Un handler también puede responder con su propio `Problem`, con o sin `app.problem_details()`:
+
+```rust
+use vitesse::problem::Problem;
+
+app.post("/transfers", |_req: Request| async move {
+    Problem::new(403)
+        .type_uri("https://example.com/probs/out-of-credit")
+        .title("No tienes suficiente crédito.")
+        .detail("Tu saldo es 30, pero cuesta 50.")
+        .extension("balance", 30)
+});
+```
+
+> [!NOTE]
+> Sin `app.problem_details()`, nada cambia: los errores conservan el formato `{"error": …}` y no se añade trabajo a las peticiones.
+
 ## Páginas de error personalizadas: `app.on_error`
 
 Por defecto, los errores se envían como `{"error": "mensaje"}`. `app.on_error` reemplaza ese formato en toda la aplicación, como el middleware de error `(err, req, res, next)` de Express:

@@ -233,6 +233,50 @@ async fn refuse_les_mauvaises_entrees() {
 
 Chaque appel à `app()` crée un état neuf : chaque test part d'une « base » vide, et les tests ne se gênent jamais, même lancés en parallèle.
 
+## Des assertions en chaîne
+
+`TestResponse` a des assertions qui s'enchaînent, comme les tests HTTP de Laravel ou le `expect` de supertest. Quand l'une échoue, le message de la panique montre le statut et le corps de la réponse :
+
+```rust
+client
+    .post("/users")
+    .json(&json!({ "name": "Ada" }))
+    .await
+    .assert_status(201)
+    .assert_header("content-type", "application/json")
+    .assert_json_path("user.name", "Ada") // clés et index ("data.0.name"), ou un pointeur JSON
+    .assert_json_includes(json!({ "user": { "id": 7 } }))
+    .assert_json_missing("user.password");
+```
+
+| Assertion | Vérifie |
+|---|---|
+| `assert_status(201)`, `assert_ok()`, `assert_not_found()` | Le statut (`assert_ok` : n'importe quel `2xx`) |
+| `assert_redirect("/login")` | Un `3xx` vers ce `Location` |
+| `assert_header(nom, valeur)`, `assert_header_missing(nom)` | Un en-tête (`content-type` ignore ses paramètres) |
+| `assert_text(texte)`, `assert_see(texte)`, `assert_dont_see(texte)` | Tout le corps, ou une partie |
+| `assert_json(valeur)`, `assert_json_includes(extrait)` | Le corps JSON, exactement ou en partie |
+| `assert_json_path(chemin, valeur)`, `assert_json_missing(chemin)`, `assert_json_count(chemin, n)` | Une valeur du corps JSON |
+| `assert_validation_errors(&["email"])` | Un `422` dont les détails nomment ces champs |
+| `assert_cookie(nom, valeur)` | Un cookie posé par la réponse |
+
+`res.json_path("data.0.name")` et `res.cookie("sid")` lisent les valeurs sans rien vérifier. Le constructeur de requêtes a aussi `.query(&paramètres)`, `.cookie(nom, valeur)` et `.bearer(jeton)`.
+
+## Garder les cookies entre les requêtes : `client.agent()`
+
+`client.agent()` renvoie un client avec une boîte à cookies, comme l'`agent` de supertest : les cookies posés par une réponse sont envoyés avec les requêtes suivantes, et retirés quand l'application les supprime. Connectez-vous une fois, puis testez les pages derrière la connexion :
+
+```rust
+let agent = TestClient::new(my_api::app()).agent();
+
+agent.post("/login").form(&[("user", "ada"), ("password", "secret")]).await.assert_ok();
+agent.get("/dashboard").await.assert_ok().assert_see("Bienvenue Ada");
+agent.post("/logout").await;
+agent.get("/dashboard").await.assert_redirect("/login");
+```
+
+`agent.cookie(nom)` lit la boîte, `agent.set_cookie(nom, valeur)` la remplit et `agent.clear_cookies()` la vide. Chaque agent a sa propre boîte ; ses clones la partagent.
+
 ## Tester les erreurs
 
 Les erreurs sont des réponses comme les autres : vérifiez le statut et le corps `{"error": "..."}`. Les paniques et les erreurs internes méritent aussi un test, pour s'assurer que rien ne fuit vers le client :

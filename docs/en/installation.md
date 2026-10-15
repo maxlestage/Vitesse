@@ -74,6 +74,7 @@ Some parts of Vitesse are Cargo features, which you turn on or off in `Cargo.tom
 | `compress` | Disabled | `middleware::compress()` (Brotli or gzip responses) and `middleware::decompress()` (compressed request bodies), see [`compress`](middleware.md#compress) |
 | `session` | Disabled | `app.cookie_secret(...)`, signed cookies (`req.sign_cookie`, `req.signed_cookie`), `middleware::session(...)` and the `vitesse::session` module, with the hmac, sha2 and getrandom crates: see [Signed cookies and sessions](sessions.md) |
 | `templates` | Disabled | `app.views(...)`, `app.templates(...)`, `req.render(...)` and the `vitesse::templates` module, with [minijinja](https://crates.io/crates/minijinja): see [HTML templates](templates.md) |
+| `schemars` | Disabled | OpenAPI schemas derived from your types: `Operation::body_type::<T>()`, `response_type`, `query_type`…, see [OpenAPI](openapi.md) |
 | `tower` | Disabled | `middleware::layer(...)`, `app.into_service()` and the `vitesse::tower` module: tower and tower-http middleware, see [Tower layers](middleware.md#tower-layers) |
 
 Everything else, Server-Sent Events (`vitesse::sse`) and the other built-in middleware included, is always available.

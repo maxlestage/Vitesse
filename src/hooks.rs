@@ -182,3 +182,51 @@ impl<F: FnOnce(&mut App)> Plugin for F {
         self(app)
     }
 }
+
+/// An async hook (`on_request_async`, `pre_handler_async`): it receives the
+/// request and gives it back, or stops it with an error.
+pub(crate) struct AsyncHook<F>(pub(crate) F);
+
+impl<F, Fut> Middleware for AsyncHook<F>
+where
+    F: Fn(Request) -> Fut + Send + Sync + 'static,
+    Fut: Future<Output = Result<Request, Error>> + Send + 'static,
+{
+    fn handle(&'static self, req: Request, next: Next) -> BoxFuture<Response> {
+        let hook = match catch_unwind(AssertUnwindSafe(|| (self.0)(req))) {
+            Ok(hook) => hook,
+            Err(_) => return Box::pin(std::future::ready(panic_response())),
+        };
+        Box::pin(async move {
+            match (AssertUnwindSafeFuture { fut: hook }).await {
+                Some(Ok(req)) => next.run(req).await,
+                Some(Err(error)) => error.into_response(),
+                None => panic_response(),
+            }
+        })
+    }
+}
+
+pin_project_lite::pin_project! {
+    /// A future whose panic becomes `None`.
+    struct AssertUnwindSafeFuture<Fut> {
+        #[pin]
+        fut: Fut,
+    }
+}
+
+impl<Fut: Future> Future for AssertUnwindSafeFuture<Fut> {
+    type Output = Option<Fut::Output>;
+
+    fn poll(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Self::Output> {
+        let fut = self.project().fut;
+        match catch_unwind(AssertUnwindSafe(|| fut.poll(cx))) {
+            Ok(std::task::Poll::Ready(out)) => std::task::Poll::Ready(Some(out)),
+            Ok(std::task::Poll::Pending) => std::task::Poll::Pending,
+            Err(_) => std::task::Poll::Ready(None),
+        }
+    }
+}

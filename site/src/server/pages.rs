@@ -972,10 +972,10 @@ fn start(lang: Lang, t: &Texts) -> Element {
                                                 .child(span().class("t-punct").text("$ "))
                                                 .text("cargo run --release"),
                                         )
-                                        .child(
-                                            term(1, "")
-                                                .child(kw("   Compiling", " vitesse v0.1.0")),
-                                        )
+                                        .child(term(1, "").child(kw(
+                                            "   Compiling",
+                                            &format!(" vitesse v{}", vitesse::VERSION),
+                                        )))
                                         .child(term(2, "").child(kw(
                                             "    Finished",
                                             " `release` profile [optimized]",

@@ -4,21 +4,10 @@ All notable changes to this project are documented in this file. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the
 project adheres to [Semantic Versioning](https://semver.org/).
 
-## [0.1.0] - Unreleased
-
-First public release.
+## [0.2.0] - 2026-10-15
 
 ### Changed
 
-- License: Vitesse is proprietary software by Maxime Nathan Lestage, all
-  rights reserved (see `LICENSE`); it is free to use as a dependency,
-  commercially too, but not to modify or redistribute. The MIT/Apache-2.0
-  dual license is withdrawn.
-- Credits: Maxime Nathan Lestage is named as the author in the crate
-  metadata, the README and the website's footer, which now links the seven
-  projects of the ecosystem.
-- Credits: Solidify joins the projects linked by the README, the license and
-  the website's footer.
 - Links: the websites of Vitesse and its sibling projects are now their
   Heroku apps (README, documentation, crate `homepage`, `app.json`, rustdoc
   logo, the demo and the website's footer) instead of GitHub Pages; the
@@ -30,11 +19,6 @@ First public release.
 - Credits: the ecosystem is now five projects (Active, Vitesse, Securite,
   Memoire, Paquets): FerroSwift and Solidify are no longer listed in the
   README, the publishing guide or the website's footer.
-- Website: every card of a shared link gives the size and description of its
-  image, so that it shows large from the first share.
-- `app.bind("…:0")` with HTTP/3 picks another port when the UDP port of the
-  TCP port the system chose is taken or reserved (Windows reserves port ranges
-  per protocol), instead of failing now and then.
 - Heroku: the demo app is now built with the Rust buildpack `emk/rust` on the
   heroku-26 stack (`RustConfig` sets the Rust version and skips the
   buildpack's own build, `heroku-build.sh` builds the example, the `Procfile`
@@ -51,6 +35,103 @@ First public release.
   build (`HEROKU_BUILD` set to `docker`) still deploys the demo app, or the
   example named by `ARG EXAMPLE` in the `Dockerfile`. The Heroku guide, the
   READMEs and the Docker guide say so, in English, French and Spanish.
+
+### Added
+
+Taking the best of Fastify, Laravel, FastAPI and axum (all opt-in, nothing
+added to the path of a request that doesn't use them):
+- Request validation (`vitesse::validate`, Laravel's `$request->validate()`,
+  Fastify's schemas): implement `Validate` with chained rules
+  (`v.field("email", &self.email).email()`, `not_empty`, `min_length`,
+  `max_length`, `min`, `max`, `between`, `one_of`, `url`, `alphanumeric`,
+  `check`, custom `message`s, `optional`/`required`, `nested`, `each`), then
+  `req.valid_json()`, `req.valid_form()` or `req.valid_query()` answer `422`
+  with the messages of every invalid field. New guide page "Validation".
+- `Error::with_details(…)` and `err.details()`: structured details sent next
+  to the message, as `{"error":"…","details":{…}}`.
+- OpenAPI 3.1 (`vitesse::openapi`, FastAPI's `/docs`, `@fastify/swagger`):
+  `app.openapi("/openapi.json", OpenApi::new(title, version))` serves the
+  document generated from every route (path parameters and their
+  constraints included), `.doc(Operation::new()…)` describes a route,
+  `.swagger_ui("/docs")` serves Swagger UI, and `app.openapi_document(&spec)`
+  returns it. New guide page "OpenAPI and Swagger UI".
+- Lifecycle hooks (Fastify's `onRequest`, `preHandler`, `onSend`):
+  `app.on_request`, `app.pre_handler` and `app.on_response`, plain functions
+  that can change the request or the response, or stop the request with an
+  error.
+- `app.param(name, middleware)` (Express's `app.param`) and
+  `app.bind_param(name, loader)` (Laravel's route model binding), on apps and
+  routers: run before the handler of every route that has the parameter.
+- Route groups: `app.group(prefix, |group| …)` (Laravel's
+  `Route::prefix()->group()`), on apps and routers.
+- Plugins: `app.register(plugin)` and the `Plugin` trait (Fastify's
+  `register`), for any `FnOnce(&mut App)`.
+- `req.params_as::<T>()`: every route parameter deserialized into a struct
+  (axum's `Path<T>`).
+The best of Phoenix, Laravel, FastAPI, Hono and supertest, all opt-in (an
+application that doesn't use them runs exactly the same code per request):
+- Problem Details (RFC 9457, `vitesse::problem`): `app.problem_details()`
+  sends every error as `application/problem+json` (`type`, `title`,
+  `status`, `detail`, `instance`, and the error's `details`),
+  `app.problem_details_with(…)` completes each problem, and a handler can
+  answer with a `Problem` of its own.
+- Middleware stacks and named groups (Laravel's `web` and `api`):
+  `middleware::Stack`, `app.middleware_group(name, stack)` and
+  `middleware::group(name)`.
+- Async hooks: `app.on_request_async` and `app.pre_handler_async`; hooks per
+  router or group (Fastify's encapsulation): `router.on_request`,
+  `router.on_response` and `router.on_request_async`.
+- HTTP caching: `middleware::etag()` (`ETag` and `304 Not Modified` for the
+  responses in memory) and `middleware::cache(ttl)`, a server-side cache of
+  whole responses with a time to live, `X-Cache`, `Age`, a custom key and
+  invalidation (`invalidate`, `invalidate_prefix`, `clear`).
+- PubSub (`vitesse::pubsub`, Phoenix's PubSub and channels): topics shared
+  by WebSocket connections, Server-Sent Events and tasks, with
+  `subscribe`, `publish`, `broadcast_from`-style `Subscription::publish`,
+  subscriber counts, `Subscription::sse(…)`, and `pubsub.relay(socket,
+  topic)` for chat rooms over WebSocket. New guide page "PubSub and
+  channels".
+- A background job queue (`vitesse::queue`, Laravel's queues): workers,
+  retries with exponential backoff, a rate limit, delayed jobs and
+  `queue.idle()` for tests; and a scheduler (`vitesse::schedule`, Laravel's
+  scheduler): `every`, `every_minute`, `hourly_at`, `daily_at`, without
+  overlapping runs. New guide page "Background jobs and scheduled tasks".
+- Typed routes: `TypedRoute<(String, u32)>` declares a pattern once, with
+  the types of its parameters, to register the route, read them
+  (`params(&req)`) and build links (`path`, `try_path`, `url`).
+- OpenAPI: schemas derived from the types with the new `schemars` feature
+  (`Operation::body_type::<T>()`, `form_type`, `validated_body` with its
+  `422`, `response_type`, `query_type` and `OpenApi::schema_type`), Scalar
+  and Redoc pages (`.scalar(path)`, `.redoc(path)`), and Swagger UI served
+  from your own files (`.swagger_ui_assets(base)`).
+- Testing: `client.agent()`, a client with a cookie jar (supertest's
+  `agent`); fluent assertions on `TestResponse` (`assert_status`,
+  `assert_ok`, `assert_header`, `assert_see`, `assert_json`,
+  `assert_json_path`, `assert_json_includes`, `assert_json_count`,
+  `assert_validation_errors`, `assert_cookie`, `assert_redirect`…),
+  `res.json_path(…)`, `res.cookie(…)`; and `.cookie(…)`, `.bearer(…)` and
+  `.query(…)` on test requests.
+
+## [0.1.0] - 2026-10-13
+
+First public release.
+
+### Changed
+
+- License: Vitesse is proprietary software by Maxime Nathan Lestage, all
+  rights reserved (see `LICENSE`); it is free to use as a dependency,
+  commercially too, but not to modify or redistribute. The MIT/Apache-2.0
+  dual license is withdrawn.
+- Credits: Maxime Nathan Lestage is named as the author in the crate
+  metadata, the README and the website's footer, which now links the seven
+  projects of the ecosystem.
+- Credits: Solidify joins the projects linked by the README, the license and
+  the website's footer.
+- Website: every card of a shared link gives the size and description of its
+  image, so that it shows large from the first share.
+- `app.bind("…:0")` with HTTP/3 picks another port when the UDP port of the
+  TCP port the system chose is taken or reserved (Windows reserves port ranges
+  per protocol), instead of failing now and then.
 
 ### Added
 
@@ -103,82 +184,9 @@ or actix-web"):
 
 - `vitesse::VERSION`, the version of the crate.
 
-Taking the best of Fastify, Laravel, FastAPI and axum (all opt-in, nothing
-added to the path of a request that doesn't use them):
 
-- Request validation (`vitesse::validate`, Laravel's `$request->validate()`,
-  Fastify's schemas): implement `Validate` with chained rules
-  (`v.field("email", &self.email).email()`, `not_empty`, `min_length`,
-  `max_length`, `min`, `max`, `between`, `one_of`, `url`, `alphanumeric`,
-  `check`, custom `message`s, `optional`/`required`, `nested`, `each`), then
-  `req.valid_json()`, `req.valid_form()` or `req.valid_query()` answer `422`
-  with the messages of every invalid field. New guide page "Validation".
-- `Error::with_details(…)` and `err.details()`: structured details sent next
-  to the message, as `{"error":"…","details":{…}}`.
-- OpenAPI 3.1 (`vitesse::openapi`, FastAPI's `/docs`, `@fastify/swagger`):
-  `app.openapi("/openapi.json", OpenApi::new(title, version))` serves the
-  document generated from every route (path parameters and their
-  constraints included), `.doc(Operation::new()…)` describes a route,
-  `.swagger_ui("/docs")` serves Swagger UI, and `app.openapi_document(&spec)`
-  returns it. New guide page "OpenAPI and Swagger UI".
-- Lifecycle hooks (Fastify's `onRequest`, `preHandler`, `onSend`):
-  `app.on_request`, `app.pre_handler` and `app.on_response`, plain functions
-  that can change the request or the response, or stop the request with an
-  error.
-- `app.param(name, middleware)` (Express's `app.param`) and
-  `app.bind_param(name, loader)` (Laravel's route model binding), on apps and
-  routers: run before the handler of every route that has the parameter.
-- Route groups: `app.group(prefix, |group| …)` (Laravel's
-  `Route::prefix()->group()`), on apps and routers.
-- Plugins: `app.register(plugin)` and the `Plugin` trait (Fastify's
-  `register`), for any `FnOnce(&mut App)`.
-- `req.params_as::<T>()`: every route parameter deserialized into a struct
-  (axum's `Path<T>`).
 
-The best of Phoenix, Laravel, FastAPI, Hono and supertest, all opt-in (an
-application that doesn't use them runs exactly the same code per request):
 
-- Problem Details (RFC 9457, `vitesse::problem`): `app.problem_details()`
-  sends every error as `application/problem+json` (`type`, `title`,
-  `status`, `detail`, `instance`, and the error's `details`),
-  `app.problem_details_with(…)` completes each problem, and a handler can
-  answer with a `Problem` of its own.
-- Middleware stacks and named groups (Laravel's `web` and `api`):
-  `middleware::Stack`, `app.middleware_group(name, stack)` and
-  `middleware::group(name)`.
-- Async hooks: `app.on_request_async` and `app.pre_handler_async`; hooks per
-  router or group (Fastify's encapsulation): `router.on_request`,
-  `router.on_response` and `router.on_request_async`.
-- HTTP caching: `middleware::etag()` (`ETag` and `304 Not Modified` for the
-  responses in memory) and `middleware::cache(ttl)`, a server-side cache of
-  whole responses with a time to live, `X-Cache`, `Age`, a custom key and
-  invalidation (`invalidate`, `invalidate_prefix`, `clear`).
-- PubSub (`vitesse::pubsub`, Phoenix's PubSub and channels): topics shared
-  by WebSocket connections, Server-Sent Events and tasks, with
-  `subscribe`, `publish`, `broadcast_from`-style `Subscription::publish`,
-  subscriber counts, `Subscription::sse(…)`, and `pubsub.relay(socket,
-  topic)` for chat rooms over WebSocket. New guide page "PubSub and
-  channels".
-- A background job queue (`vitesse::queue`, Laravel's queues): workers,
-  retries with exponential backoff, a rate limit, delayed jobs and
-  `queue.idle()` for tests; and a scheduler (`vitesse::schedule`, Laravel's
-  scheduler): `every`, `every_minute`, `hourly_at`, `daily_at`, without
-  overlapping runs. New guide page "Background jobs and scheduled tasks".
-- Typed routes: `TypedRoute<(String, u32)>` declares a pattern once, with
-  the types of its parameters, to register the route, read them
-  (`params(&req)`) and build links (`path`, `try_path`, `url`).
-- OpenAPI: schemas derived from the types with the new `schemars` feature
-  (`Operation::body_type::<T>()`, `form_type`, `validated_body` with its
-  `422`, `response_type`, `query_type` and `OpenApi::schema_type`), Scalar
-  and Redoc pages (`.scalar(path)`, `.redoc(path)`), and Swagger UI served
-  from your own files (`.swagger_ui_assets(base)`).
-- Testing: `client.agent()`, a client with a cookie jar (supertest's
-  `agent`); fluent assertions on `TestResponse` (`assert_status`,
-  `assert_ok`, `assert_header`, `assert_see`, `assert_json`,
-  `assert_json_path`, `assert_json_includes`, `assert_json_count`,
-  `assert_validation_errors`, `assert_cookie`, `assert_redirect`…),
-  `res.json_path(…)`, `res.cookie(…)`; and `.cookie(…)`, `.bearer(…)` and
-  `.query(…)` on test requests.
 
 - Express.js-style API: `App`, `app.get/post/put/patch/delete/…`, path
   parameters and wildcards, `Router` and `app.mount`, middleware with
@@ -223,4 +231,5 @@ application that doesn't use them runs exactly the same code per request):
   `Cargo.toml` is tagged (`v0.1.0` for `0.1.0`), released on GitHub with its
   section of `CHANGELOG.md` as notes, and published on crates.io.
 
+[0.2.0]: https://crates.io/crates/vitesse/0.2.0
 [0.1.0]: https://crates.io/crates/vitesse/0.1.0

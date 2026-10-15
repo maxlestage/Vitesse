@@ -1,6 +1,6 @@
 [package]
 name = "vitesse"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 rust-version = "1.85"
 description = "An Express.js-style web framework in native Rust, built for speed: familiar API (app.get, req.params, middleware, Router), its own HTTP/1.1 engine on tokio, WebSocket and HTTP/3 (QUIC)."

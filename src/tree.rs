@@ -599,6 +599,11 @@ impl<T> Tree<T> {
         self.case_insensitive
     }
 
+    /// Every value of the tree.
+    pub(crate) fn values_mut(&mut self) -> impl Iterator<Item = &mut T> {
+        self.values.iter_mut()
+    }
+
     /// Returns the value associated with the pattern, creating it if needed.
     pub(crate) fn entry(
         &mut self,

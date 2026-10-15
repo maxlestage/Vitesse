@@ -95,6 +95,8 @@ app.get("/users/:id/posts/:post", |req: Request| async move {
 });
 ```
 
+`req.params_as::<T>()?` reads them all into a struct at once (see [Typed parameters](routing.md#all-parameters-at-once-params_as)).
+
 ### The matched route
 
 `req.route()` returns the pattern of the route that answers the request, mount prefix included: `Some("/users/:id/posts/:post")` for `/users/42/posts/7`. It's Express's `req.route.path`, and it's what you want in logs and metrics, where the raw path would give one line per user. See [Routing](routing.md#the-matched-route-reqroute).
@@ -328,6 +330,8 @@ For example, sending `{"tags": []}` to this handler gives:
 ```json
 {"error":"invalid JSON: missing field `title` at line 1 column 12"}
 ```
+
+To check the content too (a title that isn't empty, an email address that looks like one…), read the body with `req.valid_json()`, which answers `422` with the messages of each invalid field. See [Validation](validation.md).
 
 ### Forms
 

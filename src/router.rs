@@ -13,6 +13,9 @@ pub(crate) struct Route {
     pub(crate) names: Box<[Box<str>]>,
     /// The full pattern, mount prefix included (`/api/users/:id`).
     pub(crate) pattern: Box<str>,
+    /// Added on the application itself, not by a mounted router: the
+    /// application's [`param`](crate::App::param) callbacks apply to it.
+    pub(crate) own: bool,
 }
 
 /// The handlers of a single path, by HTTP method.
@@ -70,6 +73,23 @@ impl MethodMap {
             _ => self.other.iter().find(|(m, _)| m == method).map(|(_, r)| r),
         };
         route.or(self.any.as_ref())
+    }
+
+    /// Every route of this path, to wrap their handlers at startup.
+    pub(crate) fn routes_mut(&mut self) -> impl Iterator<Item = &mut Route> {
+        [
+            &mut self.get,
+            &mut self.post,
+            &mut self.put,
+            &mut self.patch,
+            &mut self.delete,
+            &mut self.head,
+            &mut self.options,
+            &mut self.any,
+        ]
+        .into_iter()
+        .filter_map(Option::as_mut)
+        .chain(self.other.iter_mut().map(|(_, route)| route))
     }
 
     /// The value of the `Allow` header.
@@ -269,8 +289,9 @@ macro_rules! routing_methods {
         #[track_caller]
         pub fn mount(&mut self, prefix: &str, router: $crate::Router) -> &mut Self {
             let (routes, scopes, names) = router.into_parts();
-            for (method, path, handler) in routes {
-                self.add_route(method, &$crate::router::join_paths(prefix, &path), handler);
+            for route in routes {
+                let path = $crate::router::join_paths(prefix, &route.path);
+                self.add_mounted_route(route.method, &path, route.handler, route.doc);
             }
             for scope in scopes {
                 self.scopes.push(scope.under(prefix));
@@ -279,7 +300,135 @@ macro_rules! routing_methods {
                 self.add_name(&name, $crate::router::join_paths(prefix, &path));
             }
             self.last_route = None;
+            self.last_doc = None;
             self
+        }
+
+        /// Groups routes under a prefix, with their own middlewares
+        /// (Laravel's `Route::prefix(…)->group(…)`, Hono's `app.route`): a
+        /// shortcut for building a [`Router`](crate::Router) and
+        /// [mounting](Self::mount) it. A function that takes a
+        /// `&mut Router` works too, so a module can export its routes as one
+        /// function (Fastify's encapsulated plugins).
+        ///
+        /// ```
+        /// use vitesse::prelude::*;
+        ///
+        /// fn users(r: &mut Router) {
+        ///     r.get("/", |_| async { "all users" });
+        ///     r.get("/:id", |req: Request| async move {
+        ///         format!("user {}", req.param("id").unwrap_or_default())
+        ///     });
+        /// }
+        ///
+        /// let mut app = App::new();
+        /// app.group("/admin", |admin| {
+        ///     admin.middleware(middleware::basic_auth(("admin", "s3cret")));
+        ///     admin.get("/stats", |_| async { "stats" }); // GET /admin/stats
+        ///     admin.group("/users", users); // GET /admin/users/:id
+        /// });
+        /// app.group("/users", users); // GET /users, GET /users/:id
+        /// ```
+        #[track_caller]
+        pub fn group<F>(&mut self, prefix: &str, build: F) -> &mut Self
+        where
+            F: FnOnce(&mut $crate::Router),
+        {
+            let mut router = $crate::Router::new();
+            build(&mut router);
+            self.mount(prefix, router)
+        }
+
+        /// Describes the route added just before in the OpenAPI document
+        /// (see [`App::openapi`](crate::App::openapi)). Like
+        /// [`name`](Self::name), it follows the route.
+        ///
+        /// ```
+        /// use vitesse::prelude::*;
+        /// use vitesse::openapi::Operation;
+        ///
+        /// let mut app = App::new();
+        /// app.get("/health", |_| async { "ok" })
+        ///     .doc(Operation::new().summary("Health check").tag("ops"));
+        /// ```
+        ///
+        /// # Panics
+        /// If no route was added before.
+        #[track_caller]
+        pub fn doc(&mut self, operation: $crate::openapi::Operation) -> &mut Self {
+            if !self.set_doc(operation) {
+                panic!("`doc(…)` must follow the route it describes");
+            }
+            self
+        }
+
+        /// Runs `middleware` before the handler of every route of this
+        /// application (or router) that has the parameter `name`, after
+        /// routing (Express's `app.param(name, callback)`): load what the
+        /// parameter designates once, for all the routes that use it. Like
+        /// in Express, it applies to the routes added on this application
+        /// or router, before or after it, but not to those of the routers
+        /// and [groups](Self::group) mounted on it, which have their own.
+        ///
+        /// ```
+        /// use vitesse::prelude::*;
+        ///
+        /// let mut app = App::new();
+        /// app.param("id", |req: Request, next: Next| async move {
+        ///     match req.param_as::<u32>("id") {
+        ///         Ok(id) if id > 0 => next.run(req).await,
+        ///         _ => Error::bad_request("invalid id").into_response(),
+        ///     }
+        /// });
+        /// app.get("/users/:id", |_| async { "a user" });
+        /// app.get("/posts/:id", |_| async { "a post" });
+        /// ```
+        pub fn param<M: $crate::Middleware>(&mut self, name: &str, middleware: M) -> &mut Self {
+            self.params
+                .push((name.into(), ::std::sync::Arc::new(middleware)));
+            self
+        }
+
+        /// Route model binding (Laravel's `Route::bind`): for every route
+        /// that has the parameter `name`, `loader` turns its value into a
+        /// `T` before the handler runs, and the handler reads it with
+        /// [`req.get::<T>()`](crate::Request::get). An error from the
+        /// loader (`Error::not_found`…) becomes the response, and the
+        /// handler is not called. Built on [`param`](Self::param).
+        ///
+        /// ```
+        /// use vitesse::prelude::*;
+        ///
+        /// #[derive(Clone)]
+        /// struct User {
+        ///     id: u32,
+        ///     name: String,
+        /// }
+        ///
+        /// let mut app = App::new();
+        /// app.bind_param("user", |_req: &Request, id: &str| {
+        ///     let id = id.parse::<u32>();
+        ///     async move {
+        ///         match id {
+        ///             Ok(1) => Ok(User { id: 1, name: "Ada".into() }),
+        ///             _ => Err(Error::not_found("no such user")),
+        ///         }
+        ///     }
+        /// });
+        /// app.get("/users/:user", |req: Request| async move {
+        ///     let user = req.get::<User>().expect("bound by bind_param");
+        ///     format!("#{} {}", user.id, user.name)
+        /// });
+        /// ```
+        pub fn bind_param<T, F, Fut>(&mut self, name: &str, loader: F) -> &mut Self
+        where
+            T: Clone + Send + Sync + 'static,
+            F: Fn(&$crate::Request, &str) -> Fut + Send + Sync + 'static,
+            Fut: ::std::future::Future<Output = ::std::result::Result<T, $crate::Error>>
+                + Send
+                + 'static,
+        {
+            self.param(name, $crate::hooks::BindParam::new(name, loader))
         }
 
         /// Names the route added just before, to build its URL with
@@ -360,7 +509,11 @@ pub(crate) use routing_methods;
 /// ```
 #[derive(Default)]
 pub struct Router {
-    routes: Vec<(Option<Method>, String, Arc<dyn Handler>)>,
+    routes: Vec<RouteDef>,
+    /// `param` callbacks: parameter name → middleware.
+    params: Vec<(Box<str>, Arc<dyn Middleware>)>,
+    /// The route that `doc(…)` describes.
+    last_doc: Option<usize>,
     middlewares: Vec<Arc<dyn Middleware>>,
     fallback: Option<Arc<dyn Handler>>,
     /// Middlewares of the routers mounted inside this one, by prefix.
@@ -369,6 +522,17 @@ pub struct Router {
     names: Vec<(String, String)>,
     /// The pattern of the last route added, for [`Router::name`].
     last_route: Option<String>,
+}
+
+/// A route of a router, before it is mounted.
+pub(crate) struct RouteDef {
+    pub(crate) method: Option<Method>,
+    pub(crate) path: String,
+    pub(crate) handler: Arc<dyn Handler>,
+    pub(crate) doc: Option<crate::openapi::Operation>,
+    /// Comes from a router mounted on this one (its own `param` callbacks
+    /// already apply).
+    mounted: bool,
 }
 
 /// The middlewares and the fallback of a mounted router, with its prefix:
@@ -433,46 +597,84 @@ impl Router {
 
     #[track_caller]
     fn add_route(&mut self, method: Option<Method>, path: &str, handler: Arc<dyn Handler>) {
+        self.push_route(method, path, handler, None, false);
+    }
+
+    #[track_caller]
+    fn add_mounted_route(
+        &mut self,
+        method: Option<Method>,
+        path: &str,
+        handler: Arc<dyn Handler>,
+        doc: Option<crate::openapi::Operation>,
+    ) {
+        self.push_route(method, path, handler, doc, true);
+    }
+
+    #[track_caller]
+    fn push_route(
+        &mut self,
+        method: Option<Method>,
+        path: &str,
+        handler: Arc<dyn Handler>,
+        doc: Option<crate::openapi::Operation>,
+        mounted: bool,
+    ) {
         if let Err(e) = parse_pattern(path) {
             panic!("invalid route: {e}");
         }
         self.last_route = Some(path.to_owned());
-        self.routes.push((method, path.to_owned(), handler));
+        self.last_doc = Some(self.routes.len());
+        self.routes.push(RouteDef {
+            method,
+            path: path.to_owned(),
+            handler,
+            doc,
+            mounted,
+        });
+    }
+
+    fn set_doc(&mut self, operation: crate::openapi::Operation) -> bool {
+        match self.last_doc.and_then(|i| self.routes.get_mut(i)) {
+            Some(route) => {
+                route.doc = Some(operation);
+                true
+            }
+            None => false,
+        }
     }
 
     /// The routes, wrapped in the router's middlewares, and the scopes
     /// (this router's own one first, at `/`).
-    #[allow(clippy::type_complexity)]
-    pub(crate) fn into_parts(
-        self,
-    ) -> (
-        Vec<(Option<Method>, String, Arc<dyn Handler>)>,
-        Vec<Scope>,
-        Vec<(String, String)>,
-    ) {
+    pub(crate) fn into_parts(self) -> (Vec<RouteDef>, Vec<Scope>, Vec<(String, String)>) {
         let Router {
-            routes,
+            mut routes,
+            params,
+            last_doc: _,
             middlewares,
             fallback,
             scopes: inner,
             names,
             last_route: _,
         } = self;
+        if !params.is_empty() {
+            for route in routes.iter_mut().filter(|r| !r.mounted) {
+                let names = parse_pattern(&route.path)
+                    .map(|segments| crate::tree::param_names(&segments))
+                    .unwrap_or_default();
+                if let Some(wrapped) = crate::hooks::with_params(&params, &names, &route.handler) {
+                    route.handler = wrapped;
+                }
+            }
+        }
         if middlewares.is_empty() && fallback.is_none() {
             return (routes, inner, names);
         }
-        let routes = if middlewares.is_empty() {
-            routes
-        } else {
-            routes
-                .into_iter()
-                .map(|(method, path, handler)| {
-                    let chained: Arc<dyn Handler> =
-                        Arc::new(Chained::new(middlewares.clone(), handler));
-                    (method, path, chained)
-                })
-                .collect()
-        };
+        if !middlewares.is_empty() {
+            for route in &mut routes {
+                route.handler = Arc::new(Chained::new(middlewares.clone(), route.handler.clone()));
+            }
+        }
         let mut scopes = vec![Scope {
             prefix: "/".to_owned(),
             middlewares,

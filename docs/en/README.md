@@ -12,10 +12,11 @@ Everything you need to build fast web apps with Vitesse, the Express.js-style fr
 
 - [Routing](routing.md): routes, HTTP methods, path parameters, constraints and optional parameters, wildcards, the matched route and named routes.
 - [Reading requests](requests.md): parameters, query strings, headers, cookies, content negotiation, bodies (JSON, forms) and file uploads.
+- [Validation](validation.md): check bodies, forms and query strings with rules, and answer `422` with the messages of each field.
 - [Sending responses](responses.md): text, JSON, HTML, status codes, headers, cookies, redirects, files, streaming and Server-Sent Events.
 - [HTML templates](templates.md): render HTML pages with minijinja (`templates` feature): layouts and inheritance, loops, filters and automatic escaping.
-- [Middleware](middleware.md): global and per-route middleware, `next`, the built-in middleware (logging, CORS, authentication, rate limiting, compression…) and tower layers.
-- [Routers](routers.md): group routes with `Router`, mount them under a prefix, with their own middleware and fallback.
+- [Middleware](middleware.md): global and per-route middleware, `next`, lifecycle hooks, the built-in middleware (logging, CORS, authentication, rate limiting, compression…) and tower layers.
+- [Routers](routers.md): group routes with `Router` or `app.group`, mount them under a prefix, with their own middleware and fallback, and package them as plugins.
 - [Shared state](state.md): share configuration, counters or connection pools between requests.
 - [Signed cookies and sessions](sessions.md): tamper-proof cookies and per-visitor data kept on the server (`session` feature), with your own store.
 - [Error handling](errors.md): `vitesse::Error`, the `?` operator, custom error responses and panics.
@@ -25,6 +26,7 @@ Everything you need to build fast web apps with Vitesse, the Express.js-style fr
 ## Going further
 
 - [Testing](testing.md): test your app in memory with `TestClient`, without any network.
+- [OpenAPI and Swagger UI](openapi.md): generate the OpenAPI 3.1 document of your routes, describe them, and serve Swagger UI.
 - [Server configuration](server.md): `run`, `listen` and `bind`, listening addresses and Unix sockets, workers, timeouts, limits and shutdown.
 - [HTTPS and HTTP/2](https.md): serve HTTPS and HTTP/2 yourself with rustls, certificates, redirects and h2c.
 - [HTTP/3 and QUIC](http3.md): serve your app over HTTP/3 next to HTTP/1.1, certificates and deployment.

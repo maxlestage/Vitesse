@@ -83,6 +83,7 @@ mod app;
 mod body;
 mod error;
 mod handler;
+mod hooks;
 mod http1;
 #[cfg(feature = "http2")]
 mod http2;
@@ -104,6 +105,7 @@ pub mod http3;
 pub mod middleware;
 #[cfg(feature = "multipart")]
 pub mod multipart;
+pub mod openapi;
 #[cfg(feature = "session")]
 pub mod session;
 pub mod sse;
@@ -114,6 +116,7 @@ pub mod test;
 pub mod tls;
 #[cfg(feature = "tower")]
 pub mod tower;
+pub mod validate;
 #[cfg(feature = "ws")]
 pub mod ws;
 
@@ -124,6 +127,7 @@ pub use app::{App, DEFAULT_BODY_LIMIT};
 pub use body::{Body, BoxError};
 pub use error::{Error, Result};
 pub use handler::{BoxFuture, Chained, Handler, HandlerExt, Middleware, Next};
+pub use hooks::Plugin;
 pub use proxy::{Network, TrustProxy};
 pub use request::Request;
 pub use response::{

@@ -42,6 +42,7 @@ Si conoces Express, ya conoces casi todo Vitesse: las mismas rutas, el mismo `re
 | `'/user/:id(\\d+)'` (Express 4) | `r"/user/:id(\d+)"`: la misma restricción, en una cadena en bruto para que `\d` no necesite una barra invertida más (consulta [Restricciones](routing.md#restricciones-con-expresiones-regulares)) |
 | `'/archive/:year?'` (Express 4), `'/archive{/:year}'` (Express 5) | `"/archive/:year?"`: parámetros opcionales, solo al final de la ruta (consulta [Parámetros opcionales](routing.md#parámetros-opcionales)) |
 | Sin equivalente integrado | `.name("user")` después de una ruta, y luego `req.path_for("user", &[&42])?` para construir su URL (consulta [Rutas con nombre](routing.md#rutas-con-nombre-y-generación-de-url)) |
+| `app.param('user', (req, res, next, id) => …)` | `app.param("user", middleware)`, o `app.bind_param("user", cargador)` para cargar un valor que el handler lee con `req.get::<T>()` (consulta [Callbacks de parámetros](routing.md#callbacks-de-parámetros-y-vinculación-de-modelos)) |
 | `express.Router()` | `Router::new()` |
 | `app.use('/api', router)` | `app.mount("/api", router)` |
 | `router.use(mw)` | `router.middleware(mw)`, que también se ejecuta para los `404` bajo el prefijo del router |

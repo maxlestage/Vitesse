@@ -12,10 +12,11 @@ Tout ce qu'il faut pour créer des applications web rapides avec Vitesse, le fra
 
 - [Routage](routing.md) : routes, méthodes HTTP, paramètres de chemin, contraintes et paramètres optionnels, jokers, route correspondante et routes nommées.
 - [Lire la requête](requests.md) : paramètres, query string, en-têtes, cookies, négociation de contenu, corps (JSON, formulaires) et envois de fichiers.
+- [Validation des données](validation.md) : vérifier corps, formulaires et query strings avec des règles, et répondre `422` avec les messages de chaque champ.
 - [Répondre](responses.md) : texte, JSON, HTML, statuts, en-têtes, cookies, redirections, fichiers, streaming et Server-Sent Events.
 - [Gabarits HTML](templates.md) : générer des pages HTML avec minijinja (feature `templates`) : gabarits de base et héritage, boucles, filtres et échappement automatique.
-- [Middlewares](middleware.md) : middlewares globaux et par route, `next`, les middlewares fournis (journalisation, CORS, authentification, limitation de débit, compression…) et les couches tower.
-- [Routeurs et sous-applications](routers.md) : regrouper des routes avec `Router`, les monter sous un préfixe, avec leurs propres middlewares et leur propre fallback.
+- [Middlewares](middleware.md) : middlewares globaux et par route, `next`, les hooks du cycle de vie, les middlewares fournis (journalisation, CORS, authentification, limitation de débit, compression…) et les couches tower.
+- [Routeurs et sous-applications](routers.md) : regrouper des routes avec `Router` ou `app.group`, les monter sous un préfixe, avec leurs propres middlewares et leur propre fallback, et en faire des plugins.
 - [État partagé](state.md) : partager une configuration, des compteurs ou un pool de connexions entre les requêtes.
 - [Cookies signés et sessions](sessions.md) : des cookies infalsifiables et des données par visiteur gardées sur le serveur (feature `session`), avec votre propre stockage.
 - [Gestion des erreurs](errors.md) : `vitesse::Error`, l'opérateur `?`, réponses d'erreur personnalisées et paniques.
@@ -25,6 +26,7 @@ Tout ce qu'il faut pour créer des applications web rapides avec Vitesse, le fra
 ## Aller plus loin
 
 - [Tests](testing.md) : tester votre application en mémoire avec `TestClient`, sans réseau.
+- [OpenAPI et Swagger UI](openapi.md) : générer le document OpenAPI 3.1 de vos routes, les décrire, et servir Swagger UI.
 - [Configuration du serveur](server.md) : `run`, `listen` et `bind`, adresses d'écoute et sockets Unix, workers, délais, limites et arrêt.
 - [HTTPS et HTTP/2](https.md) : servir vous-même HTTPS et HTTP/2 avec rustls, certificats, redirections et h2c.
 - [HTTP/3 et QUIC](http3.md) : servir votre application en HTTP/3 à côté de HTTP/1.1, certificats et déploiement.

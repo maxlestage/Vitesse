@@ -95,6 +95,8 @@ app.get("/users/:id/posts/:post", |req: Request| async move {
 });
 ```
 
+`req.params_as::<T>()?` les lit tous d'un coup dans une structure (voir [Paramètres typés](routing.md#tous-les-paramètres-dun-coup--params_as)).
+
 ### La route correspondante
 
 `req.route()` renvoie le motif de la route qui répond à la requête, préfixe de montage compris : `Some("/users/:id/posts/:post")` pour `/users/42/posts/7`. C'est le `req.route.path` d'Express, et c'est ce qu'il vous faut dans les journaux et les métriques, où le chemin brut donnerait une ligne par utilisateur. Voir [Routage](routing.md#la-route-correspondante--reqroute).
@@ -328,6 +330,8 @@ Par exemple, envoyer `{"tags": []}` à ce handler donne :
 ```json
 {"error":"invalid JSON: missing field `title` at line 1 column 12"}
 ```
+
+Pour vérifier aussi le contenu (un titre non vide, une adresse e-mail qui en a l'air…), lisez le corps avec `req.valid_json()`, qui répond `422` avec les messages de chaque champ invalide. Voir [Validation des données](validation.md).
 
 ### Formulaires
 

@@ -99,6 +99,38 @@ or actix-web"):
 
 - `vitesse::VERSION`, the version of the crate.
 
+Taking the best of Fastify, Laravel, FastAPI and axum (all opt-in, nothing
+added to the path of a request that doesn't use them):
+
+- Request validation (`vitesse::validate`, Laravel's `$request->validate()`,
+  Fastify's schemas): implement `Validate` with chained rules
+  (`v.field("email", &self.email).email()`, `not_empty`, `min_length`,
+  `max_length`, `min`, `max`, `between`, `one_of`, `url`, `alphanumeric`,
+  `check`, custom `message`s, `optional`/`required`, `nested`, `each`), then
+  `req.valid_json()`, `req.valid_form()` or `req.valid_query()` answer `422`
+  with the messages of every invalid field. New guide page "Validation".
+- `Error::with_details(…)` and `err.details()`: structured details sent next
+  to the message, as `{"error":"…","details":{…}}`.
+- OpenAPI 3.1 (`vitesse::openapi`, FastAPI's `/docs`, `@fastify/swagger`):
+  `app.openapi("/openapi.json", OpenApi::new(title, version))` serves the
+  document generated from every route (path parameters and their
+  constraints included), `.doc(Operation::new()…)` describes a route,
+  `.swagger_ui("/docs")` serves Swagger UI, and `app.openapi_document(&spec)`
+  returns it. New guide page "OpenAPI and Swagger UI".
+- Lifecycle hooks (Fastify's `onRequest`, `preHandler`, `onSend`):
+  `app.on_request`, `app.pre_handler` and `app.on_response`, plain functions
+  that can change the request or the response, or stop the request with an
+  error.
+- `app.param(name, middleware)` (Express's `app.param`) and
+  `app.bind_param(name, loader)` (Laravel's route model binding), on apps and
+  routers: run before the handler of every route that has the parameter.
+- Route groups: `app.group(prefix, |group| …)` (Laravel's
+  `Route::prefix()->group()`), on apps and routers.
+- Plugins: `app.register(plugin)` and the `Plugin` trait (Fastify's
+  `register`), for any `FnOnce(&mut App)`.
+- `req.params_as::<T>()`: every route parameter deserialized into a struct
+  (axum's `Path<T>`).
+
 - Express.js-style API: `App`, `app.get/post/put/patch/delete/…`, path
   parameters and wildcards, `Router` and `app.mount`, middleware with
   `next.run(req)`, shared state, `app.fallback` and `app.on_error`.

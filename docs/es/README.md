@@ -12,10 +12,11 @@ Todo lo que necesitas para crear aplicaciones web rápidas con Vitesse, el frame
 
 - [Enrutamiento](routing.md): rutas, métodos HTTP, parámetros de ruta, restricciones y parámetros opcionales, comodines, la ruta elegida y las rutas con nombre.
 - [Leer la petición](requests.md): parámetros, query string, cabeceras, cookies, negociación de contenido, cuerpos (JSON, formularios) y subida de archivos.
+- [Validación](validation.md): comprueba cuerpos, formularios y query strings con reglas, y responde `422` con los mensajes de cada campo.
 - [Responder](responses.md): texto, JSON, HTML, códigos de estado, cabeceras, cookies, redirecciones, archivos, streaming y Server-Sent Events.
 - [Plantillas HTML](templates.md): renderizar páginas HTML con minijinja (feature `templates`): plantillas base y herencia, bucles, filtros y escapado automático.
-- [Middlewares](middleware.md): middlewares globales y por ruta, `next`, los middlewares incluidos (registros, CORS, autenticación, limitación de peticiones, compresión…) y las capas de tower.
-- [Routers](routers.md): agrupar rutas con `Router` y montarlas bajo un prefijo, con sus propios middlewares y su fallback.
+- [Middlewares](middleware.md): middlewares globales y por ruta, `next`, los hooks del ciclo de vida, los middlewares incluidos (registros, CORS, autenticación, limitación de peticiones, compresión…) y las capas de tower.
+- [Routers](routers.md): agrupar rutas con `Router` o `app.group` y montarlas bajo un prefijo, con sus propios middlewares y su fallback, y empaquetarlas como plugins.
 - [Estado compartido](state.md): compartir configuración, contadores o pools de conexiones entre peticiones.
 - [Cookies firmadas y sesiones](sessions.md): cookies a prueba de manipulaciones y datos por visitante guardados en el servidor (feature `session`), con tu propio almacén.
 - [Manejo de errores](errors.md): `vitesse::Error`, el operador `?`, respuestas de error personalizadas y pánicos.
@@ -25,6 +26,7 @@ Todo lo que necesitas para crear aplicaciones web rápidas con Vitesse, el frame
 ## Profundizando
 
 - [Pruebas](testing.md): probar tu aplicación en memoria con `TestClient`, sin red.
+- [OpenAPI y Swagger UI](openapi.md): genera el documento OpenAPI 3.1 de tus rutas, descríbelas y sirve Swagger UI.
 - [Configuración del servidor](server.md): `run`, `listen` y `bind`, direcciones de escucha y sockets Unix, workers, tiempos de espera, límites y apagado.
 - [HTTPS y HTTP/2](https.md): servir tú mismo HTTPS y HTTP/2 con rustls, certificados, redirecciones y h2c.
 - [HTTP/3 y QUIC](http3.md): servir tu aplicación en HTTP/3 junto a HTTP/1.1, certificados y despliegue.

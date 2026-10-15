@@ -8,8 +8,11 @@ use std::time::Duration;
 use http::header::{self, HeaderValue};
 use http::{Method, StatusCode};
 
+use bytes::Bytes;
+
 use crate::error::Error;
 use crate::handler::{BoxFuture, Chain, Handler, Middleware, Next};
+use crate::hooks::{Hooks, Plugin, PreHandler, RequestHook, ResponseHook};
 use crate::proxy::TrustProxy;
 use crate::request::{Request, Shared, StateMap};
 use crate::response::{IntoResponse, Response};
@@ -44,6 +47,17 @@ pub struct App {
     names: HashMap<String, String>,
     /// The pattern of the last route added, for [`App::name`].
     last_route: Option<String>,
+    /// Every route, for the OpenAPI document.
+    api_routes: Vec<crate::openapi::ApiRoute>,
+    /// The route that [`App::doc`] describes, in `api_routes`.
+    last_doc: Option<usize>,
+    /// Where the OpenAPI document is served ([`App::openapi`]).
+    openapi: Option<(String, crate::openapi::OpenApi)>,
+    /// `param` callbacks: parameter name → middleware.
+    params: Vec<(Box<str>, Arc<dyn Middleware>)>,
+    on_request: Vec<RequestHook>,
+    pre_handler: Vec<RequestHook>,
+    on_response: Vec<ResponseHook>,
     middlewares: Vec<Arc<dyn Middleware>>,
     /// Middlewares of the mounted routers, by prefix.
     scopes: Vec<Scope>,
@@ -80,6 +94,13 @@ impl App {
             scopes: Vec::new(),
             names: HashMap::new(),
             last_route: None,
+            api_routes: Vec::new(),
+            last_doc: None,
+            openapi: None,
+            params: Vec::new(),
+            on_request: Vec::new(),
+            pre_handler: Vec::new(),
+            on_response: Vec::new(),
             fallback: None,
             error_handler: None,
             state: StateMap::default(),
@@ -110,6 +131,39 @@ impl App {
 
     #[track_caller]
     fn add_route(&mut self, method: Option<Method>, path: &str, handler: Arc<dyn Handler>) {
+        self.insert_route(method, path, handler, None, true);
+    }
+
+    #[track_caller]
+    fn add_mounted_route(
+        &mut self,
+        method: Option<Method>,
+        path: &str,
+        handler: Arc<dyn Handler>,
+        doc: Option<crate::openapi::Operation>,
+    ) {
+        self.insert_route(method, path, handler, doc, false);
+    }
+
+    fn set_doc(&mut self, operation: crate::openapi::Operation) -> bool {
+        match self.last_doc.and_then(|i| self.api_routes.get_mut(i)) {
+            Some(route) => {
+                route.doc = Some(operation);
+                true
+            }
+            None => false,
+        }
+    }
+
+    #[track_caller]
+    fn insert_route(
+        &mut self,
+        method: Option<Method>,
+        path: &str,
+        handler: Arc<dyn Handler>,
+        doc: Option<crate::openapi::Operation>,
+        own: bool,
+    ) {
         // Un `match` plutôt qu'une closure : `#[track_caller]` désigne ainsi la
         // ligne de l'utilisateur.
         let segments = match parse_pattern(path) {
@@ -117,12 +171,19 @@ impl App {
             Err(e) => panic!("invalid route: {e}"),
         };
         self.last_route = Some(path.to_owned());
+        self.last_doc = Some(self.api_routes.len());
+        self.api_routes.push(crate::openapi::ApiRoute {
+            method: method.clone(),
+            pattern: path.to_owned(),
+            doc,
+        });
         // `/archive/:year?` est enregistrée deux fois : `/archive` et `/archive/:year`.
         for variant in variants(&segments) {
             let route = Route {
                 handler: handler.clone(),
                 names: param_names(&variant),
                 pattern: path.into(),
+                own,
             };
             let methods = self.tree.entry(&variant, MethodMap::default);
             if methods.insert(method.clone(), route).is_err() {
@@ -145,6 +206,121 @@ impl App {
     pub fn fallback<H: Handler>(&mut self, handler: H) -> &mut Self {
         self.fallback = Some(Arc::new(handler));
         self
+    }
+
+    /// Adds a plugin: a function (or a [`Plugin`] struct) that configures
+    /// the application, Fastify's `register`. See [`Plugin`].
+    ///
+    /// ```
+    /// use vitesse::prelude::*;
+    ///
+    /// fn health(app: &mut App) {
+    ///     app.get("/healthz", |_| async { "ok" });
+    /// }
+    ///
+    /// let mut app = App::new();
+    /// app.register(health);
+    /// ```
+    pub fn register<P: Plugin>(&mut self, plugin: P) -> &mut Self {
+        plugin.register(self);
+        self
+    }
+
+    /// A hook run on every request, before the middlewares and the routing
+    /// (Fastify's `onRequest`): it can read or change the request (headers,
+    /// [`Request::set`]…), or stop it by returning an error, which becomes
+    /// the response (through [`App::on_error`]). Hooks run in the order they
+    /// were added. Lighter than a middleware: a plain function, no future.
+    ///
+    /// ```
+    /// use vitesse::prelude::*;
+    ///
+    /// let mut app = App::new();
+    /// app.on_request(|req: &mut Request| {
+    ///     if req.header("x-api-key") != Some("secret") {
+    ///         return Err(Error::unauthorized("missing API key"));
+    ///     }
+    ///     Ok(())
+    /// });
+    /// ```
+    pub fn on_request<F>(&mut self, hook: F) -> &mut Self
+    where
+        F: Fn(&mut Request) -> Result<(), Error> + Send + Sync + 'static,
+    {
+        self.on_request.push(Box::new(hook));
+        self
+    }
+
+    /// A hook run after routing, just before the route's middlewares and
+    /// handler (Fastify's `preHandler`): [`Request::route`] and the
+    /// parameters are known. Returning an error stops the request. Routes
+    /// of mounted routers included; not run for `404`, `405` or the
+    /// automatic `OPTIONS`.
+    ///
+    /// ```
+    /// use vitesse::prelude::*;
+    ///
+    /// let mut app = App::new();
+    /// app.pre_handler(|req: &mut Request| {
+    ///     if req.route() == Some("/admin/:page") && req.header("x-admin").is_none() {
+    ///         return Err(Error::forbidden("admins only"));
+    ///     }
+    ///     Ok(())
+    /// });
+    /// app.get("/admin/:page", |_| async { "admin" });
+    /// ```
+    pub fn pre_handler<F>(&mut self, hook: F) -> &mut Self
+    where
+        F: Fn(&mut Request) -> Result<(), Error> + Send + Sync + 'static,
+    {
+        self.pre_handler.push(Box::new(hook));
+        self
+    }
+
+    /// A hook run on every response before it is sent (Fastify's
+    /// `onSend`): add headers, change the status… It sees the responses of
+    /// the middlewares, of the `404`s and of the errors (before
+    /// [`App::on_error`] rewrites them: [`Response::error`] is still there).
+    ///
+    /// ```
+    /// use vitesse::prelude::*;
+    ///
+    /// let mut app = App::new();
+    /// app.on_response(|res: &mut Response| {
+    ///     res.set_header("x-powered-by", "Vitesse");
+    /// });
+    /// ```
+    pub fn on_response<F>(&mut self, hook: F) -> &mut Self
+    where
+        F: Fn(&mut Response) + Send + Sync + 'static,
+    {
+        self.on_response.push(Box::new(hook));
+        self
+    }
+
+    /// Serves the OpenAPI 3.1 document of the application at `path`
+    /// (`/openapi.json`), generated from its routes when it starts, and a
+    /// Swagger UI page if `spec` asks for one. Describe the routes with
+    /// [`doc`](App::doc). See [`openapi`](crate::openapi).
+    ///
+    /// ```
+    /// use vitesse::prelude::*;
+    /// use vitesse::openapi::{OpenApi, Operation};
+    ///
+    /// let mut app = App::new();
+    /// app.get("/pets", |_| async { Json(vec!["Rex"]) })
+    ///     .doc(Operation::new().summary("List the pets"));
+    /// app.openapi("/openapi.json", OpenApi::new("Pets", "1.0.0").swagger_ui("/docs"));
+    /// ```
+    pub fn openapi(&mut self, path: &str, spec: crate::openapi::OpenApi) -> &mut Self {
+        self.openapi = Some((path.to_owned(), spec));
+        self
+    }
+
+    /// The OpenAPI document of the routes added so far, without serving
+    /// it: to write it to a file, or check it in a test.
+    pub fn openapi_document(&self, spec: &crate::openapi::OpenApi) -> serde_json::Value {
+        crate::openapi::document(spec, &self.api_routes)
     }
 
     /// Customizes error responses (Express's `(err, req, res, next)`).
@@ -356,7 +532,49 @@ impl App {
 
     /// Freezes the application. It then lives until the end of the program,
     /// so requests never have to touch a reference count.
-    pub(crate) fn build(self) -> &'static AppService {
+    pub(crate) fn build(mut self) -> &'static AppService {
+        if let Some((path, spec)) = self.openapi.take() {
+            let document = Bytes::from(
+                serde_json::to_vec_pretty(&crate::openapi::document(&spec, &self.api_routes))
+                    .expect("a JSON value always serializes"),
+            );
+            if let Some(ui) = &spec.swagger_ui {
+                let page = Bytes::from(crate::openapi::swagger_page(spec.title(), &path));
+                self.get(ui, move |_| {
+                    let page = page.clone();
+                    async move { crate::response::Html(page) }
+                });
+            }
+            self.get(&path, move |_| {
+                let document = document.clone();
+                async move {
+                    Response::new()
+                        .content_type("application/json")
+                        .send(document)
+                }
+            });
+        }
+        let pre_handler: Option<Arc<[RequestHook]>> =
+            (!self.pre_handler.is_empty()).then(|| std::mem::take(&mut self.pre_handler).into());
+        if !self.params.is_empty() || pre_handler.is_some() {
+            for methods in self.tree.values_mut() {
+                for route in methods.routes_mut() {
+                    if route.own {
+                        if let Some(wrapped) =
+                            crate::hooks::with_params(&self.params, &route.names, &route.handler)
+                        {
+                            route.handler = wrapped;
+                        }
+                    }
+                    if let Some(hooks) = &pre_handler {
+                        route.handler = Arc::new(PreHandler {
+                            hooks: hooks.clone(),
+                            handler: route.handler.clone(),
+                        });
+                    }
+                }
+            }
+        }
         let fallback = self.fallback.unwrap_or_else(|| Arc::new(not_found));
         let tree: &'static Tree<MethodMap> = Box::leak(Box::new(self.tree));
         let core = Arc::new(Core { tree, fallback });
@@ -379,6 +597,15 @@ impl App {
             core,
         });
         let mut middlewares = self.middlewares;
+        if !self.on_request.is_empty() || !self.on_response.is_empty() {
+            middlewares.insert(
+                0,
+                Arc::new(Hooks {
+                    on_request: self.on_request.into(),
+                    on_response: self.on_response.into(),
+                }),
+            );
+        }
         if let Some(handler) = self.error_handler {
             middlewares.insert(0, Arc::new(ErrorHandler(handler)));
         }

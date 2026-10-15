@@ -132,6 +132,34 @@ api.mount("/posts", posts);
 app.mount("/api/v1", api); // GET /api/v1/users, GET /api/v1/posts
 ```
 
+## Route groups: `app.group`
+
+`app.group(prefix, |group| { … })` builds a router, lets you fill it, and mounts it: Laravel's `Route::prefix()->group()`, Hono's `app.route()`. It's the shortest way to give a few routes a prefix and middleware of their own:
+
+```rust
+app.group("/admin", |admin| {
+    admin.middleware(middleware::basic_auth(("admin", "s3cret")));
+    admin.get("/stats", stats);       // GET /admin/stats, protected
+    admin.group("/users", |users| {   // groups nest
+        users.get("/:id", show_user); // GET /admin/users/:id, protected too
+    });
+});
+```
+
+The closure receives a `&mut Router`, so a function that takes one works as well: a module can export its routes as a single function, and be mounted under any prefix.
+
+```rust
+// src/routes/users.rs
+pub fn routes(r: &mut Router) {
+    r.get("/", list).post("/", create).get("/:id", show);
+}
+
+// src/main.rs
+app.group("/api/users", routes::users::routes);
+```
+
+Everything said on this page about routers applies to groups: middleware covering the whole prefix, fallback, names, and so on.
+
 ## Parameters in the prefix
 
 A mount prefix can contain parameters, which handlers read like any other:
@@ -211,6 +239,34 @@ app.mount("/api/:version", api);
 - **Route priority** is global: a static segment wins over a constrained or composite one, which wins over a plain parameter, which wins over a wildcard (`/users/new`, then `/users/:id(\d+)`, then `/users/:name`), whatever router they come from. See [How routes are matched](routing.md#how-routes-are-matched).
 - **Route names** are global too: see [Named routes in routers](#named-routes-in-routers).
 - The error handler (`app.on_error`) and the state (`app.state`) belong to the application, not to routers. A router can have its own [fallback](#router-fallback), though, which answers before `app.fallback`.
+
+## Plugins: `app.register`
+
+A plugin is a reusable piece of application: routes, middleware, state, hooks… added in one call, like Fastify's `register`. Any function that takes `&mut App` is a plugin, and a struct that implements `vitesse::Plugin` can carry options:
+
+```rust
+use vitesse::Plugin;
+
+fn health(app: &mut App) {
+    app.get("/healthz", |_| async { "ok" });
+}
+
+struct Metrics {
+    path: &'static str,
+}
+
+impl Plugin for Metrics {
+    fn register(self, app: &mut App) {
+        app.state(Counters::default());
+        app.on_response(|res: &mut Response| { /* count statuses */ });
+        app.get(self.path, render_metrics);
+    }
+}
+
+app.register(health).register(Metrics { path: "/metrics" });
+```
+
+A plugin works on the whole application (global middleware, hooks, state). For routes encapsulated under a prefix with middleware of their own, use a [group](#route-groups-appgroup).
 
 ## Organising a project
 

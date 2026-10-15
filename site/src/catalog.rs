@@ -51,7 +51,7 @@ pub const CATEGORIES: [Category; 5] = [
     },
 ];
 
-pub const PAGES: [Page; 26] = [
+pub const PAGES: [Page; 28] = [
     Page {
         slug: "introduction",
         category: 0,
@@ -104,6 +104,16 @@ pub const PAGES: [Page; 26] = [
             "Paramètres, query string, en-têtes, cookies et corps.",
             "Parameters, query strings, headers, cookies and bodies.",
             "Parámetros, query string, cabeceras, cookies y cuerpo.",
+        ],
+    },
+    Page {
+        slug: "validation",
+        category: 1,
+        title: ["Validation des données", "Validation", "Validación"],
+        summary: [
+            "Vérifier corps, formulaires et query strings, avec des erreurs 422 par champ.",
+            "Check bodies, forms and query strings, with 422 errors per field.",
+            "Comprueba cuerpos, formularios y query strings, con errores 422 por campo.",
         ],
     },
     Page {
@@ -208,6 +218,20 @@ pub const PAGES: [Page; 26] = [
             "Tester sans réseau avec TestClient, ou sur un vrai port.",
             "Test without a network using TestClient, or on a real port.",
             "Prueba sin red con TestClient, o en un puerto real.",
+        ],
+    },
+    Page {
+        slug: "openapi",
+        category: 2,
+        title: [
+            "OpenAPI et Swagger UI",
+            "OpenAPI and Swagger UI",
+            "OpenAPI y Swagger UI",
+        ],
+        summary: [
+            "Le document OpenAPI 3.1 des routes, et Swagger UI pour l'essayer.",
+            "The OpenAPI 3.1 document of the routes, and Swagger UI to try it.",
+            "El documento OpenAPI 3.1 de las rutas, y Swagger UI para probarlo.",
         ],
     },
     Page {

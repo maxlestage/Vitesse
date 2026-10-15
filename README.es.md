@@ -40,7 +40,11 @@ fn main() -> std::io::Result<()> {
   `templates`), y cualquier capa de [tower](https://crates.io/crates/tower)
   (feature `tower`).
 - **Rutas expresivas**: `/flights/:from-:to`, `/users/:id(\d+)`,
-  `/archive/:year?`, rutas con nombre y generación de URL.
+  `/archive/:year?`, rutas con nombre y generación de URL, grupos de rutas,
+  `app.param` y vinculación de modelos.
+- **APIs**: validación de peticiones con errores `422` por campo, OpenAPI 3.1
+  generado a partir de las rutas con Swagger UI, hooks del ciclo de vida
+  (`on_request`, `pre_handler`, `on_response`) y plugins.
 - **Rápido**: más rápido que actix-web, axum y Drogon en el benchmark de
   abajo.
 - **Robusto**: los pánicos se convierten en respuestas `500`, los límites de

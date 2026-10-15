@@ -132,6 +132,34 @@ api.mount("/posts", posts);
 app.mount("/api/v1", api); // GET /api/v1/users, GET /api/v1/posts
 ```
 
+## Groupes de routes : `app.group`
+
+`app.group(préfixe, |groupe| { … })` crée un routeur, vous laisse le remplir et le monte : le `Route::prefix()->group()` de Laravel, le `app.route()` de Hono. C'est le plus court pour donner à quelques routes un préfixe et des middlewares à elles :
+
+```rust
+app.group("/admin", |admin| {
+    admin.middleware(middleware::basic_auth(("admin", "s3cret")));
+    admin.get("/stats", stats);          // GET /admin/stats, protégée
+    admin.group("/users", |users| {      // les groupes s'imbriquent
+        users.get("/:id", afficher);     // GET /admin/users/:id, protégée aussi
+    });
+});
+```
+
+La closure reçoit un `&mut Router` : une fonction qui en prend un convient aussi, et un module peut exporter ses routes sous forme d'une seule fonction, montable sous n'importe quel préfixe.
+
+```rust
+// src/routes/users.rs
+pub fn routes(r: &mut Router) {
+    r.get("/", lister).post("/", creer).get("/:id", afficher);
+}
+
+// src/main.rs
+app.group("/api/users", routes::users::routes);
+```
+
+Tout ce que cette page dit des routeurs vaut pour les groupes : middlewares qui couvrent tout le préfixe, fallback, noms, etc.
+
 ## Des paramètres dans le préfixe
 
 Un préfixe de montage peut contenir des paramètres, que les handlers lisent comme les autres :
@@ -211,6 +239,34 @@ app.mount("/api/:version", api);
 - **La priorité des routes** est globale : un segment statique passe avant un segment contraint ou composé, qui passe avant un simple paramètre, qui passe lui-même avant un joker (`/users/new`, puis `/users/:id(\d+)`, puis `/users/:name`), quel que soit le routeur d'origine. Voir [Comment les routes sont choisies](routing.md#comment-les-routes-sont-choisies).
 - **Les noms des routes** sont globaux eux aussi : voir [Routes nommées dans les routeurs](#routes-nommées-dans-les-routeurs).
 - Le gestionnaire d'erreurs (`app.on_error`) et l'état (`app.state`) appartiennent à l'application, pas aux routeurs. Un routeur peut toutefois avoir son propre [fallback](#le-fallback-dun-routeur), qui répond avant `app.fallback`.
+
+## Plugins : `app.register`
+
+Un plugin est un morceau d'application réutilisable : routes, middlewares, état, hooks… ajoutés en un appel, comme le `register` de Fastify. Toute fonction qui prend un `&mut App` est un plugin, et une structure qui implémente `vitesse::Plugin` peut porter des options :
+
+```rust
+use vitesse::Plugin;
+
+fn sante(app: &mut App) {
+    app.get("/healthz", |_| async { "ok" });
+}
+
+struct Metriques {
+    chemin: &'static str,
+}
+
+impl Plugin for Metriques {
+    fn register(self, app: &mut App) {
+        app.state(Compteurs::default());
+        app.on_response(|res: &mut Response| { /* compter les statuts */ });
+        app.get(self.chemin, afficher_metriques);
+    }
+}
+
+app.register(sante).register(Metriques { chemin: "/metrics" });
+```
+
+Un plugin agit sur toute l'application (middlewares globaux, hooks, état). Pour des routes encapsulées sous un préfixe, avec leurs propres middlewares, utilisez un [groupe](#groupes-de-routes--appgroup).
 
 ## Organiser un projet
 

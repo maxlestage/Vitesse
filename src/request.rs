@@ -970,6 +970,46 @@ impl Request {
             .map_err(|e| Error::bad_request(format!("invalid query string: {e}")))
     }
 
+    /// Deserializes the query string, then checks it with its
+    /// [`Validate`](crate::validate::Validate) rules: `400` if it cannot be
+    /// read, `422` with the messages of each invalid field otherwise. See
+    /// [`validate`](crate::validate).
+    pub fn valid_query<T>(&self) -> Result<T, Error>
+    where
+        T: DeserializeOwned + crate::validate::Validate,
+    {
+        let value: T = self.query_as()?;
+        crate::validate::validate(&value)?;
+        Ok(value)
+    }
+
+    /// Deserializes all the route parameters into a struct (axum's
+    /// `Path<T>`), converting numbers and booleans; `400` on failure.
+    ///
+    /// ```
+    /// use vitesse::prelude::*;
+    ///
+    /// #[derive(serde::Deserialize)]
+    /// struct PostPath {
+    ///     user: String,
+    ///     post: u64,
+    /// }
+    ///
+    /// let mut app = App::new();
+    /// app.get("/users/:user/posts/:post", |req: Request| async move {
+    ///     let path: PostPath = req.params_as()?;
+    ///     Ok::<_, Error>(format!("post #{} of {}", path.post, path.user))
+    /// });
+    /// ```
+    pub fn params_as<T: DeserializeOwned>(&self) -> Result<T, Error> {
+        let mut encoded = form_urlencoded::Serializer::new(String::new());
+        for (name, value) in self.params() {
+            encoded.append_pair(name, value);
+        }
+        serde_urlencoded::from_str(&encoded.finish())
+            .map_err(|e| Error::bad_request(format!("invalid route parameters: {e}")))
+    }
+
     // ----- Connexion --------------------------------------------------------
 
     /// The client's address (IP + port).
@@ -1113,6 +1153,55 @@ impl Request {
         let bytes = self.bytes().await?;
         serde_urlencoded::from_bytes(&bytes)
             .map_err(|e| Error::bad_request(format!("invalid form data: {e}")))
+    }
+
+    /// Deserializes a JSON body, then checks it with its
+    /// [`Validate`](crate::validate::Validate) rules (Laravel's
+    /// `$request->validate()`): `400` if the JSON is invalid, `422` with the
+    /// messages of each invalid field otherwise. See
+    /// [`validate`](crate::validate).
+    ///
+    /// ```
+    /// use vitesse::prelude::*;
+    /// use vitesse::validate::{Validate, Validator};
+    ///
+    /// #[derive(serde::Deserialize)]
+    /// struct NewPost {
+    ///     title: String,
+    /// }
+    ///
+    /// impl Validate for NewPost {
+    ///     fn validate(&self, v: &mut Validator) {
+    ///         v.field("title", &self.title).not_empty().max_length(120);
+    ///     }
+    /// }
+    ///
+    /// let mut app = App::new();
+    /// app.post("/posts", |req: Request| async move {
+    ///     let post: NewPost = req.valid_json().await?;
+    ///     Ok::<_, Error>((201, post.title))
+    /// });
+    /// ```
+    pub async fn valid_json<T>(&self) -> Result<T, Error>
+    where
+        T: DeserializeOwned + crate::validate::Validate,
+    {
+        let value: T = self.json().await?;
+        crate::validate::validate(&value)?;
+        Ok(value)
+    }
+
+    /// Deserializes an `application/x-www-form-urlencoded` form, then checks
+    /// it with its [`Validate`](crate::validate::Validate) rules: `400` if it
+    /// cannot be read, `422` with the messages of each invalid field
+    /// otherwise.
+    pub async fn valid_form<T>(&self) -> Result<T, Error>
+    where
+        T: DeserializeOwned + crate::validate::Validate,
+    {
+        let value: T = self.form().await?;
+        crate::validate::validate(&value)?;
+        Ok(value)
     }
 
     /// Reads a `multipart/form-data` body (file uploads) field by field, as

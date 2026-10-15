@@ -2,8 +2,8 @@ name: Site
 
 # Le site (site/) : une application Vitesse qui rend ses pages avec active, et le
 # code du navigateur compilé en WebAssembly. Le workflow vérifie la crate, construit
-# le code du navigateur, exporte tout le site en fichiers statiques (avec le préfixe
-# du dépôt dans chaque lien) et le publie sur GitHub Pages depuis master.
+# le code du navigateur et vérifie l'export statique. Le site est servi par Heroku
+# (RustConfig, heroku-build.sh) : rien n'est publié sur GitHub Pages.
 
 on:
   push:
@@ -70,25 +70,3 @@ jobs:
           BASE_PATH: /${{ github.event.repository.name }}
           SITE_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}
         run: cargo run --release --locked -- export dist
-      - uses: actions/upload-pages-artifact@v3
-        if: github.event_name != 'pull_request'
-        with:
-          path: site/dist
-
-  deploy:
-    name: Deploy (GitHub Pages)
-    if: github.event_name != 'pull_request'
-    needs: build
-    runs-on: ubuntu-latest
-    permissions:
-      pages: write
-      id-token: write
-    concurrency:
-      group: pages
-      cancel-in-progress: true
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - id: deployment
-        uses: actions/deploy-pages@v4

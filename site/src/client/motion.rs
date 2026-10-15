@@ -121,6 +121,26 @@ fn reveals() {
             io.unobserve(&target);
         }
     });
+    // Safety net for browsers that miss an intersection (Safari on iOS while the page
+    // scrolls with momentum): every scroll reveals what is already on screen.
+    let ticking = Rc::new(Cell::new(false));
+    on_passive(&window(), "scroll", move |_: web_sys::Event| {
+        if ticking.replace(true) {
+            return;
+        }
+        let ticking = ticking.clone();
+        request_frame(move |_| {
+            ticking.set(false);
+            let height = viewport().1;
+            for el in all("[data-reveal]:not(.in)") {
+                let rect = el.get_bounding_client_rect();
+                if rect.top() < height && rect.bottom() > 0.0 {
+                    let _ = el.class_list().add_1("in");
+                }
+            }
+            false
+        });
+    });
 }
 
 /// Barre de progression, navigation qui se cache, parallaxe, et le défilement

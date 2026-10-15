@@ -194,6 +194,25 @@ app.mount("/docs/:lang(en|fr|es)", docs);
 
 `req.route()` da el patrón completo, prefijo incluido: `/docs/:lang(en|fr|es)/:page?`. Los parámetros opcionales tienen que quedar al final de la ruta completa, prefijo y ruta incluidos: con un prefijo como `/:lang?`, cualquier ruta que no sea la `/` del router hace que `mount` entre en pánico. Pon el parámetro opcional en las rutas del router, como arriba.
 
+## Los hooks de un router
+
+Los routers y los grupos tienen sus propios hooks, que solo se ejecutan para ellos (la encapsulación de Fastify): `on_request` y `on_response`, funciones simples que se ejecutan antes de los middlewares del router, y `on_request_async`, que se ejecuta donde se añadió entre los middlewares:
+
+```rust
+app.group("/admin", |admin| {
+    admin.on_request(|req: &mut Request| match req.header("x-admin") {
+        Some(_) => Ok(()),
+        None => Err(Error::forbidden("solo administradores")),
+    });
+    admin.on_response(|res: &mut Response| {
+        res.set_header("cache-control", "no-store");
+    });
+    admin.get("/stats", stats);
+});
+```
+
+Como los middlewares del router, también cubren las respuestas `404` y `405` bajo su prefijo, y `on_response` ve los errores de sus propios hooks `on_request`. Los hooks de la aplicación (consulta [Middlewares](middleware.md)) se ejecutan para todas las peticiones.
+
 ## Rutas WebSocket
 
 `router.ws(ruta, handler)` declara una ruta [WebSocket](websocket.md), exactamente igual que `app.ws`. Se aplica el prefijo del router, y sus middlewares se ejecutan sobre la petición del handshake, antes de aceptar la conexión: un middleware que responde `401` rechaza la conexión.

@@ -35,6 +35,7 @@ fn main() -> std::io::Result<()> {
 | `compress` | Disabled | `middleware::compress()` and `middleware::decompress()` |
 | `session` | Disabled | `app.cookie_secret`, signed cookies, `middleware::session` and the `vitesse::session` module |
 | `templates` | Disabled | `app.views`, `app.templates`, `req.render` and the `vitesse::templates` module (minijinja) |
+| `schemars` | Disabled | `Operation::body_type::<T>()`, `validated_body`, `response_type`, `query_type` and `OpenApi::schema_type` |
 | `tower` | Disabled | `middleware::layer`, `app.into_service()` and the `vitesse::tower` module |
 
 ```toml
@@ -307,6 +308,9 @@ The response has `content-type: text/event-stream` and `cache-control: no-cache`
 | `vitesse::Result<T>` | Alias for `Result<T, vitesse::Error>` |
 | `?` on any standard error | `500 {"error":"Internal Server Error"}`; the cause is only logged |
 | Panic in a handler or a middleware | `500`; the server keeps running |
+| `app.problem_details()` | Every error as RFC 9457 `application/problem+json`, with `instance` and `details` |
+| `app.problem_details_with(\|err, problem\| problem.type_uri(…))` | The same, completed per error |
+| `Problem::new(403).type_uri(…).title(…).detail(…).extension(k, v)` | A problem document as a response (`vitesse::problem`) |
 
 See [Errors](errors.md).
 
@@ -367,6 +371,11 @@ See [Validation](validation.md) and [OpenAPI](openapi.md).
 | `middleware::decompress()` | | Decompresses `gzip`, `br` and `deflate` request bodies (`compress` feature) |
 | `middleware::layer(tower_layer)` | | Any tower / tower-http `Layer` (`tower` feature) |
 | `middleware::serve_static(dir)` | `express.static()` | Same as `ServeDir::new(dir)` |
+| `middleware::etag()` | `etag` setting | `ETag` + `304 Not Modified` for responses in memory |
+| `middleware::cache(ttl)` | `apicache` | Server-side response cache: `.max_entries(n)`, `.key(…)`, `cache.invalidate(path)`; `X-Cache: HIT`/`MISS` |
+| `Stack::new().with(a).with(b)` | | Several middlewares as one (`vitesse::middleware::Stack`) |
+| `app.middleware_group("api", stack)`, `middleware::group("api")` | Laravel's groups | A named stack, used by its name |
+| `app.on_request_async(\|req\| async { Ok(req) })`, `app.pre_handler_async(…)` | Fastify's async hooks | Hooks that await; `Err(error)` stops the request |
 
 See [Middleware](middleware.md).
 
@@ -381,6 +390,8 @@ See [Middleware](middleware.md).
 | `router.middleware(mw)` | Middleware for this router: its routes and every other request under its prefix (`router.use`) |
 | `router.fallback(handler)` | Answers the paths under the router's prefix that no route matches, instead of the app's fallback |
 | `app.mount("/api", router)` | Mounts it; the prefix can contain parameters (`/users/:id/posts`) |
+| `router.on_request(…)`, `router.on_response(…)`, `router.on_request_async(…)` | Hooks for this router only (Fastify's encapsulation) |
+| `static R: TypedRoute<(u32,)> = TypedRoute::new("/users/:id")` | A typed route: `app.get(R.pattern(), …)`, `R.params(&req)?`, `R.path((42,))` |
 
 See [Routers](routers.md).
 
@@ -538,10 +549,27 @@ The layer can change the method, URI, headers, extensions and body; its errors b
 | `res.status()`, `res.header(name)`, `res.headers()` | Status and headers |
 | `res.text()`, `res.bytes()`, `res.json::<T>()` | The body |
 | `client.get("/ws-route")` | On a WebSocket route: only the handshake response (`426` for plain HTTP); test conversations on a real port |
-| `.header("cookie", "vitesse.sid=…")` | Sends back a cookie read from `res.header("set-cookie")`: there is no cookie jar (sessions, signed cookies) |
+| `.cookie(name, value)`, `.bearer(token)`, `.query(&params)` | A cookie, `Authorization: Bearer`, a query string |
+| `client.agent()` | A client with a cookie jar (sessions, logins): `agent.cookie(name)`, `agent.clear_cookies()` |
+| `res.assert_status(201).assert_json_path("user.name", "Ada")` | Chained assertions: `assert_ok`, `assert_header`, `assert_see`, `assert_json`, `assert_json_includes`, `assert_validation_errors`, `assert_cookie`, `assert_redirect`… |
 | `app.into_service().oneshot(request).await` | Tests through tower (`tower` feature and tower's `ServiceExt`) |
 
 See [Testing](testing.md).
+
+## PubSub, jobs and schedules
+
+| Usage | Description |
+|---|---|
+| `PubSub::<String>::new()` | Topics shared by its clones (`vitesse::pubsub`); put it in `app.state` |
+| `pubsub.subscribe(topic)`, `sub.recv().await` | Subscribes, reads the next message |
+| `pubsub.publish(topic, msg)`, `sub.publish(msg)` | To every subscriber; to the others only |
+| `pubsub.relay(socket, topic).await` | A WebSocket joins a room (`ws` feature) |
+| `sub.sse(\|msg\| Event::new().data(msg))` | A subscription as Server-Sent Events |
+| `Queue::builder().workers(4).retries(3).rate_limit(10, period).start()` | A job queue (`vitesse::queue`) |
+| `queue.dispatch(\|\| async { … })`, `queue.dispatch_after(delay, job)`, `queue.idle().await` | Adds jobs; waits until none is left |
+| `Scheduler::new().every(d, name, task).daily_at(3, 30, name, task).start()` | Scheduled tasks (`vitesse::schedule`), `.stop()` on the handle |
+
+See [PubSub and channels](pubsub.md) and [Background jobs and scheduled tasks](background.md).
 
 ## Re-exports
 

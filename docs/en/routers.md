@@ -194,6 +194,25 @@ app.mount("/docs/:lang(en|fr|es)", docs);
 
 `req.route()` gives the full pattern, prefix included: `/docs/:lang(en|fr|es)/:page?`. Optional parameters must stay at the end of the full path, prefix and route included: with a prefix such as `/:lang?`, any route other than the router's `/` makes `mount` panic. Put the optional parameter in the router's routes instead, as above.
 
+## Router hooks
+
+Routers and groups have hooks of their own, which only run for them (Fastify's encapsulation): `on_request` and `on_response`, plain functions run before the router's middleware, and `on_request_async`, which runs where it was added among the middleware:
+
+```rust
+app.group("/admin", |admin| {
+    admin.on_request(|req: &mut Request| match req.header("x-admin") {
+        Some(_) => Ok(()),
+        None => Err(Error::forbidden("admins only")),
+    });
+    admin.on_response(|res: &mut Response| {
+        res.set_header("cache-control", "no-store");
+    });
+    admin.get("/stats", stats);
+});
+```
+
+Like the router's middleware, they also cover the `404` and `405` responses under its prefix, and `on_response` sees the errors of its own `on_request` hooks. The application's hooks (see [Middleware](middleware.md)) run for every request.
+
 ## WebSocket routes
 
 `router.ws(path, handler)` declares a [WebSocket](websocket.md) route, exactly like `app.ws`. The router's prefix applies, and its middleware runs on the handshake request, before the connection is accepted: a middleware that answers `401` refuses the connection.

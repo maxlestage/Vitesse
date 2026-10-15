@@ -51,7 +51,7 @@ pub const CATEGORIES: [Category; 5] = [
     },
 ];
 
-pub const PAGES: [Page; 28] = [
+pub const PAGES: [Page; 30] = [
     Page {
         slug: "introduction",
         category: 0,
@@ -232,6 +232,34 @@ pub const PAGES: [Page; 28] = [
             "Le document OpenAPI 3.1 des routes, et Swagger UI pour l'essayer.",
             "The OpenAPI 3.1 document of the routes, and Swagger UI to try it.",
             "El documento OpenAPI 3.1 de las rutas, y Swagger UI para probarlo.",
+        ],
+    },
+    Page {
+        slug: "pubsub",
+        category: 2,
+        title: [
+            "PubSub et canaux",
+            "PubSub and channels",
+            "PubSub y canales",
+        ],
+        summary: [
+            "Des sujets et des salons pour WebSocket, SSE et tâches de fond.",
+            "Topics and rooms for WebSocket, SSE and background tasks.",
+            "Temas y salas para WebSocket, SSE y tareas en segundo plano.",
+        ],
+    },
+    Page {
+        slug: "background",
+        category: 2,
+        title: [
+            "Tâches de fond et planifiées",
+            "Background jobs and scheduled tasks",
+            "Tareas en segundo plano y programadas",
+        ],
+        summary: [
+            "Une file de tâches avec nouvelles tentatives, et un planificateur.",
+            "A job queue with retries and rate limits, and a scheduler.",
+            "Una cola de tareas con reintentos, y un planificador.",
         ],
     },
     Page {

@@ -233,6 +233,50 @@ async fn rejects_bad_input() {
 
 Every call to `app()` creates a fresh state, so each test starts from an empty "database" and tests never interfere with each other, even when they run in parallel.
 
+## Fluent assertions
+
+`TestResponse` has assertions that can be chained, like Laravel's HTTP tests or supertest's `expect`. When one fails, the panic message shows the status and the body of the response:
+
+```rust
+client
+    .post("/users")
+    .json(&json!({ "name": "Ada" }))
+    .await
+    .assert_status(201)
+    .assert_header("content-type", "application/json")
+    .assert_json_path("user.name", "Ada") // keys and indexes ("data.0.name"), or a JSON pointer
+    .assert_json_includes(json!({ "user": { "id": 7 } }))
+    .assert_json_missing("user.password");
+```
+
+| Assertion | Checks |
+|---|---|
+| `assert_status(201)`, `assert_ok()`, `assert_not_found()` | The status (`assert_ok`: any `2xx`) |
+| `assert_redirect("/login")` | A `3xx` to this `Location` |
+| `assert_header(name, value)`, `assert_header_missing(name)` | A header (`content-type` ignores its parameters) |
+| `assert_text(text)`, `assert_see(text)`, `assert_dont_see(text)` | The whole body, or a part of it |
+| `assert_json(value)`, `assert_json_includes(subset)` | The JSON body, exactly or as a subset |
+| `assert_json_path(path, value)`, `assert_json_missing(path)`, `assert_json_count(path, n)` | A value of the JSON body |
+| `assert_validation_errors(&["email"])` | A `422` whose details name these fields |
+| `assert_cookie(name, value)` | A cookie set by the response |
+
+`res.json_path("data.0.name")` and `res.cookie("sid")` read the values without asserting anything. The request builder also has `.query(&params)`, `.cookie(name, value)` and `.bearer(token)`.
+
+## Cookies across requests: `client.agent()`
+
+`client.agent()` returns a client with a cookie jar, like supertest's `agent`: the cookies set by a response are sent with the next requests, and removed when the application deletes them. Log in once, then test the pages behind the login:
+
+```rust
+let agent = TestClient::new(my_api::app()).agent();
+
+agent.post("/login").form(&[("user", "ada"), ("password", "secret")]).await.assert_ok();
+agent.get("/dashboard").await.assert_ok().assert_see("Welcome Ada");
+agent.post("/logout").await;
+agent.get("/dashboard").await.assert_redirect("/login");
+```
+
+`agent.cookie(name)` reads the jar, `agent.set_cookie(name, value)` fills it and `agent.clear_cookies()` empties it. Each agent has its own jar; its clones share it.
+
 ## Testing errors
 
 Errors are ordinary responses: check the status and the `{"error": "..."}` body. Panics and internal errors are worth a test too, to make sure nothing leaks to the client:

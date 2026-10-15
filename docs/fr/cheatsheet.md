@@ -35,6 +35,7 @@ fn main() -> std::io::Result<()> {
 | `compress` | Désactivée | `middleware::compress()` et `middleware::decompress()` |
 | `session` | Désactivée | `app.cookie_secret`, les cookies signés, `middleware::session` et le module `vitesse::session` |
 | `templates` | Désactivée | `app.views`, `app.templates`, `req.render` et le module `vitesse::templates` (minijinja) |
+| `schemars` | Désactivée | `Operation::body_type::<T>()`, `validated_body`, `response_type`, `query_type` et `OpenApi::schema_type` |
 | `tower` | Désactivée | `middleware::layer`, `app.into_service()` et le module `vitesse::tower` |
 
 ```toml
@@ -307,6 +308,9 @@ La réponse porte `content-type: text/event-stream` et `cache-control: no-cache`
 | `vitesse::Result<T>` | Alias de `Result<T, vitesse::Error>` |
 | `?` sur n'importe quelle erreur standard | `500 {"error":"Internal Server Error"}` ; la cause est seulement journalisée |
 | Panique dans un handler ou un middleware | `500` ; le serveur continue de tourner |
+| `app.problem_details()` | Toutes les erreurs en `application/problem+json` (RFC 9457), avec `instance` et `details` |
+| `app.problem_details_with(\|err, problem\| problem.type_uri(…))` | Pareil, complété pour chaque erreur |
+| `Problem::new(403).type_uri(…).title(…).detail(…).extension(k, v)` | Un document de problème comme réponse (`vitesse::problem`) |
 
 Voir [Erreurs](errors.md).
 
@@ -367,6 +371,11 @@ Voir [Validation des données](validation.md) et [OpenAPI](openapi.md).
 | `middleware::decompress()` | | Décompresse les corps de requête `gzip`, `br` et `deflate` (feature `compress`) |
 | `middleware::layer(couche_tower)` | | N'importe quelle `Layer` tower / tower-http (feature `tower`) |
 | `middleware::serve_static(dossier)` | `express.static()` | Équivaut à `ServeDir::new(dossier)` |
+| `middleware::etag()` | réglage `etag` | `ETag` + `304 Not Modified` pour les réponses en mémoire |
+| `middleware::cache(durée)` | `apicache` | Cache de réponses côté serveur : `.max_entries(n)`, `.key(…)`, `cache.invalidate(chemin)` ; `X-Cache: HIT`/`MISS` |
+| `Stack::new().with(a).with(b)` | | Plusieurs middlewares en un (`vitesse::middleware::Stack`) |
+| `app.middleware_group("api", pile)`, `middleware::group("api")` | groupes de Laravel | Une pile nommée, utilisée par son nom |
+| `app.on_request_async(\|req\| async { Ok(req) })`, `app.pre_handler_async(…)` | hooks async de Fastify | Des hooks qui attendent ; `Err(erreur)` arrête la requête |
 
 Voir [Middlewares](middleware.md).
 
@@ -381,6 +390,8 @@ Voir [Middlewares](middleware.md).
 | `router.middleware(mw)` | Middleware du routeur : ses routes et toute autre requête sous son préfixe (`router.use`) |
 | `router.fallback(handler)` | Répond aux chemins sous le préfixe du routeur auxquels aucune route ne correspond, à la place du fallback de l'application |
 | `app.mount("/api", router)` | Le monte ; le préfixe peut contenir des paramètres (`/users/:id/posts`) |
+| `router.on_request(…)`, `router.on_response(…)`, `router.on_request_async(…)` | Des hooks pour ce routeur seulement (l'encapsulation de Fastify) |
+| `static R: TypedRoute<(u32,)> = TypedRoute::new("/users/:id")` | Une route typée : `app.get(R.pattern(), …)`, `R.params(&req)?`, `R.path((42,))` |
 
 Voir [Routeurs](routers.md).
 
@@ -538,10 +549,27 @@ La couche peut modifier la méthode, l'URI, les en-têtes, les extensions et le 
 | `res.status()`, `res.header(nom)`, `res.headers()` | Statut et en-têtes |
 | `res.text()`, `res.bytes()`, `res.json::<T>()` | Le corps |
 | `client.get("/route-ws")` | Sur une route WebSocket : seulement la réponse à la poignée de main (`426` pour du HTTP ordinaire) ; testez les conversations sur un vrai port |
-| `.header("cookie", "vitesse.sid=…")` | Renvoie un cookie lu dans `res.header("set-cookie")` : le client ne garde pas les cookies (sessions, cookies signés) |
+| `.cookie(nom, valeur)`, `.bearer(jeton)`, `.query(&paramètres)` | Un cookie, `Authorization: Bearer`, une query string |
+| `client.agent()` | Un client avec une boîte à cookies (sessions, connexions) : `agent.cookie(nom)`, `agent.clear_cookies()` |
+| `res.assert_status(201).assert_json_path("user.name", "Ada")` | Des assertions en chaîne : `assert_ok`, `assert_header`, `assert_see`, `assert_json`, `assert_json_includes`, `assert_validation_errors`, `assert_cookie`, `assert_redirect`… |
 | `app.into_service().oneshot(request).await` | Teste à travers tower (feature `tower` et `ServiceExt` de tower) |
 
 Voir [Tests](testing.md).
+
+## PubSub, file de tâches et planificateur
+
+| Usage | Description |
+|---|---|
+| `PubSub::<String>::new()` | Des sujets partagés par ses clones (`vitesse::pubsub`) ; à mettre dans `app.state` |
+| `pubsub.subscribe(sujet)`, `sub.recv().await` | S'abonne, lit le message suivant |
+| `pubsub.publish(sujet, msg)`, `sub.publish(msg)` | À tous les abonnés ; aux autres seulement |
+| `pubsub.relay(socket, sujet).await` | Un WebSocket rejoint un salon (feature `ws`) |
+| `sub.sse(\|msg\| Event::new().data(msg))` | Un abonnement en Server-Sent Events |
+| `Queue::builder().workers(4).retries(3).rate_limit(10, période).start()` | Une file de tâches (`vitesse::queue`) |
+| `queue.dispatch(\|\| async { … })`, `queue.dispatch_after(délai, tâche)`, `queue.idle().await` | Ajoute des tâches ; attend qu'il n'en reste plus |
+| `Scheduler::new().every(d, nom, tâche).daily_at(3, 30, nom, tâche).start()` | Des tâches planifiées (`vitesse::schedule`), `.stop()` sur la poignée |
+
+Voir [PubSub et canaux](pubsub.md) et [Tâches de fond et planifiées](background.md).
 
 ## Réexportations
 

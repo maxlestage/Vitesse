@@ -74,6 +74,7 @@ Algunas partes de Vitesse son features de Cargo, que activas o desactivas en `Ca
 | `compress` | Desactivada | `middleware::compress()` (respuestas en Brotli o gzip) y `middleware::decompress()` (cuerpos de petición comprimidos), consulta [`compress`](middleware.md#compress) |
 | `session` | Desactivada | `app.cookie_secret(...)`, las cookies firmadas (`req.sign_cookie`, `req.signed_cookie`), `middleware::session(...)` y el módulo `vitesse::session`, con los crates hmac, sha2 y getrandom: consulta [Cookies firmadas y sesiones](sessions.md) |
 | `templates` | Desactivada | `app.views(...)`, `app.templates(...)`, `req.render(...)` y el módulo `vitesse::templates`, con [minijinja](https://crates.io/crates/minijinja): consulta [Plantillas HTML](templates.md) |
+| `schemars` | Desactivada | Esquemas OpenAPI derivados de tus tipos: `Operation::body_type::<T>()`, `response_type`, `query_type`…, consulta [OpenAPI](openapi.md) |
 | `tower` | Desactivada | `middleware::layer(...)`, `app.into_service()` y el módulo `vitesse::tower`: middlewares de tower y tower-http, consulta [Capas de tower](middleware.md#capas-de-tower) |
 
 Todo lo demás, incluidos los Server-Sent Events (`vitesse::sse`) y los demás middlewares incluidos, está siempre disponible.

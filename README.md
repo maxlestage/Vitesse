@@ -44,7 +44,12 @@ fn main() -> std::io::Result<()> {
   `app.param` and route model binding.
 - **APIs**: request validation with per-field `422` errors, OpenAPI 3.1
   generated from the routes with Swagger UI, lifecycle hooks (`on_request`,
-  `pre_handler`, `on_response`) and plugins.
+  `pre_handler`, `on_response`) and plugins, RFC 9457 Problem Details,
+  OpenAPI schemas derived from your types, Scalar and Redoc.
+- **Batteries**: PubSub topics for WebSocket rooms and Server-Sent Events, a
+  background job queue with retries and rate limits, a scheduler, a response
+  cache, named middleware groups, typed routes, and test assertions with a
+  cookie jar.
 - **Fast**: faster than actix-web, axum and Drogon in the benchmark below.
 - **Sturdy**: panics become `500` responses, size limits and timeouts are
   built in, and the server shuts down gracefully.
@@ -120,6 +125,7 @@ gracefully on `Ctrl+C` / `SIGTERM`. If you already run a tokio runtime, use
 | `compress` | Disabled | `middleware::compress()` and `middleware::decompress()`: Brotli, gzip ([guide](docs/en/middleware.md#compress)) |
 | `session` | Disabled | Signed cookies and sessions: `app.cookie_secret(...)`, `middleware::session(...)` ([guide](docs/en/sessions.md)) |
 | `templates` | Disabled | HTML templates with minijinja: `app.views(...)`, `req.render(...)` ([guide](docs/en/templates.md)) |
+| `schemars` | Disabled | OpenAPI schemas derived from your types ([guide](docs/en/openapi.md)) |
 | `tower` | Disabled | tower layers as middleware, the app as a tower `Service` ([guide](docs/en/middleware.md)) |
 
 ```toml

@@ -80,6 +80,7 @@
 #![warn(missing_docs)]
 
 mod app;
+mod background;
 mod body;
 mod error;
 mod handler;
@@ -97,6 +98,7 @@ mod router;
 mod server;
 mod static_files;
 mod tree;
+mod typed_route;
 mod upgrade;
 mod util;
 
@@ -106,6 +108,10 @@ pub mod middleware;
 #[cfg(feature = "multipart")]
 pub mod multipart;
 pub mod openapi;
+pub mod problem;
+pub mod pubsub;
+pub mod queue;
+pub mod schedule;
 #[cfg(feature = "session")]
 pub mod session;
 pub mod sse;
@@ -138,6 +144,7 @@ pub use router::Router;
 pub use server::UnixServer;
 pub use server::{ListenAddr, Server};
 pub use static_files::ServeDir;
+pub use typed_route::{RouteParams, TypedRoute};
 
 pub use bytes::Bytes;
 pub use http::{self, HeaderMap, Method, StatusCode, header};

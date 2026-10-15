@@ -58,11 +58,19 @@ pub struct App {
     on_request: Vec<RequestHook>,
     pre_handler: Vec<RequestHook>,
     on_response: Vec<ResponseHook>,
+    /// `on_request_async` hooks, as middlewares.
+    on_request_async: Vec<Arc<dyn Middleware>>,
+    /// `pre_handler_async` hooks, as middlewares.
+    pre_handler_async: Vec<Arc<dyn Middleware>>,
     middlewares: Vec<Arc<dyn Middleware>>,
     /// Middlewares of the mounted routers, by prefix.
     scopes: Vec<Scope>,
     fallback: Option<Arc<dyn Handler>>,
     error_handler: Option<Arc<dyn Fn(Error) -> Response + Send + Sync>>,
+    /// Set by [`App::problem_details`]: errors as `application/problem+json`.
+    problem_details: Option<crate::problem::ProblemDetails>,
+    /// Named middleware groups ([`App::middleware_group`]).
+    middleware_groups: HashMap<String, crate::middleware::Stack>,
     state: StateMap,
     body_limit: usize,
     trust_proxy: TrustProxy,
@@ -101,8 +109,12 @@ impl App {
             on_request: Vec::new(),
             pre_handler: Vec::new(),
             on_response: Vec::new(),
+            on_request_async: Vec::new(),
+            pre_handler_async: Vec::new(),
             fallback: None,
             error_handler: None,
+            problem_details: None,
+            middleware_groups: HashMap::new(),
             state: StateMap::default(),
             body_limit: DEFAULT_BODY_LIMIT,
             trust_proxy: TrustProxy::None,
@@ -277,6 +289,68 @@ impl App {
         self
     }
 
+    /// The async version of [`App::on_request`], for hooks that wait on
+    /// something (a cache, a database, another service): it receives the
+    /// request and gives it back (`Ok(req)`), or stops it with an error.
+    /// Async hooks run after the plain ones, in the order they were added.
+    ///
+    /// ```
+    /// use vitesse::prelude::*;
+    ///
+    /// async fn is_banned(_ip: Option<std::net::IpAddr>) -> bool {
+    ///     false // ask Redis…
+    /// }
+    ///
+    /// let mut app = App::new();
+    /// app.on_request_async(|req: Request| async move {
+    ///     if is_banned(req.ip()).await {
+    ///         return Err(Error::forbidden("banned"));
+    ///     }
+    ///     Ok(req)
+    /// });
+    /// ```
+    pub fn on_request_async<F, Fut>(&mut self, hook: F) -> &mut Self
+    where
+        F: Fn(Request) -> Fut + Send + Sync + 'static,
+        Fut: std::future::Future<Output = Result<Request, Error>> + Send + 'static,
+    {
+        self.on_request_async
+            .push(Arc::new(crate::hooks::AsyncHook(hook)));
+        self
+    }
+
+    /// The async version of [`App::pre_handler`]: after routing, before
+    /// the route's middlewares and handler, after the plain `pre_handler`
+    /// hooks. Load what the handler needs, with the parameters known.
+    ///
+    /// ```
+    /// use vitesse::prelude::*;
+    ///
+    /// #[derive(Clone)]
+    /// struct Tenant(String);
+    ///
+    /// let mut app = App::new();
+    /// app.pre_handler_async(|mut req: Request| async move {
+    ///     if let Some(slug) = req.param("tenant").map(str::to_owned) {
+    ///         // … look the tenant up in the database
+    ///         req.set(Tenant(slug));
+    ///     }
+    ///     Ok(req)
+    /// });
+    /// app.get("/t/:tenant/home", |req: Request| async move {
+    ///     req.get::<Tenant>().map(|t| t.0.clone()).unwrap_or_default()
+    /// });
+    /// ```
+    pub fn pre_handler_async<F, Fut>(&mut self, hook: F) -> &mut Self
+    where
+        F: Fn(Request) -> Fut + Send + Sync + 'static,
+        Fut: std::future::Future<Output = Result<Request, Error>> + Send + 'static,
+    {
+        self.pre_handler_async
+            .push(Arc::new(crate::hooks::AsyncHook(hook)));
+        self
+    }
+
     /// A hook run on every response before it is sent (Fastify's
     /// `onSend`): add headers, change the status… It sees the responses of
     /// the middlewares, of the `404`s and of the errors (before
@@ -342,6 +416,94 @@ impl App {
         R: IntoResponse,
     {
         self.error_handler = Some(Arc::new(move |err| handler(err).into_response()));
+        self
+    }
+
+    /// Sends every error as a Problem Details document (RFC 9457,
+    /// `application/problem+json`) instead of `{"error": …}`: the `404`s,
+    /// `405`s, validation `422`s, panics and the errors of the handlers,
+    /// with the request's path as `instance` and the error's
+    /// [`details`](Error::details) in a `details` member. Headers set on
+    /// the way (CORS, `Allow`…) are kept, and [`App::on_error`], if any,
+    /// still has the last word. See [`problem`](crate::problem).
+    ///
+    /// ```
+    /// use vitesse::prelude::*;
+    ///
+    /// let mut app = App::new();
+    /// app.problem_details();
+    /// app.get("/users/:id", |_req: Request| async move {
+    ///     Err::<String, _>(Error::not_found("No user with this id"))
+    /// });
+    /// // GET /users/7 → 404 application/problem+json
+    /// // {"type":"about:blank","title":"Not Found","status":404,
+    /// //  "detail":"No user with this id","instance":"/users/7"}
+    /// ```
+    pub fn problem_details(&mut self) -> &mut Self {
+        self.problem_details = Some(crate::problem::ProblemDetails { customize: None });
+        self
+    }
+
+    /// Like [`App::problem_details`], with a function that completes each
+    /// problem made from an error: a `type` URI per status, extension
+    /// members (a trace id…).
+    ///
+    /// ```
+    /// use vitesse::prelude::*;
+    /// use vitesse::problem::Problem;
+    ///
+    /// let mut app = App::new();
+    /// app.problem_details_with(|err: &Error, problem: Problem| {
+    ///     let slug = err.status().as_u16();
+    ///     problem.type_uri(format!("https://api.example.com/problems/{slug}"))
+    /// });
+    /// ```
+    pub fn problem_details_with<F>(&mut self, customize: F) -> &mut Self
+    where
+        F: Fn(&Error, crate::problem::Problem) -> crate::problem::Problem + Send + Sync + 'static,
+    {
+        self.problem_details = Some(crate::problem::ProblemDetails {
+            customize: Some(Box::new(customize)),
+        });
+        self
+    }
+
+    /// Names a stack of middlewares (Laravel's middleware groups, such as
+    /// `web` and `api`), to use it by name with
+    /// [`middleware::group`](crate::middleware::group) on routes, routers
+    /// and groups, even from code that has no access to the application.
+    /// The middlewares run in the order of the stack.
+    ///
+    /// ```
+    /// use std::time::Duration;
+    /// use vitesse::prelude::*;
+    /// use vitesse::middleware::Stack;
+    ///
+    /// let mut app = App::new();
+    /// app.middleware_group(
+    ///     "api",
+    ///     Stack::new()
+    ///         .with(middleware::cors())
+    ///         .with(middleware::rate_limit(100, Duration::from_secs(60))),
+    /// );
+    /// app.group("/api", |api| {
+    ///     api.middleware(middleware::group("api"));
+    ///     api.get("/users", |_| async { Json(vec!["ada"]) });
+    /// });
+    /// app.get("/status", (|_| async { "ok" }).with(middleware::group("api")));
+    /// ```
+    ///
+    /// # Panics
+    /// If the name is already used.
+    #[track_caller]
+    pub fn middleware_group(&mut self, name: &str, stack: crate::middleware::Stack) -> &mut Self {
+        if self
+            .middleware_groups
+            .insert(name.to_owned(), stack)
+            .is_some()
+        {
+            panic!("duplicate middleware group: '{name}' is already defined");
+        }
         self
     }
 
@@ -538,8 +700,19 @@ impl App {
                 serde_json::to_vec_pretty(&crate::openapi::document(&spec, &self.api_routes))
                     .expect("a JSON value always serializes"),
             );
+            for (ui, page_path) in &spec.pages {
+                let page = Bytes::from(crate::openapi::docs_page(*ui, spec.title(), &path));
+                self.get(page_path, move |_| {
+                    let page = page.clone();
+                    async move { crate::response::Html(page) }
+                });
+            }
             if let Some(ui) = &spec.swagger_ui {
-                let page = Bytes::from(crate::openapi::swagger_page(spec.title(), &path));
+                let page = Bytes::from(crate::openapi::swagger_page(
+                    spec.title(),
+                    &path,
+                    spec.assets.as_deref(),
+                ));
                 self.get(ui, move |_| {
                     let page = page.clone();
                     async move { crate::response::Html(page) }
@@ -556,7 +729,8 @@ impl App {
         }
         let pre_handler: Option<Arc<[RequestHook]>> =
             (!self.pre_handler.is_empty()).then(|| std::mem::take(&mut self.pre_handler).into());
-        if !self.params.is_empty() || pre_handler.is_some() {
+        let pre_handler_async = std::mem::take(&mut self.pre_handler_async);
+        if !self.params.is_empty() || pre_handler.is_some() || !pre_handler_async.is_empty() {
             for methods in self.tree.values_mut() {
                 for route in methods.routes_mut() {
                     if route.own {
@@ -565,6 +739,12 @@ impl App {
                         {
                             route.handler = wrapped;
                         }
+                    }
+                    if !pre_handler_async.is_empty() {
+                        route.handler = Arc::new(crate::handler::Chained::new(
+                            pre_handler_async.clone(),
+                            route.handler.clone(),
+                        ));
                     }
                     if let Some(hooks) = &pre_handler {
                         route.handler = Arc::new(PreHandler {
@@ -597,6 +777,9 @@ impl App {
             core,
         });
         let mut middlewares = self.middlewares;
+        for (i, hook) in self.on_request_async.into_iter().enumerate() {
+            middlewares.insert(i, hook);
+        }
         if !self.on_request.is_empty() || !self.on_response.is_empty() {
             middlewares.insert(
                 0,
@@ -606,8 +789,16 @@ impl App {
                 }),
             );
         }
+        if let Some(problem) = self.problem_details {
+            middlewares.insert(0, Arc::new(problem));
+        }
         if let Some(handler) = self.error_handler {
             middlewares.insert(0, Arc::new(ErrorHandler(handler)));
+        }
+        if !self.middleware_groups.is_empty() {
+            self.state.insert(crate::middleware::Groups(std::mem::take(
+                &mut self.middleware_groups,
+            )));
         }
         Box::leak(Box::new(AppService {
             chain: Chain {

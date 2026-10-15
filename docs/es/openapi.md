@@ -98,6 +98,81 @@ app.openapi("/openapi.json", spec);
 
 Los esquemas compartidos se referencian con `json!({ "$ref": "#/components/schemas/User" })`.
 
+## Esquemas a partir de tus tipos (feature `schemars`)
+
+Escribir JSON Schema a mano repite tus estructuras. Con la feature de Cargo `schemars`, los esquemas se derivan de los tipos, como hace FastAPI con los modelos de Pydantic: deriva `JsonSchema` junto a `Deserialize` o `Serialize` y nombra los tipos en la operación.
+
+```toml
+[dependencies]
+vitesse = { git = "https://github.com/maxlestage/Vitesse", features = ["schemars"] }
+schemars = "1"
+```
+
+```rust
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
+use vitesse::openapi::Operation;
+
+#[derive(Deserialize, JsonSchema)]
+struct NewPet {
+    /// El nombre de la mascota.
+    name: String,
+    age: Option<u8>,
+}
+
+#[derive(Serialize, JsonSchema)]
+struct Pet {
+    id: u64,
+    name: String,
+}
+
+#[derive(Deserialize, JsonSchema)]
+struct Search {
+    /// Las palabras que se buscan.
+    q: String,
+    page: Option<u32>,
+}
+
+app.post("/pets", create_pet).doc(
+    Operation::new()
+        .summary("Añadir una mascota")
+        .validated_body::<NewPet>() // el cuerpo, y el 422 de su validación
+        .response_type::<Pet>(201, "La nueva mascota"),
+);
+app.get("/pets", search_pets).doc(Operation::new().query_type::<Search>());
+```
+
+| Método | Describe |
+|---|---|
+| `body_type::<T>()`, `form_type::<T>()` | Un cuerpo de petición JSON o de formulario |
+| `validated_body::<T>()` | Un cuerpo que también implementa `Validate`, con su respuesta `422` |
+| `response_type::<T>(código, descripción)` | Una respuesta JSON |
+| `query_type::<T>()` | Un parámetro de query string por campo, en orden alfabético, obligatorio salvo si es un `Option` o tiene un valor por defecto |
+| `OpenApi::schema_type::<T>()` | Un esquema compartido, para referenciarlo tú mismo |
+
+Los tipos con nombre van a `components/schemas` (con los tipos que usan) y se referencian con `$ref`; los comentarios de documentación se convierten en descripciones. Un esquema dado con `OpenApi::schema` con el mismo nombre tiene prioridad.
+
+## Scalar, Redoc y un Swagger UI autoalojado
+
+Además de Swagger UI, el documento puede servirse con [Scalar](https://scalar.com), una referencia moderna para leer la API y probarla, y [Redoc](https://redocly.com/redoc), una referencia en tres columnas:
+
+```rust
+let spec = OpenApi::new("Pets", "1.0.0")
+    .swagger_ui("/docs")
+    .scalar("/reference")
+    .redoc("/redoc");
+```
+
+Estas páginas cargan sus scripts desde el CDN jsDelivr. En una red sin acceso a Internet, o con una `Content-Security-Policy` estricta, sirve tú mismo los archivos de Swagger UI (la carpeta `dist` del paquete npm `swagger-ui-dist`) e indícaselos a la página:
+
+```rust
+app.static_dir("/vendor/swagger-ui", "vendor/swagger-ui-dist");
+app.openapi(
+    "/openapi.json",
+    OpenApi::new("Pets", "1.0.0").swagger_ui("/docs").swagger_ui_assets("/vendor/swagger-ui"),
+);
+```
+
 ## Qué se lista
 
 - Todas las rutas con un método: las de la aplicación, sus routers y sus grupos.

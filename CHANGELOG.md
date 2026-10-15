@@ -135,6 +135,51 @@ added to the path of a request that doesn't use them):
 - `req.params_as::<T>()`: every route parameter deserialized into a struct
   (axum's `Path<T>`).
 
+The best of Phoenix, Laravel, FastAPI, Hono and supertest, all opt-in (an
+application that doesn't use them runs exactly the same code per request):
+
+- Problem Details (RFC 9457, `vitesse::problem`): `app.problem_details()`
+  sends every error as `application/problem+json` (`type`, `title`,
+  `status`, `detail`, `instance`, and the error's `details`),
+  `app.problem_details_with(…)` completes each problem, and a handler can
+  answer with a `Problem` of its own.
+- Middleware stacks and named groups (Laravel's `web` and `api`):
+  `middleware::Stack`, `app.middleware_group(name, stack)` and
+  `middleware::group(name)`.
+- Async hooks: `app.on_request_async` and `app.pre_handler_async`; hooks per
+  router or group (Fastify's encapsulation): `router.on_request`,
+  `router.on_response` and `router.on_request_async`.
+- HTTP caching: `middleware::etag()` (`ETag` and `304 Not Modified` for the
+  responses in memory) and `middleware::cache(ttl)`, a server-side cache of
+  whole responses with a time to live, `X-Cache`, `Age`, a custom key and
+  invalidation (`invalidate`, `invalidate_prefix`, `clear`).
+- PubSub (`vitesse::pubsub`, Phoenix's PubSub and channels): topics shared
+  by WebSocket connections, Server-Sent Events and tasks, with
+  `subscribe`, `publish`, `broadcast_from`-style `Subscription::publish`,
+  subscriber counts, `Subscription::sse(…)`, and `pubsub.relay(socket,
+  topic)` for chat rooms over WebSocket. New guide page "PubSub and
+  channels".
+- A background job queue (`vitesse::queue`, Laravel's queues): workers,
+  retries with exponential backoff, a rate limit, delayed jobs and
+  `queue.idle()` for tests; and a scheduler (`vitesse::schedule`, Laravel's
+  scheduler): `every`, `every_minute`, `hourly_at`, `daily_at`, without
+  overlapping runs. New guide page "Background jobs and scheduled tasks".
+- Typed routes: `TypedRoute<(String, u32)>` declares a pattern once, with
+  the types of its parameters, to register the route, read them
+  (`params(&req)`) and build links (`path`, `try_path`, `url`).
+- OpenAPI: schemas derived from the types with the new `schemars` feature
+  (`Operation::body_type::<T>()`, `form_type`, `validated_body` with its
+  `422`, `response_type`, `query_type` and `OpenApi::schema_type`), Scalar
+  and Redoc pages (`.scalar(path)`, `.redoc(path)`), and Swagger UI served
+  from your own files (`.swagger_ui_assets(base)`).
+- Testing: `client.agent()`, a client with a cookie jar (supertest's
+  `agent`); fluent assertions on `TestResponse` (`assert_status`,
+  `assert_ok`, `assert_header`, `assert_see`, `assert_json`,
+  `assert_json_path`, `assert_json_includes`, `assert_json_count`,
+  `assert_validation_errors`, `assert_cookie`, `assert_redirect`…),
+  `res.json_path(…)`, `res.cookie(…)`; and `.cookie(…)`, `.bearer(…)` and
+  `.query(…)` on test requests.
+
 - Express.js-style API: `App`, `app.get/post/put/patch/delete/…`, path
   parameters and wildcards, `Router` and `app.mount`, middleware with
   `next.run(req)`, shared state, `app.fallback` and `app.on_error`.

@@ -413,6 +413,28 @@ Names are checked at two moments:
 
 Routes declared in a [router](routers.md#named-routes-in-routers) can be named too. The name belongs to the whole application, and the path includes the mount prefix: its parameters come first in the list of values.
 
+## Typed routes: `TypedRoute`
+
+A `TypedRoute` declares a pattern once, with the types of its parameters, then serves to register the route, to read its parameters with their types and to build its links (Laravel's `route()`, Phoenix's verified routes): no name to repeat, no parameter to forget, and a compile error when a link passes the wrong types.
+
+```rust
+use vitesse::TypedRoute;
+
+static COMMENT: TypedRoute<(String, u32)> = TypedRoute::new("/blog/:slug/comments/:id(\\d+)");
+
+app.get(COMMENT.pattern(), |req: Request| async move {
+    let (slug, id) = COMMENT.params(&req)?; // (String, u32); 400 if a value doesn't parse
+    Ok::<_, Error>(format!("comment {id} of {slug}"))
+});
+app.get("/", |_| async {
+    Html(format!("<a href=\"{}\">first comment</a>", COMMENT.path(("hello".into(), 1))))
+});
+```
+
+- The parameters are a tuple, in the order of the pattern: `TypedRoute<()>`, `TypedRoute<(u32,)>`, up to six types that implement `Display` and `FromStr`.
+- `path(params)` encodes the values (`"a b"` becomes `a%20b`) and panics if one breaks its constraint; `try_path` returns a `500` error instead, and `url(&req, params)` the absolute URL.
+- The pattern is checked on first use: a pattern that doesn't have as many parameters as the tuple fails.
+
 ## HEAD, OPTIONS and 405
 
 Vitesse takes care of standard HTTP behaviour:

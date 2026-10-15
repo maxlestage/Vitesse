@@ -188,3 +188,64 @@ async fn subprotocols_size_limit_and_split() {
     }
     assert!(closed);
 }
+
+#[tokio::test]
+async fn pubsub_rooms_over_websocket() {
+    use vitesse::pubsub::PubSub;
+
+    let pubsub = PubSub::<String>::new();
+    let mut app = App::new();
+    app.state(pubsub.clone());
+    app.ws("/rooms/:room", |req, socket| async move {
+        let pubsub = req.state::<PubSub>();
+        let room = req.param("room").unwrap_or("lobby").to_owned();
+        pubsub.relay(socket, &room).await;
+    });
+    let addr = start(app).await;
+
+    let (mut ada, _) = connect_async(format!("ws://{addr}/rooms/rust"))
+        .await
+        .unwrap();
+    let (mut bob, _) = connect_async(format!("ws://{addr}/rooms/rust"))
+        .await
+        .unwrap();
+    let (mut eve, _) = connect_async(format!("ws://{addr}/rooms/go"))
+        .await
+        .unwrap();
+    // Both have joined once the room counts them.
+    for _ in 0..100 {
+        if pubsub.subscribers("rust") == 2 && pubsub.subscribers("go") == 1 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert_eq!(pubsub.subscribers("rust"), 2);
+
+    ada.send(Client::text("hello rust")).await.unwrap();
+    assert_eq!(
+        bob.next().await.unwrap().unwrap(),
+        Client::text("hello rust")
+    );
+    assert_eq!(
+        ada.next().await.unwrap().unwrap(),
+        Client::text("hello rust")
+    );
+
+    // The server publishes too; the other room hears nothing.
+    assert_eq!(pubsub.publish("go", "hello go"), 1);
+    assert_eq!(eve.next().await.unwrap().unwrap(), Client::text("hello go"));
+    assert!(
+        tokio::time::timeout(Duration::from_millis(50), bob.next())
+            .await
+            .is_err()
+    );
+
+    ada.close(None).await.unwrap();
+    for _ in 0..100 {
+        if pubsub.subscribers("rust") == 1 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert_eq!(pubsub.subscribers("rust"), 1);
+}

@@ -98,6 +98,81 @@ app.openapi("/openapi.json", spec);
 
 Shared schemas are referenced with `json!({ "$ref": "#/components/schemas/User" })`.
 
+## Schemas from your types (`schemars` feature)
+
+Writing JSON Schema by hand repeats your structs. With the `schemars` Cargo feature, the schemas are derived from the types, like FastAPI does with Pydantic models: derive `JsonSchema` next to `Deserialize` or `Serialize`, then name the types in the operation.
+
+```toml
+[dependencies]
+vitesse = { git = "https://github.com/maxlestage/Vitesse", features = ["schemars"] }
+schemars = "1"
+```
+
+```rust
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
+use vitesse::openapi::Operation;
+
+#[derive(Deserialize, JsonSchema)]
+struct NewPet {
+    /// The pet's name.
+    name: String,
+    age: Option<u8>,
+}
+
+#[derive(Serialize, JsonSchema)]
+struct Pet {
+    id: u64,
+    name: String,
+}
+
+#[derive(Deserialize, JsonSchema)]
+struct Search {
+    /// Words to look for.
+    q: String,
+    page: Option<u32>,
+}
+
+app.post("/pets", create_pet).doc(
+    Operation::new()
+        .summary("Add a pet")
+        .validated_body::<NewPet>() // the body, and the 422 of its validation
+        .response_type::<Pet>(201, "The new pet"),
+);
+app.get("/pets", search_pets).doc(Operation::new().query_type::<Search>());
+```
+
+| Method | Describes |
+|---|---|
+| `body_type::<T>()`, `form_type::<T>()` | A JSON or form request body |
+| `validated_body::<T>()` | A body that also implements `Validate`, with its `422` response |
+| `response_type::<T>(status, description)` | A JSON response |
+| `query_type::<T>()` | One query parameter per field, in alphabetical order, required unless it is an `Option` or has a default |
+| `OpenApi::schema_type::<T>()` | A shared schema, to reference yourself |
+
+Named types land in `components/schemas` (with the types they use) and are referenced with `$ref`; doc comments become descriptions. A schema given with `OpenApi::schema` under the same name wins.
+
+## Scalar, Redoc and a self-hosted Swagger UI
+
+Besides Swagger UI, the document can be served with [Scalar](https://scalar.com), a modern reference to read the API and try it, and [Redoc](https://redocly.com/redoc), a three-column reference:
+
+```rust
+let spec = OpenApi::new("Pets", "1.0.0")
+    .swagger_ui("/docs")
+    .scalar("/reference")
+    .redoc("/redoc");
+```
+
+These pages load their scripts from the jsDelivr CDN. On a network without Internet access, or with a strict `Content-Security-Policy`, serve Swagger UI's files yourself (the `dist` folder of the `swagger-ui-dist` npm package) and point the page to them:
+
+```rust
+app.static_dir("/vendor/swagger-ui", "vendor/swagger-ui-dist");
+app.openapi(
+    "/openapi.json",
+    OpenApi::new("Pets", "1.0.0").swagger_ui("/docs").swagger_ui_assets("/vendor/swagger-ui"),
+);
+```
+
 ## What is listed
 
 - Every route with a method, from the application, its routers and its groups.

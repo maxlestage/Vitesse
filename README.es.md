@@ -44,7 +44,12 @@ fn main() -> std::io::Result<()> {
   `app.param` y vinculación de modelos.
 - **APIs**: validación de peticiones con errores `422` por campo, OpenAPI 3.1
   generado a partir de las rutas con Swagger UI, hooks del ciclo de vida
-  (`on_request`, `pre_handler`, `on_response`) y plugins.
+  (`on_request`, `pre_handler`, `on_response`) y plugins, Problem Details
+  (RFC 9457), esquemas OpenAPI derivados de tus tipos, Scalar y Redoc.
+- **Todo incluido**: temas PubSub para salas WebSocket y Server-Sent Events,
+  una cola de tareas con reintentos y límite de ritmo, un planificador, una
+  caché de respuestas, grupos de middlewares con nombre, rutas tipadas y
+  aserciones de prueba con tarro de cookies.
 - **Rápido**: más rápido que actix-web, axum y Drogon en el benchmark de
   abajo.
 - **Robusto**: los pánicos se convierten en respuestas `500`, los límites de
@@ -124,6 +129,7 @@ ordenada con `Ctrl+C` / `SIGTERM`. Si ya tienes un runtime de tokio, usa
 | `compress` | Desactivada | `middleware::compress()` y `middleware::decompress()`: Brotli, gzip ([guía](docs/es/middleware.md#compress)) |
 | `session` | Desactivada | Cookies firmadas y sesiones: `app.cookie_secret(...)`, `middleware::session(...)` ([guía](docs/es/sessions.md)) |
 | `templates` | Desactivada | Plantillas HTML con minijinja: `app.views(...)`, `req.render(...)` ([guía](docs/es/templates.md)) |
+| `schemars` | Desactivada | Esquemas OpenAPI derivados de tus tipos ([guía](docs/es/openapi.md)) |
 | `tower` | Desactivada | Capas de tower como middlewares, la aplicación como `Service` de tower ([guía](docs/es/middleware.md)) |
 
 ```toml

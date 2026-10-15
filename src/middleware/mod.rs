@@ -11,6 +11,9 @@
 //! | [`basic_auth`], [`bearer_auth`] | HTTP authentication | actix-web-httpauth, tower-http's `ValidateRequestHeader` |
 //! | [`concurrency_limit`] | Requests in flight | tower's `ConcurrencyLimit` and `LoadShed` |
 //! | [`rate_limit`] | Requests per client and period | express-rate-limit, tower-governor |
+//! | [`etag`] | `ETag` and `304 Not Modified` | Express's `etag` setting |
+//! | [`cache`] | Server-side response cache with a TTL | Laravel's `responsecache`, Rails' action caching |
+//! | [`Stack`], [`group`] | Several middlewares as one, named groups | Laravel's middleware groups |
 //! | [`serve_static`] | Static files | `express.static` |
 //! | `compress` (`compress` feature) | Brotli / gzip responses | compression, actix-web's `Compress` |
 //! | `decompress` (`compress` feature) | Compressed request bodies | tower-http's `RequestDecompression` |
@@ -31,15 +34,20 @@ use crate::response::{IntoResponse, Response};
 use crate::static_files::ServeDir;
 
 mod auth;
+mod cache;
 mod limit;
 mod request_id;
+mod stack;
 
 pub use auth::{
     BasicAuth, BasicCredentials, BasicUser, BearerAuth, BearerToken, basic_auth, bearer_auth,
     constant_time_eq,
 };
+pub use cache::{ETag, ResponseCache, cache, etag};
 pub use limit::{ConcurrencyLimit, RateLimit, concurrency_limit, rate_limit};
 pub use request_id::{RequestId, SetRequestId, request_id};
+pub(crate) use stack::Groups;
+pub use stack::{Group, Stack, group};
 
 /// Server-side sessions (`session` feature): see
 /// [`vitesse::session`](crate::session).

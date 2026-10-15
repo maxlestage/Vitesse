@@ -515,6 +515,9 @@ pub struct Router {
     /// The route that `doc(…)` describes.
     last_doc: Option<usize>,
     middlewares: Vec<Arc<dyn Middleware>>,
+    /// `on_request` and `on_response` hooks, run before the middlewares.
+    on_request: Vec<crate::hooks::RequestHook>,
+    on_response: Vec<crate::hooks::ResponseHook>,
     fallback: Option<Arc<dyn Handler>>,
     /// Middlewares of the routers mounted inside this one, by prefix.
     pub(crate) scopes: Vec<Scope>,
@@ -563,6 +566,70 @@ impl Router {
     pub fn middleware<M: Middleware>(&mut self, middleware: M) -> &mut Self {
         self.middlewares.push(Arc::new(middleware));
         self
+    }
+
+    /// A hook run on the requests of this router only (Fastify's
+    /// encapsulated `onRequest`): its routes, and the other requests under
+    /// its prefix (`404`, `405`), before the router's middlewares. Returning
+    /// an error stops the request.
+    ///
+    /// ```
+    /// use vitesse::prelude::*;
+    ///
+    /// let mut app = App::new();
+    /// app.group("/admin", |admin| {
+    ///     admin.on_request(|req: &mut Request| match req.header("x-admin") {
+    ///         Some(_) => Ok(()),
+    ///         None => Err(Error::forbidden("admins only")),
+    ///     });
+    ///     admin.on_response(|res: &mut Response| {
+    ///         res.set_header("cache-control", "no-store");
+    ///     });
+    ///     admin.get("/stats", |_| async { "stats" });
+    /// });
+    /// app.get("/", |_| async { "public" }); // no hook here
+    /// ```
+    pub fn on_request<F>(&mut self, hook: F) -> &mut Self
+    where
+        F: Fn(&mut crate::Request) -> Result<(), crate::Error> + Send + Sync + 'static,
+    {
+        self.on_request.push(Box::new(hook));
+        self
+    }
+
+    /// A hook run on the responses of this router only (Fastify's
+    /// encapsulated `onSend`), those its `on_request` hooks stop included:
+    /// see [`on_request`](Self::on_request).
+    pub fn on_response<F>(&mut self, hook: F) -> &mut Self
+    where
+        F: Fn(&mut crate::Response) + Send + Sync + 'static,
+    {
+        self.on_response.push(Box::new(hook));
+        self
+    }
+
+    /// The async version of [`on_request`](Self::on_request): it receives
+    /// the request and gives it back, or stops it with an error. Like a
+    /// [middleware](Self::middleware), it runs where it was added among
+    /// them.
+    ///
+    /// ```
+    /// use vitesse::prelude::*;
+    ///
+    /// let mut api = Router::new();
+    /// api.on_request_async(|mut req: Request| async move {
+    ///     let token = req.header("authorization").map(str::to_owned);
+    ///     // … check the token with the auth service
+    ///     req.set(token);
+    ///     Ok(req)
+    /// });
+    /// ```
+    pub fn on_request_async<F, Fut>(&mut self, hook: F) -> &mut Self
+    where
+        F: Fn(crate::Request) -> Fut + Send + Sync + 'static,
+        Fut: std::future::Future<Output = Result<crate::Request, crate::Error>> + Send + 'static,
+    {
+        self.middleware(crate::hooks::AsyncHook(hook))
     }
 
     /// Sets the handler called when no route of this router matches a path
@@ -651,7 +718,9 @@ impl Router {
             mut routes,
             params,
             last_doc: _,
-            middlewares,
+            mut middlewares,
+            on_request,
+            on_response,
             fallback,
             scopes: inner,
             names,
@@ -666,6 +735,15 @@ impl Router {
                     route.handler = wrapped;
                 }
             }
+        }
+        if !on_request.is_empty() || !on_response.is_empty() {
+            middlewares.insert(
+                0,
+                Arc::new(crate::hooks::Hooks {
+                    on_request: on_request.into(),
+                    on_response: on_response.into(),
+                }),
+            );
         }
         if middlewares.is_empty() && fallback.is_none() {
             return (routes, inner, names);

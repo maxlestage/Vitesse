@@ -229,6 +229,24 @@ app.get("/export/:format", |req: Request| async move {
 
 `GET /export/csv` answers `exporting as CSV`, and `GET /export/xml` gets a `400`.
 
+### All parameters at once: `params_as`
+
+`req.params_as::<T>()` deserializes every parameter of the route into a struct, converting numbers and booleans, like axum's `Path<T>`. An optional parameter that is absent fits an `Option`:
+
+```rust
+#[derive(serde::Deserialize)]
+struct PostPath {
+    user: String,
+    post: u64,
+    draft: Option<bool>,
+}
+
+app.get("/users/:user/posts/:post/:draft?", |req: Request| async move {
+    let path: PostPath = req.params_as()?; // 400 if `post` isn't a number
+    Ok::<_, Error>(format!("post #{} of {}", path.post, path.user))
+});
+```
+
 ## Wildcards
 
 A `*name` segment captures the rest of the path, slashes included. Express 5 uses the same syntax:
@@ -446,6 +464,51 @@ app.fallback(|_| async { res::file("dist/index.html").await });
 - A [router](routers.md#router-fallback) can have its own fallback for the paths under its prefix, with `router.fallback(handler)`: JSON `404`s under `/api`, for example, and an HTML page everywhere else.
 - To change the format of *every* error response at once (404, 405, 400, 500 and so on), use `app.on_error` instead. See [Error handling](errors.md).
 
+## Parameter callbacks and model binding
+
+`app.param(name, middleware)` runs a middleware before the handler of every route that has the parameter `name`, after routing: it's Express's `app.param()`. Load or check what the parameter designates once, for all the routes that use it:
+
+```rust
+app.param("id", |req: Request, next: Next| async move {
+    match req.param_as::<u32>("id") {
+        Ok(id) if id > 0 => next.run(req).await,
+        _ => Error::bad_request("invalid id").into_response(),
+    }
+});
+app.get("/users/:id", show_user);   // checked
+app.get("/posts/:id", show_post);   // checked
+app.get("/about", about);           // untouched
+```
+
+`app.bind_param(name, loader)` is Laravel's route model binding, built on it: the loader turns the value of the parameter into a value of your own, which the handler reads with `req.get::<T>()`. When the loader returns an error, it becomes the response and the handler isn't called:
+
+```rust
+#[derive(Clone)]
+struct User {
+    id: u32,
+    name: String,
+}
+
+app.bind_param("user", |req: &Request, id: &str| {
+    let db = req.state::<Db>(); // `&'static`: the future can keep it
+    let id = id.parse::<u32>();
+    async move {
+        let id = id.map_err(|_| Error::bad_request("invalid user id"))?;
+        db.find_user(id).await.ok_or_else(|| Error::not_found("no such user"))
+    }
+});
+
+app.get("/users/:user", |req: Request| async move {
+    let user = req.get::<User>().expect("bound by bind_param");
+    format!("#{} {}", user.id, user.name)
+});
+app.delete("/users/:user", delete_user); // the same loader, for free
+```
+
+- The callbacks apply to the routes added before or after them, in the order of the parameters in the path; routes without the parameter pay nothing.
+- Like in Express, they belong to the application or the router they are declared on: `router.param(…)` covers the routes of that router, and the application's callbacks don't apply to the routes of a mounted router or of a [group](routers.md#route-groups-appgroup): declare them in the group, with `group.param(…)`.
+- They run after the global and router middleware (authentication first, then loading), and before the route's own middleware (`.with`).
+
 ## Organising routes
 
 As your app grows, group related routes in a `Router` and mount it under a prefix, as you would with `express.Router()`:
@@ -457,4 +520,4 @@ api.get("/users", list_users).post("/users", create_user);
 app.mount("/api", api); // GET /api/users, POST /api/users
 ```
 
-Routers can have their own middleware and can be nested, see [Routers](routers.md). For middleware on a single route (`handler.with(auth)`), see [Middleware](middleware.md).
+`app.group(prefix, |group| { … })` does the same without naming the router, and plugins (`app.register`) package routes for reuse. Routers can have their own middleware and can be nested, see [Routers](routers.md). For middleware on a single route (`handler.with(auth)`), see [Middleware](middleware.md).

@@ -33,6 +33,9 @@ pub struct Error {
     status: StatusCode,
     message: Cow<'static, str>,
     source: Option<BoxError>,
+    /// Structured details sent to the client next to the message
+    /// (validation errors…); boxed to keep `Error` small.
+    details: Option<Box<serde_json::Value>>,
 }
 
 impl Error {
@@ -42,6 +45,7 @@ impl Error {
             status: status.into_status(),
             message: message.into(),
             source: None,
+            details: None,
         }
     }
 
@@ -56,6 +60,29 @@ impl Error {
     pub fn with_source(mut self, source: impl Into<BoxError>) -> Self {
         self.source = Some(source.into());
         self
+    }
+
+    /// Attaches structured details, sent to the client in the `details`
+    /// field of the JSON body: `{"error": "…", "details": …}`. Validation
+    /// errors ([`validate`](crate::validate)) put the messages of each field
+    /// there.
+    ///
+    /// ```
+    /// use vitesse::{Error, json};
+    ///
+    /// let err = Error::conflict("username taken")
+    ///     .with_details(json!({ "suggestions": ["ada2", "ada_l"] }));
+    /// assert_eq!(err.details().unwrap()["suggestions"][0], "ada2");
+    /// ```
+    pub fn with_details(mut self, details: impl Into<serde_json::Value>) -> Self {
+        self.details = Some(Box::new(details.into()));
+        self
+    }
+
+    /// The structured details sent to the client, if any (see
+    /// [`Error::with_details`]).
+    pub fn details(&self) -> Option<&serde_json::Value> {
+        self.details.as_deref()
     }
 
     /// `400 Bad Request`
@@ -120,6 +147,7 @@ impl fmt::Debug for Error {
             .field("status", &self.status)
             .field("message", &self.message)
             .field("source", &self.source)
+            .field("details", &self.details)
             .finish()
     }
 }
@@ -149,9 +177,12 @@ impl IntoResponse for Error {
         #[derive(serde::Serialize)]
         struct Payload<'a> {
             error: &'a str,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            details: Option<&'a serde_json::Value>,
         }
         let body = serde_json::to_vec(&Payload {
             error: &self.message,
+            details: self.details.as_deref(),
         })
         .unwrap_or_default();
         let mut res = Response::new().status(self.status).json_bytes(body);

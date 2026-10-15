@@ -56,6 +56,12 @@ Voir [Installation](installation.md#les-features-cargo).
 | `app.middleware(mw)` | Middleware global (`app.use`) : toutes les requêtes, dans l'ordre, avant le routage |
 | `app.fallback(handler)` | Handler appelé quand aucune route ne correspond (par défaut : `404 {"error":"Cannot GET /x"}`) |
 | `app.on_error(f)` | Personnalise toutes les réponses d'erreur ; `f` est une `Fn(Error) -> impl IntoResponse` |
+| `app.on_request(\|req: &mut Request\| …)` | Hook avant les middlewares et le routage (`onRequest`) ; `Err(erreur)` arrête la requête |
+| `app.pre_handler(\|req: &mut Request\| …)` | Hook après le routage, avant les middlewares et le handler de la route (`preHandler`) |
+| `app.on_response(\|res: &mut Response\| …)` | Hook sur chaque réponse avant son envoi (`onSend`) |
+| `app.register(plugin)` | Ajoute un plugin : une `FnOnce(&mut App)` ou un `impl Plugin` (le `register` de Fastify) |
+| `app.openapi("/openapi.json", OpenApi::new(titre, version))` | Sert le document OpenAPI 3.1 des routes ; `.swagger_ui("/docs")` ajoute Swagger UI |
+| `app.openapi_document(&spec)` | Le même document en `serde_json::Value`, sans le servir |
 | `app.state(valeur)` | Enregistre un état global, un par type (`app.locals`) |
 | `app.body_limit(octets)` | Taille maximale d'un corps lu en mémoire (par défaut `DEFAULT_BODY_LIMIT`, 1 Mio) ; par route : `middleware::body_limit` |
 | `app.trust_proxy(valeur)` | Reverse proxys de confiance (`app.set('trust proxy')`) : `false` (par défaut), `true`, un nombre de sauts, ou `"loopback, 10.0.0.0/8"` |
@@ -94,6 +100,10 @@ Ces méthodes existent sur `App` comme sur `Router`, et s'enchaînent.
 | `app.serve_dir(préfixe, serve_dir)` | Idem, avec un `ServeDir` configuré |
 | `app.ws(chemin, handler)` | Route WebSocket (`GET`) : `handler(req, socket)` prend la main sur la connexion (express-ws) |
 | `.name("user")` | Nomme la route ajoutée juste avant, pour `req.path_for` et `req.url_for` ; les noms sont globaux à l'application, préfixes de montage compris |
+| `.doc(Operation::new().summary(…))` | Décrit la route ajoutée juste avant dans le document OpenAPI (`vitesse::openapi`) |
+| `app.group(préfixe, \|groupe\| { … })` | Un `Router` rempli par la closure (ou une `fn(&mut Router)`) et monté sous `préfixe` |
+| `app.param(nom, mw)` | Middleware exécuté avant le handler de chaque route qui a le paramètre `nom` (`app.param` d'Express) |
+| `app.bind_param(nom, \|req, valeur\| async { … })` | Liaison de modèles : le `Ok(T)` du chargeur est dans `req.get::<T>()`, son `Err` est la réponse |
 
 | Motif | Correspond à |
 |---|---|
@@ -131,6 +141,8 @@ Priorité : statique > segment contraint ou composé > paramètre > joker : `r"/
 | `req.version()` | La version HTTP : `HTTP/1.1`, `HTTP/2.0`, `HTTP/3.0`… |
 | `req.set_uri(uri)` | Remplace l'URI (réécriture d'URL dans un middleware global) |
 | `req.set_method(méthode)` | Change la méthode avant le routage (surcharge de méthode, dans un middleware global) |
+| `req.params_as::<T>()?` | Tous les paramètres de route, désérialisés dans une structure (`Path<T>` d'axum) ; `400` en cas d'échec |
+| `req.valid_json::<T>().await?`, `req.valid_form::<T>().await?`, `req.valid_query::<T>()?` | Lit, puis vérifie les règles `Validate` : `422` avec les messages de chaque champ |
 | `req.route()` | Le motif de la route correspondante, préfixe de montage compris (`Some("/users/:id")`) ; `None` si aucune route ne correspond |
 | `req.path_for("user", &[&42])?` | Le chemin d'une route nommée, valeurs encodées pour l'URL : `"/users/42"` ; `500` pour un nom inconnu ou une valeur manquante |
 | `req.url_for("user", &[&42])?` | La même chose, avec le protocole et l'hôte de la requête : `"https://example.com/users/42"` |
@@ -290,12 +302,29 @@ La réponse porte `content-type: text/event-stream` et `cache-control: no-cache`
 | `Error::unprocessable(msg)` | `422` |
 | `Error::internal(msg)` | `500` |
 | `.with_source(err)` | Attache la cause d'origine (journalisée pour les erreurs 5xx) |
+| `.with_details(json!({ … }))` | Données structurées envoyées à côté du message : `{"error":"…","details":{…}}` ; relues avec `err.details()` |
 | `err.status()`, `err.message()`, `err.source()` | Lit l'erreur |
 | `vitesse::Result<T>` | Alias de `Result<T, vitesse::Error>` |
 | `?` sur n'importe quelle erreur standard | `500 {"error":"Internal Server Error"}` ; la cause est seulement journalisée |
 | Panique dans un handler ou un middleware | `500` ; le serveur continue de tourner |
 
 Voir [Erreurs](errors.md).
+
+## Validation
+
+| Usage | Description |
+|---|---|
+| `impl Validate for T { fn validate(&self, v: &mut Validator) { … } }` | Les règles d'un type (`vitesse::validate`) |
+| `v.field("nom", &self.nom).not_empty().max_length(50)` | Les règles d'un champ ; il s'arrête à sa première règle en échec |
+| `v.optional(nom, &opt)`, `v.required(nom, &opt)` | Une `Option` : règles sautées si `None`, ou « is required » |
+| `.min_length(n)`, `.max_length(n)`, `.not_empty()` | Caractères d'une chaîne, éléments d'une collection |
+| `.min(x)`, `.max(x)`, `.between(a, b)`, `.one_of(&[…])` | Bornes et choix |
+| `.email()`, `.url()`, `.alphanumeric()` | Formats d'une chaîne |
+| `.check(\|v\| bool, "message")`, `.message("…")` | Une règle à vous ; remplace le message de la règle juste avant |
+| `v.nested("adresse", &self.adresse)`, `v.each("articles", &self.articles)` | Valeurs imbriquées : `adresse.ville`, `articles[0].nom` |
+| `v.error(nom, message)` | Un problème signalé directement (règles sur plusieurs champs) |
+
+Voir [Validation des données](validation.md) et [OpenAPI](openapi.md).
 
 ## Middlewares
 

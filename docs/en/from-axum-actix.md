@@ -90,9 +90,9 @@ Each extractor becomes a method of `Request`:
 
 | axum | actix-web | Vitesse |
 |---|---|---|
-| `Path<T>` | `web::Path<T>` | `req.param("id")`, `req.param_as::<u32>("id")?` |
+| `Path<T>` | `web::Path<T>` | `req.param("id")`, `req.param_as::<u32>("id")?`, `req.params_as::<T>()?` |
 | `Query<T>` | `web::Query<T>` | `req.query("page")`, `req.query_as::<T>()?` |
-| `Json<T>` | `web::Json<T>` | `req.json::<T>().await?` |
+| `Json<T>` | `web::Json<T>` | `req.json::<T>().await?`, `req.valid_json::<T>().await?` with [validation](validation.md) |
 | `Form<T>` | `web::Form<T>` | `req.form::<T>().await?` |
 | `String`, `Bytes` | `String`, `Bytes` | `req.text().await?`, `req.bytes().await?` |
 | `Body` (stream) | `web::Payload` | `req.take_body()` |

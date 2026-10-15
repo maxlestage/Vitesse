@@ -107,6 +107,41 @@ La cadena completa de una petición es: **middlewares globales → middlewares d
 > [!IMPORTANT]
 > A diferencia de `app.use()` en Express, la posición de `app.middleware(...)` respecto a tus rutas no importa: un middleware global envuelve **todas** las peticiones, incluidas las rutas declaradas antes que él, los `404` y los `405`. El manejador [`app.on_error`](errors.md) siempre es la capa más externa.
 
+## Hooks del ciclo de vida
+
+Los hooks son funciones simples que se ejecutan en un momento dado de cada petición, como los hooks de Fastify. No devuelven un future, lo que los hace más ligeros que un middleware para lo que hacen: leer o modificar la petición o la respuesta.
+
+| Hook | Se ejecuta | Puede |
+|---|---|---|
+| `app.on_request(\|req: &mut Request\| …)` | Primero, antes de los middlewares y del enrutamiento (`onRequest` de Fastify) | Modificar la petición; detenerla con `Err(error)` |
+| `app.pre_handler(\|req: &mut Request\| …)` | Después del enrutamiento, justo antes de los middlewares y el handler de la ruta (`preHandler`): se conocen `req.route()` y los parámetros | Igual |
+| `app.on_response(\|res: &mut Response\| …)` | En cada respuesta, antes de enviarla (`onSend`) | Añadir cabeceras, cambiar el estado… |
+
+```rust
+app.on_request(|req: &mut Request| {
+    if req.header("x-api-key") != Some("secret") {
+        return Err(Error::unauthorized("falta la clave de API"));
+    }
+    req.set(std::time::Instant::now());
+    Ok(())
+});
+
+app.pre_handler(|req: &mut Request| {
+    println!("{} {}", req.method(), req.route().unwrap_or("?"));
+    Ok(())
+});
+
+app.on_response(|res: &mut Response| {
+    res.set_header("x-powered-by", "Vitesse");
+});
+```
+
+- Un error devuelto por `on_request` o `pre_handler` se convierte en la respuesta, pasando por `app.on_error` y los hooks `on_response`.
+- `on_response` ve todas las respuestas: rutas, `404`, errores (antes de que `app.on_error` las reescriba: `res.error()` sigue ahí).
+- `pre_handler` se ejecuta para todas las rutas, incluidas las de los routers montados, pero no para las respuestas `404`, `405` y `OPTIONS` automáticas, que no tienen ruta.
+- Los hooks de un mismo tipo se ejecutan en el orden en que se añadieron; un pánico en un hook se convierte en un `500`.
+- Sin hooks, no se añade nada al recorrido de la petición. Para ejecutar código *alrededor* del handler (medir la duración, `tokio::time::timeout`…), o de forma asíncrona, usa un middleware.
+
 ## Un middleware solo para algunas rutas
 
 Hay tres formas de limitar un middleware a algunas rutas:

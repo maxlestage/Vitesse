@@ -56,6 +56,12 @@ See [Installation](installation.md#cargo-features).
 | `app.middleware(mw)` | Global middleware (`app.use`): every request, in order, before routing |
 | `app.fallback(handler)` | Handler called when no route matches (default: `404 {"error":"Cannot GET /x"}`) |
 | `app.on_error(f)` | Customises every error response; `f` is a `Fn(Error) -> impl IntoResponse` |
+| `app.on_request(\|req: &mut Request\| …)` | Hook before the middleware and the routing (`onRequest`); `Err(error)` stops the request |
+| `app.pre_handler(\|req: &mut Request\| …)` | Hook after routing, before the route's middleware and handler (`preHandler`) |
+| `app.on_response(\|res: &mut Response\| …)` | Hook on every response before it is sent (`onSend`) |
+| `app.register(plugin)` | Adds a plugin: a `FnOnce(&mut App)` or an `impl Plugin` (Fastify's `register`) |
+| `app.openapi("/openapi.json", OpenApi::new(title, version))` | Serves the OpenAPI 3.1 document of the routes; `.swagger_ui("/docs")` adds Swagger UI |
+| `app.openapi_document(&spec)` | The same document as a `serde_json::Value`, without serving it |
 | `app.state(value)` | Registers a global state value, one per type (`app.locals`) |
 | `app.body_limit(bytes)` | Maximum size of a body read in memory (default `DEFAULT_BODY_LIMIT`, 1 MiB); per route: `middleware::body_limit` |
 | `app.trust_proxy(value)` | Trusted reverse proxies (`app.set('trust proxy')`): `false` (default), `true`, a number of hops, or `"loopback, 10.0.0.0/8"` |
@@ -94,6 +100,10 @@ These methods exist on both `App` and `Router`, and can be chained.
 | `app.serve_dir(prefix, serve_dir)` | Same, with a configured `ServeDir` |
 | `app.ws(path, handler)` | WebSocket route (`GET`): `handler(req, socket)` takes over the connection (express-ws) |
 | `.name("user")` | Names the route added just before, for `req.path_for` and `req.url_for`; names are global to the app, mount prefixes included |
+| `.doc(Operation::new().summary(…))` | Describes the route added just before in the OpenAPI document (`vitesse::openapi`) |
+| `app.group(prefix, \|group\| { … })` | A `Router` filled by the closure (or a `fn(&mut Router)`) and mounted under `prefix` |
+| `app.param(name, mw)` | Middleware run before the handler of every route with the parameter `name` (Express's `app.param`) |
+| `app.bind_param(name, \|req, value\| async { … })` | Route model binding: the loader's `Ok(T)` is in `req.get::<T>()`, its `Err` is the response |
 
 | Pattern | Matches |
 |---|---|
@@ -131,6 +141,8 @@ Priority: static > constrained or composite segment > parameter > wildcard, so `
 | `req.version()` | The HTTP version: `HTTP/1.1`, `HTTP/2.0`, `HTTP/3.0`… |
 | `req.set_uri(uri)` | Rewrites the URI (URL rewriting in a global middleware) |
 | `req.set_method(method)` | Changes the method before routing (method override, in a global middleware) |
+| `req.params_as::<T>()?` | Every route parameter, deserialized into a struct (axum's `Path<T>`); `400` on failure |
+| `req.valid_json::<T>().await?`, `req.valid_form::<T>().await?`, `req.valid_query::<T>()?` | Read, then check the `Validate` rules: `422` with the messages of each field |
 | `req.route()` | The pattern of the matched route, mount prefix included (`Some("/users/:id")`); `None` if no route matches |
 | `req.path_for("user", &[&42])?` | The path of a named route, values percent-encoded: `"/users/42"`; `500` for an unknown name or a missing value |
 | `req.url_for("user", &[&42])?` | The same, with the protocol and host of the request: `"https://example.com/users/42"` |
@@ -290,12 +302,29 @@ The response has `content-type: text/event-stream` and `cache-control: no-cache`
 | `Error::unprocessable(msg)` | `422` |
 | `Error::internal(msg)` | `500` |
 | `.with_source(err)` | Attaches the original cause (logged for 5xx errors) |
+| `.with_details(json!({ … }))` | Structured data sent next to the message: `{"error":"…","details":{…}}`; read with `err.details()` |
 | `err.status()`, `err.message()`, `err.source()` | Read the error |
 | `vitesse::Result<T>` | Alias for `Result<T, vitesse::Error>` |
 | `?` on any standard error | `500 {"error":"Internal Server Error"}`; the cause is only logged |
 | Panic in a handler or a middleware | `500`; the server keeps running |
 
 See [Errors](errors.md).
+
+## Validation
+
+| Usage | Description |
+|---|---|
+| `impl Validate for T { fn validate(&self, v: &mut Validator) { … } }` | The rules of a type (`vitesse::validate`) |
+| `v.field("name", &self.name).not_empty().max_length(50)` | Rules of a field; it stops at its first failing rule |
+| `v.optional(name, &opt)`, `v.required(name, &opt)` | An `Option`: rules skipped when `None`, or "is required" |
+| `.min_length(n)`, `.max_length(n)`, `.not_empty()` | Characters of a string, items of a collection |
+| `.min(x)`, `.max(x)`, `.between(a, b)`, `.one_of(&[…])` | Bounds and choices |
+| `.email()`, `.url()`, `.alphanumeric()` | Formats of a string |
+| `.check(\|v\| bool, "message")`, `.message("…")` | A rule of your own; replaces the message of the rule just before |
+| `v.nested("address", &self.address)`, `v.each("items", &self.items)` | Nested values: `address.city`, `items[0].name` |
+| `v.error(name, message)` | A problem reported directly (rules across fields) |
+
+See [Validation](validation.md) and [OpenAPI](openapi.md).
 
 ## Middleware
 

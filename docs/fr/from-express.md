@@ -42,6 +42,7 @@ Si vous connaissez Express, vous connaissez déjà l'essentiel de Vitesse : les 
 | `'/user/:id(\\d+)'` (Express 4) | `r"/user/:id(\d+)"` : la même contrainte, dans une chaîne brute pour que `\d` n'ait pas besoin d'une barre oblique inverse de plus (voir [Contraintes](routing.md#contraintes-avec-des-expressions-régulières)) |
 | `'/archive/:year?'` (Express 4), `'/archive{/:year}'` (Express 5) | `"/archive/:year?"` : des paramètres optionnels, à la fin du chemin seulement (voir [Paramètres optionnels](routing.md#paramètres-optionnels)) |
 | Pas d'équivalent intégré | `.name("user")` après une route, puis `req.path_for("user", &[&42])?` pour construire son URL (voir [Routes nommées](routing.md#routes-nommées-et-génération-durl)) |
+| `app.param('user', (req, res, next, id) => …)` | `app.param("user", middleware)`, ou `app.bind_param("user", chargeur)` pour charger une valeur que le handler lit avec `req.get::<T>()` (voir [Callbacks de paramètres](routing.md#callbacks-de-paramètres-et-liaison-de-modèles)) |
 | `express.Router()` | `Router::new()` |
 | `app.use('/api', router)` | `app.mount("/api", router)` |
 | `router.use(mw)` | `router.middleware(mw)`, qui s'exécute aussi pour les `404` sous le préfixe du routeur |

@@ -229,6 +229,24 @@ app.get("/export/:format", |req: Request| async move {
 
 `GET /export/csv` répond `export en CSV`, et `GET /export/xml` reçoit une `400`.
 
+### Tous les paramètres d'un coup : `params_as`
+
+`req.params_as::<T>()` désérialise tous les paramètres de la route dans une structure, en convertissant nombres et booléens, comme le `Path<T>` d'axum. Un paramètre optionnel absent va dans une `Option` :
+
+```rust
+#[derive(serde::Deserialize)]
+struct CheminArticle {
+    user: String,
+    post: u64,
+    draft: Option<bool>,
+}
+
+app.get("/users/:user/posts/:post/:draft?", |req: Request| async move {
+    let chemin: CheminArticle = req.params_as()?; // 400 si `post` n'est pas un nombre
+    Ok::<_, Error>(format!("article n°{} de {}", chemin.post, chemin.user))
+});
+```
+
 ## Jokers
 
 Un segment `*nom` capture tout le reste du chemin, barres obliques comprises. Express 5 utilise la même syntaxe :
@@ -446,6 +464,51 @@ app.fallback(|_| async { res::file("dist/index.html").await });
 - Un [routeur](routers.md#le-fallback-dun-routeur) peut avoir son propre fallback pour les chemins sous son préfixe, avec `router.fallback(handler)` : des `404` en JSON sous `/api`, par exemple, et une page HTML partout ailleurs.
 - Pour changer d'un coup le format de *toutes* les réponses d'erreur (404, 405, 400, 500, etc.), utilisez plutôt `app.on_error`. Voir [Gestion des erreurs](errors.md).
 
+## Callbacks de paramètres et liaison de modèles
+
+`app.param(nom, middleware)` exécute un middleware avant le handler de chaque route qui a le paramètre `nom`, après le routage : c'est le `app.param()` d'Express. Chargez ou vérifiez ce que désigne le paramètre une seule fois, pour toutes les routes qui l'utilisent :
+
+```rust
+app.param("id", |req: Request, next: Next| async move {
+    match req.param_as::<u32>("id") {
+        Ok(id) if id > 0 => next.run(req).await,
+        _ => Error::bad_request("identifiant invalide").into_response(),
+    }
+});
+app.get("/users/:id", afficher_utilisateur); // vérifié
+app.get("/posts/:id", afficher_article);     // vérifié
+app.get("/a-propos", a_propos);             // non concerné
+```
+
+`app.bind_param(nom, chargeur)` est la liaison de modèles de Laravel (route model binding), construite dessus : le chargeur transforme la valeur du paramètre en une valeur à vous, que le handler lit avec `req.get::<T>()`. Quand le chargeur renvoie une erreur, elle devient la réponse et le handler n'est pas appelé :
+
+```rust
+#[derive(Clone)]
+struct Utilisateur {
+    id: u32,
+    nom: String,
+}
+
+app.bind_param("user", |req: &Request, id: &str| {
+    let db = req.state::<Db>(); // `&'static` : le future peut la garder
+    let id = id.parse::<u32>();
+    async move {
+        let id = id.map_err(|_| Error::bad_request("identifiant invalide"))?;
+        db.trouver(id).await.ok_or_else(|| Error::not_found("utilisateur inconnu"))
+    }
+});
+
+app.get("/users/:user", |req: Request| async move {
+    let u = req.get::<Utilisateur>().expect("lié par bind_param");
+    format!("n°{} {}", u.id, u.nom)
+});
+app.delete("/users/:user", supprimer); // le même chargeur, gratuitement
+```
+
+- Les callbacks s'appliquent aux routes ajoutées avant ou après eux, dans l'ordre des paramètres du chemin ; les routes sans le paramètre ne paient rien.
+- Comme dans Express, ils appartiennent à l'application ou au routeur où ils sont déclarés : `router.param(…)` couvre les routes de ce routeur, et ceux de l'application ne s'appliquent pas aux routes d'un routeur monté ou d'un [groupe](routers.md#groupes-de-routes--appgroup) : déclarez-les dans le groupe, avec `groupe.param(…)`.
+- Ils passent après les middlewares globaux et ceux des routeurs (l'authentification d'abord, puis le chargement), et avant les middlewares propres à la route (`.with`).
+
 ## Organiser ses routes
 
 Quand l'application grandit, regroupez les routes liées dans un `Router` et montez-le sous un préfixe, comme avec `express.Router()` :
@@ -457,4 +520,4 @@ api.get("/users", list_users).post("/users", create_user);
 app.mount("/api", api); // GET /api/users, POST /api/users
 ```
 
-Les routeurs peuvent avoir leurs propres middlewares et s'imbriquer, voir [Routeurs](routers.md). Pour un middleware sur une seule route (`handler.with(auth)`), voir [Middlewares](middleware.md).
+`app.group(préfixe, |groupe| { … })` fait de même sans nommer le routeur, et les plugins (`app.register`) emballent des routes pour les réutiliser. Les routeurs peuvent avoir leurs propres middlewares et s'imbriquer, voir [Routeurs](routers.md). Pour un middleware sur une seule route (`handler.with(auth)`), voir [Middlewares](middleware.md).

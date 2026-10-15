@@ -188,6 +188,21 @@ async fn read_note(req: Request) -> Result<String, ApiError> {
 > [!TIP]
 > Build the response from a `vitesse::Error`, as above, rather than by hand: that way it keeps the usual JSON format, the source is logged, and it goes through `app.on_error`.
 
+## Structured details: `with_details`
+
+`.with_details(value)` attaches structured data to an error, sent to the client next to the message, in a `details` field:
+
+```rust
+Err(Error::conflict("username taken")
+    .with_details(json!({ "suggestions": ["ada2", "ada_l"] })))
+```
+
+```json
+{"error":"username taken","details":{"suggestions":["ada2","ada_l"]}}
+```
+
+Errors without details keep the `{"error": "…"}` format. [Validation](validation.md) errors use this field for the messages of each field, and `err.details()` reads it back, in `app.on_error` for instance.
+
 ## Custom error pages: `app.on_error`
 
 By default, errors are sent as `{"error": "message"}`. `app.on_error` replaces that format for the whole application, like Express's `(err, req, res, next)` error middleware:

@@ -23,6 +23,10 @@ First public release.
   Heroku apps (README, documentation, crate `homepage`, `app.json`, rustdoc
   logo, the demo and the website's footer) instead of GitHub Pages; the
   static export for GitHub Pages is unchanged.
+- Website: no longer published on GitHub Pages (the deploy job of the `Site`
+  workflow is removed): it is served by Heroku only, and GitHub only hosts
+  the code. The READMEs no longer describe a Pages deployment; the `Site`
+  workflow still checks the static export.
 - Credits: the ecosystem is now five projects (Active, Vitesse, Securite,
   Memoire, Paquets): FerroSwift and Solidify are no longer listed in the
   README, the publishing guide or the website's footer.

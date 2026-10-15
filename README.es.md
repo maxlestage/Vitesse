@@ -365,8 +365,9 @@ escritas con [Active](https://active-c1883a966650.herokuapp.com/) (renderizadas 
 el servidor, con todas las etiquetas SEO), y las partes interactivas son
 islas de Active compiladas a WebAssembly. Es una Progressive Web App: se
 instala en la pantalla de inicio de un móvil y sigue funcionando sin
-conexión. El workflow `Site` lo exporta a archivos estáticos y lo publica en
-GitHub Pages cada vez que cambia en `master`.
+conexión. Lo sirve únicamente Heroku, en
+<https://vitesse-f16135654c3d.herokuapp.com/>. El workflow `Site` lo comprueba, compila su
+código del navegador y comprueba que se sigue exportando a archivos estáticos.
 
 ```sh
 rustup target add wasm32-unknown-unknown
@@ -377,8 +378,8 @@ cargo build --lib --target wasm32-unknown-unknown --profile wasm-release
 wasm-bindgen --target web --no-typescript --out-dir pkg target/wasm32-unknown-unknown/wasm-release/vitesse_site.wasm
 # 2. El servidor, en http://localhost:3000 (PORT para cambiar de puerto)
 cargo run --release
-# O todo el sitio en archivos estáticos, detrás de la ruta de GitHub Pages
-BASE_PATH=/Vitesse SITE_URL=https://maxlestage.github.io/Vitesse cargo run --release -- export dist
+# O todo el sitio en archivos estáticos, para cualquier alojamiento estático, detrás de un prefijo
+BASE_PATH=/Vitesse SITE_URL=https://example.com/Vitesse cargo run --release -- export dist
 ```
 
 El JavaScript que los navegadores necesitan para arrancar el WebAssembly y el

@@ -355,9 +355,9 @@ by Vitesse itself: the server is a Vitesse app whose pages are written with
 [Active](https://active-c1883a966650.herokuapp.com/) (server-rendered, with
 complete SEO tags), and the interactive parts are active islands compiled to
 WebAssembly. It is a Progressive Web App: it can be installed on a phone's
-home screen and keeps working offline. The `Site` workflow exports it to
-static files and publishes it to GitHub Pages whenever it changes on
-`master`.
+home screen and keeps working offline. It is served by Heroku only, at
+<https://vitesse-f16135654c3d.herokuapp.com/>. The `Site` workflow checks it, builds its browser code and
+checks that it can still be exported to static files.
 
 ```sh
 rustup target add wasm32-unknown-unknown
@@ -368,8 +368,8 @@ cargo build --lib --target wasm32-unknown-unknown --profile wasm-release
 wasm-bindgen --target web --no-typescript --out-dir pkg target/wasm32-unknown-unknown/wasm-release/vitesse_site.wasm
 # 2. The server, on http://localhost:3000 (PORT to change it)
 cargo run --release
-# Or the whole site as static files, behind the GitHub Pages path
-BASE_PATH=/Vitesse SITE_URL=https://maxlestage.github.io/Vitesse cargo run --release -- export dist
+# Or the whole site as static files, for any static host, behind a path prefix
+BASE_PATH=/Vitesse SITE_URL=https://example.com/Vitesse cargo run --release -- export dist
 ```
 
 The JavaScript that browsers need to start WebAssembly and the service

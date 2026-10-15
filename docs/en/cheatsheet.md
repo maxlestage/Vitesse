@@ -583,6 +583,6 @@ See [PubSub and channels](pubsub.md) and [Background jobs and scheduled tasks](b
 | `vitesse::templates::minijinja` | The `minijinja` crate (`templates` feature) |
 | `vitesse::session::{Session, Sessions, SessionStore, MemoryStore, Record}` | The session types (`session` feature) |
 | `vitesse::DEFAULT_BODY_LIMIT` | `1024 * 1024` bytes |
-| `vitesse::VERSION` | The version of the crate (`"0.1.0"`) |
+| `vitesse::VERSION` | The version of the crate (`"0.2.0"`) |
 | `Handler`, `Middleware`, `IntoResponse`, `IntoStatus`, `HandlerExt`, `ListenAddr` | The public traits |
 | `BoxFuture<T>`, `BoxError`, `Chained`, `Next`, `Server`, `UnixServer`, `SameSite`, `Cookie`, `Body`, `TrustProxy`, `Network` | The other public types |

@@ -123,6 +123,7 @@ gracefully on `Ctrl+C` / `SIGTERM`. If you already run a tokio runtime, use
 | `http3` | Disabled | HTTP/3 over QUIC: `app.http3(...)` and `vitesse::http3` ([guide](docs/en/http3.md)) |
 | `multipart` | Disabled | File uploads: `req.multipart()` and `vitesse::multipart` ([guide](docs/en/requests.md)) |
 | `compress` | Disabled | `middleware::compress()` and `middleware::decompress()`: Brotli, gzip ([guide](docs/en/middleware.md#compress)) |
+| `mimalloc` | Disabled | The whole program allocates with mimalloc: +4 to 5% requests per second on JSON in the benchmark (do not enable it if the program already sets a `#[global_allocator]`) |
 | `session` | Disabled | Signed cookies and sessions: `app.cookie_secret(...)`, `middleware::session(...)` ([guide](docs/en/sessions.md)) |
 | `templates` | Disabled | HTML templates with minijinja: `app.views(...)`, `req.render(...)` ([guide](docs/en/templates.md)) |
 | `schemars` | Disabled | OpenAPI schemas derived from your types ([guide](docs/en/openapi.md)) |

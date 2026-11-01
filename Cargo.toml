@@ -72,6 +72,10 @@ tower-service = { version = "0.3", optional = true }
 # Schémas OpenAPI dérivés des types (`schemars`) : `Operation::body_type::<T>()`.
 schemars = { version = "1", optional = true }
 
+# Allocateur mimalloc (`mimalloc`) : plus rapide que celui du système pour
+# les petites allocations de chaque requête.
+mimalloc = { version = "0.1", default-features = false, optional = true }
+
 # Formulaires `multipart/form-data` (`multipart`).
 multer = { version = "3", optional = true }
 
@@ -98,6 +102,8 @@ multipart = ["dep:multer"]
 schemars = ["dep:schemars"]
 # `middleware::compress()` : réponses en Brotli ou gzip.
 compress = ["dep:brotli", "dep:flate2"]
+# mimalloc comme allocateur global du programme (`vitesse::mimalloc`).
+mimalloc = ["dep:mimalloc"]
 
 [[example]]
 name = "chat"

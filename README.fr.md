@@ -126,6 +126,7 @@ utilisez plutôt `app.listen(port).await`.
 | `http3` | Désactivée | HTTP/3 sur QUIC : `app.http3(...)` et `vitesse::http3` ([guide](docs/fr/http3.md)) |
 | `multipart` | Désactivée | Envois de fichiers : `req.multipart()` et `vitesse::multipart` ([guide](docs/fr/requests.md)) |
 | `compress` | Désactivée | `middleware::compress()` et `middleware::decompress()` : Brotli, gzip ([guide](docs/fr/middleware.md#compress)) |
+| `mimalloc` | Désactivée | Tout le programme alloue avec mimalloc : +4 à 5 % de requêtes par seconde en JSON dans le benchmark (à ne pas activer si le programme définit déjà un `#[global_allocator]`) |
 | `session` | Désactivée | Cookies signés et sessions : `app.cookie_secret(...)`, `middleware::session(...)` ([guide](docs/fr/sessions.md)) |
 | `templates` | Désactivée | Gabarits HTML avec minijinja : `app.views(...)`, `req.render(...)` ([guide](docs/fr/templates.md)) |
 | `schemars` | Désactivée | Des schémas OpenAPI tirés de vos types ([guide](docs/fr/openapi.md)) |

@@ -126,6 +126,16 @@ pub mod validate;
 #[cfg(feature = "ws")]
 pub mod ws;
 
+/// With the `mimalloc` feature, the whole program allocates with
+/// [mimalloc](https://github.com/microsoft/mimalloc) instead of the system
+/// allocator: each request allocates a few small values (the request, the
+/// response, JSON), and mimalloc serves them from per-thread pages, without
+/// locks. Do not enable it if the program already sets a
+/// `#[global_allocator]`.
+#[cfg(feature = "mimalloc")]
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 /// The version of this crate, e.g. `"0.1.0"`: handy for a footer or a `Server` header.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 

@@ -127,6 +127,7 @@ ordenada con `Ctrl+C` / `SIGTERM`. Si ya tienes un runtime de tokio, usa
 | `http3` | Desactivada | HTTP/3 sobre QUIC: `app.http3(...)` y `vitesse::http3` ([guía](docs/es/http3.md)) |
 | `multipart` | Desactivada | Subida de archivos: `req.multipart()` y `vitesse::multipart` ([guía](docs/es/requests.md)) |
 | `compress` | Desactivada | `middleware::compress()` y `middleware::decompress()`: Brotli, gzip ([guía](docs/es/middleware.md#compress)) |
+| `mimalloc` | Desactivada | Todo el programa asigna memoria con mimalloc: +4 a 5 % de peticiones por segundo en JSON en el benchmark (no activarla si el programa ya define un `#[global_allocator]`) |
 | `session` | Desactivada | Cookies firmadas y sesiones: `app.cookie_secret(...)`, `middleware::session(...)` ([guía](docs/es/sessions.md)) |
 | `templates` | Desactivada | Plantillas HTML con minijinja: `app.views(...)`, `req.render(...)` ([guía](docs/es/templates.md)) |
 | `schemars` | Desactivada | Esquemas OpenAPI derivados de tus tipos ([guía](docs/es/openapi.md)) |

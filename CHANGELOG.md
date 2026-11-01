@@ -4,6 +4,18 @@ All notable changes to this project are documented in this file. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the
 project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- `mimalloc` feature (disabled by default): the program allocates with
+  mimalloc, as Facile does. In the benchmark (server on 2 cores, median of
+  9 interleaved runs), +4.8% requests per second on `POST /echo` and +3.7%
+  on `GET /json`; no measurable change on the routes that barely allocate.
+  Profiling shows the HTTP/1.1 engine already makes one `recv` and one
+  `send` per request, and spends ~13% of the server's CPU in user space:
+  the rest is the kernel's TCP stack.
+
 ## [0.2.0] - 2026-10-15
 
 ### Changed

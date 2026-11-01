@@ -6,15 +6,19 @@ project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-### Added
+### Changed
 
-- `mimalloc` feature (disabled by default): the program allocates with
-  mimalloc, as Facile does. In the benchmark (server on 2 cores, median of
-  9 interleaved runs), +4.8% requests per second on `POST /echo` and +3.7%
-  on `GET /json`; no measurable change on the routes that barely allocate.
-  Profiling shows the HTTP/1.1 engine already makes one `recv` and one
-  `send` per request, and spends ~13% of the server's CPU in user space:
-  the rest is the kernel's TCP stack.
+- Faster by default: the new `mimalloc` feature, **enabled by default**,
+  makes the program allocate with mimalloc, as Facile does. Measured
+  (server on 2 cores, wrk on 2 others, median of 7 interleaved runs), a
+  typical application build against this one: +10.5% requests per second
+  and −9.9% CPU per request on `GET /json`, +6.9% and −10.9% on
+  `POST /echo`; the routes that barely allocate do not change. Programs
+  that set their own `#[global_allocator]` turn it off with
+  `default-features = false, features = ["ws"]`.
+  Profiling shows the HTTP/1.1 engine already makes exactly one `recv` and
+  one `send` per request and allocates less than once per `GET /`: what is
+  left is mostly the kernel's TCP stack.
 
 ## [0.2.0] - 2026-10-15
 

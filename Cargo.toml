@@ -80,7 +80,7 @@ mimalloc = { version = "0.1", default-features = false, optional = true }
 multer = { version = "3", optional = true }
 
 [features]
-default = ["ws"]
+default = ["ws", "mimalloc"]
 # `app.ws(...)` et le module `vitesse::ws`.
 ws = ["dep:tokio-tungstenite", "dep:futures-util"]
 # `app.http3(...)` : HTTP/3 sur QUIC (UDP), à côté de HTTP/1.1.
@@ -102,7 +102,8 @@ multipart = ["dep:multer"]
 schemars = ["dep:schemars"]
 # `middleware::compress()` : réponses en Brotli ou gzip.
 compress = ["dep:brotli", "dep:flate2"]
-# mimalloc comme allocateur global du programme (`vitesse::mimalloc`).
+# mimalloc comme allocateur global du programme (activé par défaut ; à retirer
+# avec `default-features = false` si le programme a son `#[global_allocator]`).
 mimalloc = ["dep:mimalloc"]
 
 [[example]]

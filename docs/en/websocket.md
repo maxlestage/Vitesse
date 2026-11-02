@@ -10,7 +10,7 @@ If you don't need WebSocket, turn off the default features to compile a little l
 
 ```toml
 [dependencies]
-vitesse = { git = "https://github.com/maxlestage/Vitesse", default-features = false }
+vitesse = { git = "https://github.com/maxlestage/Vitesse", default-features = false, features = ["mimalloc"] }
 ```
 
 ## A first WebSocket route

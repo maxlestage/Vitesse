@@ -28,6 +28,7 @@ fn main() -> std::io::Result<()> {
 | Feature | Por defecto | Añade |
 |---|---|---|
 | `ws` | Activada | `app.ws`, `router.ws` y el módulo `vitesse::ws` |
+| `mimalloc` | Activada | Todo el programa asigna memoria con mimalloc: hasta +10 % de peticiones por segundo y −10 % de CPU por petición en las rutas JSON. Si el programa define su propio `#[global_allocator]`: `default-features = false, features = ["ws"]` |
 | `tls` | Desactivada | `app.tls` y el módulo `vitesse::tls` (HTTPS) |
 | `http2` | Desactivada | HTTP/2: sobre TLS (ALPN) con `tls`, y sin cifrar (h2c, prior knowledge) |
 | `http3` | Desactivada | `app.http3`, `server.http3_addr` y el módulo `vitesse::http3` |
@@ -41,7 +42,7 @@ fn main() -> std::io::Result<()> {
 ```toml
 [dependencies]
 vitesse = { git = "https://github.com/maxlestage/Vitesse", features = ["tls", "http2"] } # añade HTTPS y HTTP/2
-# vitesse = { git = "https://github.com/maxlestage/Vitesse", default-features = false } # sin WebSocket
+# vitesse = { git = "https://github.com/maxlestage/Vitesse", default-features = false, features = ["mimalloc"] } # sin WebSocket
 ```
 
 Consulta [Instalación](installation.md#features-de-cargo).

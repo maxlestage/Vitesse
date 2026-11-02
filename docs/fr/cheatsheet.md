@@ -28,6 +28,7 @@ fn main() -> std::io::Result<()> {
 | Feature | Par défaut | Apporte |
 |---|---|---|
 | `ws` | Activée | `app.ws`, `router.ws` et le module `vitesse::ws` |
+| `mimalloc` | Activée | Tout le programme alloue avec mimalloc : jusqu'à +10 % de requêtes par seconde et −10 % de CPU par requête sur les routes JSON. Si le programme définit son propre `#[global_allocator]` : `default-features = false, features = ["ws"]` |
 | `tls` | Désactivée | `app.tls` et le module `vitesse::tls` (HTTPS) |
 | `http2` | Désactivée | HTTP/2 : sur TLS (ALPN) avec `tls`, et en clair (h2c, « prior knowledge ») |
 | `http3` | Désactivée | `app.http3`, `server.http3_addr` et le module `vitesse::http3` |
@@ -41,7 +42,7 @@ fn main() -> std::io::Result<()> {
 ```toml
 [dependencies]
 vitesse = { git = "https://github.com/maxlestage/Vitesse", features = ["tls", "http2"] } # ajoute HTTPS et HTTP/2
-# vitesse = { git = "https://github.com/maxlestage/Vitesse", default-features = false } # sans WebSocket
+# vitesse = { git = "https://github.com/maxlestage/Vitesse", default-features = false, features = ["mimalloc"] } # sans WebSocket
 ```
 
 Voir [Installation](installation.md#les-features-cargo).

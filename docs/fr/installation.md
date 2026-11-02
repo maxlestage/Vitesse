@@ -88,10 +88,10 @@ vitesse = { git = "https://github.com/maxlestage/Vitesse", features = ["tls", "h
 # Des pages rendues sur le serveur, avec connexion des utilisateurs :
 # vitesse = { git = "https://github.com/maxlestage/Vitesse", features = ["templates", "session"] }
 # Sans WebSocket, pour compiler un peu moins :
-# vitesse = { git = "https://github.com/maxlestage/Vitesse", default-features = false }
+# vitesse = { git = "https://github.com/maxlestage/Vitesse", default-features = false, features = ["mimalloc"] }
 ```
 
-Avec `cargo add` : `cargo add vitesse --git https://github.com/maxlestage/Vitesse --features tls,http2`, ou `cargo add vitesse --git https://github.com/maxlestage/Vitesse --no-default-features`.
+Avec `cargo add` : `cargo add vitesse --git https://github.com/maxlestage/Vitesse --features tls,http2`, ou `cargo add vitesse --git https://github.com/maxlestage/Vitesse --no-default-features --features mimalloc`.
 
 ## Dépendances optionnelles
 

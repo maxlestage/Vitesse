@@ -20,6 +20,9 @@ project adheres to [Semantic Versioning](https://semver.org/).
   5 interleaved runs): +1 to +8% requests per second and 1 to 7% less CPU
   per request; `POST /echo` +7.8%. Same responses, same limits, same
   timeouts (tested on one connection with every change of hands).
+  After a busy turn, the engine looks for events again for 15 µs before
+  letting the thread sleep, as Facile does: waking a sleeping thread costs
+  more (`GET /` +12% requests per second and −13% CPU per request).
 - **Much faster in a real application** (security headers, CORS, request
   log, compression, static files; measured with a browser's requests,
   `examples/bench_app.rs`): a compressed JSON list of 50 users goes from

@@ -8,6 +8,18 @@ project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- **An engine per thread**: with one thread per core (the default on
+  Linux) and in any `current_thread` runtime, the plain HTTP/1.1
+  connections of a thread are watched by an epoll (kqueue) of their own.
+  A request received whole whose handler answers at once is read, served
+  and written without a tokio task, a waker or a timer per connection;
+  anything else (a body still arriving, a handler that waits, a streamed
+  or large response, an upgrade, HTTP/2, an error to answer) hands the
+  connection over, with its buffers, to the asynchronous engine, which
+  picks up where it was. Measured against the previous engine (median of
+  5 interleaved runs): +1 to +8% requests per second and 1 to 7% less CPU
+  per request; `POST /echo` +7.8%. Same responses, same limits, same
+  timeouts (tested on one connection with every change of hands).
 - **Much faster in a real application** (security headers, CORS, request
   log, compression, static files; measured with a browser's requests,
   `examples/bench_app.rs`): a compressed JSON list of 50 users goes from

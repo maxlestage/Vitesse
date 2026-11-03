@@ -79,6 +79,11 @@ mimalloc = { version = "0.1", default-features = false, optional = true }
 # Formulaires `multipart/form-data` (`multipart`).
 multer = { version = "3", optional = true }
 
+# Le moteur d'un thread (runtime `current_thread`, Unix) : l'epoll (kqueue) de
+# ses connexions HTTP/1. Déjà une dépendance de tokio : rien de plus à compiler.
+[target.'cfg(unix)'.dependencies]
+mio = { version = "1", features = ["os-poll", "net"] }
+
 [features]
 default = ["ws", "mimalloc"]
 # `app.ws(...)` et le module `vitesse::ws`.

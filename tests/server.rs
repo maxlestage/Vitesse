@@ -131,3 +131,66 @@ async fn shutdown_timeout_bounds_the_wait() {
         start.elapsed()
     );
 }
+
+/// Each core serves its plain connections with an engine of its own, without a
+/// task per connection; a request it cannot answer at once (a handler that
+/// waits, a body still arriving, a streamed response) hands the connection
+/// over to a task. Pipelined on one connection, the responses keep their
+/// order through these changes of hands, and the connection stays usable.
+#[tokio::test]
+async fn the_engine_hands_connections_over_in_order() {
+    let mut app = App::new();
+    app.get("/", |_| async { "fast" });
+    app.get("/wait", |_| async {
+        tokio::time::sleep(Duration::from_millis(30)).await;
+        "waited"
+    });
+    app.post("/echo", |req: Request| async move {
+        let body = req.text().await?;
+        Ok::<_, Error>(format!("echo {body}"))
+    });
+    app.get("/big", |_| async { "x".repeat(200_000) });
+    let addr = start(app).await;
+    let mut tcp = TcpStream::connect(addr).await.unwrap();
+
+    tcp.write_all(b"GET / HTTP/1.1\r\nhost: x\r\n\r\nGET /wait HTTP/1.1\r\nhost: x\r\n\r\nGET / HTTP/1.1\r\nhost: x\r\n\r\n")
+        .await
+        .unwrap();
+    // Un corps qui arrive en deux fois.
+    tcp.write_all(b"POST /echo HTTP/1.1\r\nhost: x\r\ncontent-length: 10\r\n\r\nhello")
+        .await
+        .unwrap();
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    tcp.write_all(b"world")
+        .await
+        .unwrap();
+    tcp.write_all(b"GET /big HTTP/1.1\r\nhost: x\r\n\r\nGET / HTTP/1.1\r\nhost: x\r\nconnection: close\r\n\r\n")
+        .await
+        .unwrap();
+    let out = read_all(&mut tcp).await;
+    let bodies: Vec<&str> = out
+        .split("HTTP/1.1 200 OK\r\n")
+        .skip(1)
+        .map(|r| r.split_once("\r\n\r\n").map_or("", |(_, body)| body))
+        .collect();
+    assert_eq!(bodies.len(), 6, "{out}");
+    assert_eq!(&bodies[..4], ["fast", "waited", "fast", "echo helloworld"]);
+    assert_eq!(bodies[4].len(), 200_000);
+    assert_eq!(bodies[5], "fast");
+
+    // Bien des connexions à la fois, chacune avec plusieurs requêtes.
+    let mut clients = Vec::new();
+    for i in 0..50 {
+        clients.push(tokio::spawn(async move {
+            let mut tcp = TcpStream::connect(addr).await.unwrap();
+            let path = if i % 5 == 0 { "/wait" } else { "/" };
+            let req = format!("GET {path} HTTP/1.1\r\nhost: x\r\n\r\nGET / HTTP/1.1\r\nhost: x\r\nconnection: close\r\n\r\n");
+            tcp.write_all(req.as_bytes()).await.unwrap();
+            let out = read_all(&mut tcp).await;
+            assert_eq!(out.matches("HTTP/1.1 200 OK").count(), 2, "{out}");
+        }));
+    }
+    for client in clients {
+        client.await.unwrap();
+    }
+}

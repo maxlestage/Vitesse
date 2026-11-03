@@ -39,6 +39,9 @@ use crate::server::ResponseFuture;
 use crate::upgrade::{Io, OnUpgrade, UpgradeHandle, Upgraded};
 use crate::util::http_date;
 
+#[cfg(unix)]
+pub(crate) mod engine;
+
 /// Maximum number of headers per request.
 const MAX_HEADERS: usize = 64;
 /// Maximum size of a request head (positions fit in 16 bits).
@@ -140,49 +143,9 @@ pub(crate) async fn serve_connection<IO: Io>(
     app: &'static AppService,
     state: &'static ServerState,
 ) {
-    let mut conn = Conn {
-        io,
-        rbuf: BytesMut::with_capacity(READ_SIZE),
-        wbuf: Vec::with_capacity(READ_SIZE),
-        peer,
-        secure,
-        app,
-        state,
-        linger: false,
-        raw: RawHeaders::default(),
-        upgrade: None,
-        served: 0,
-        http2: false,
-    };
+    let mut conn = Conn::new(io, peer, secure, app, state);
     let result = conn.run().await;
-    #[cfg(feature = "http2")]
-    if conn.http2 {
-        // Préambule HTTP/2 en clair (h2c, « prior knowledge ») : h2 reprend la
-        // connexion avec les octets déjà lus.
-        let Conn { io, rbuf, .. } = conn;
-        let io = crate::http2::Rewind::new(rbuf.freeze(), io);
-        crate::http2::serve(io, peer, secure, app, state).await;
-        return;
-    }
-    if let Some(on_upgrade) = conn.upgrade.take() {
-        // `101 Switching Protocols` envoyée : la connexion change de protocole.
-        if result.is_ok() {
-            let Conn { io, rbuf, .. } = conn;
-            on_upgrade(Upgraded {
-                io: Box::new(io),
-                read: rbuf.to_vec(),
-            })
-            .await;
-        }
-        return;
-    }
-    if result.is_ok() && conn.linger {
-        conn.linger_close().await;
-    } else if result.is_ok() && secure {
-        // TLS : `close_notify` avant de fermer, sinon le client ne sait pas
-        // si la réponse est complète.
-        let _ = tokio::time::timeout(Duration::from_secs(1), conn.io.shutdown()).await;
-    }
+    conn.close(result).await;
 }
 
 struct Conn<IO> {
@@ -335,35 +298,6 @@ impl<IO: Io> Conn<IO> {
                     tick.as_mut().reset(Instant::now() + period);
                 }
             }
-        }
-    }
-
-    /// The connection starts with (the beginning of) the HTTP/2 preface.
-    fn is_h2_preface(&self) -> bool {
-        let n = self.rbuf.len().min(H2_PREFACE.len());
-        self.served == 0 && n > 0 && self.rbuf[..n] == H2_PREFACE[..n]
-    }
-
-    /// The request body, if it has already been fully received (the common
-    /// case).
-    #[inline]
-    fn ready_body(&mut self, framing: Framing) -> Option<ReqBody> {
-        match framing {
-            Framing::None => Some(ReqBody::Empty),
-            Framing::Length(n) if n <= self.rbuf.len() as u64 => {
-                Some(ReqBody::Buffered(self.rbuf.split_to(n as usize).freeze()))
-            }
-            _ => None,
-        }
-    }
-
-    #[inline]
-    fn job(&self, req: Request, head: &ParsedHead) -> Job {
-        Job {
-            fut: ResponseFuture::new(self.app, req),
-            is_head: head.method == Method::HEAD,
-            version: head.version,
-            keep_alive: head.keep_alive,
         }
     }
 
@@ -535,6 +469,126 @@ impl<IO: Io> Conn<IO> {
         Ok(())
     }
 
+    async fn write_rest(&mut self, rest: Rest) -> io::Result<()> {
+        match rest {
+            Rest::None => Ok(()),
+            Rest::Bytes(bytes) => self.write_with(&bytes).await,
+            Rest::Stream(stream, chunked) => self.write_stream(stream, chunked).await,
+        }
+    }
+
+    /// Sends a streamed body, chunk by chunk (each chunk goes out right away:
+    /// ideal for files as well as for events).
+    async fn write_stream<B>(&mut self, mut body: B, chunked: bool) -> io::Result<()>
+    where
+        B: http_body::Body<Data = Bytes, Error = BoxError> + Unpin,
+    {
+        while let Some(frame) = body.frame().await {
+            let frame = frame.map_err(io::Error::other)?;
+            let Ok(data) = frame.into_data() else {
+                continue;
+            };
+            if data.is_empty() {
+                continue;
+            }
+            if chunked {
+                push_hex(&mut self.wbuf, data.len());
+                self.wbuf.extend_from_slice(b"\r\n");
+            }
+            if data.len() <= INLINE_BODY {
+                self.wbuf.extend_from_slice(&data);
+                if chunked {
+                    self.wbuf.extend_from_slice(b"\r\n");
+                }
+                self.flush().await?;
+            } else {
+                self.write_with(&data).await?;
+                if chunked {
+                    self.wbuf.extend_from_slice(b"\r\n");
+                }
+            }
+        }
+        if chunked {
+            self.wbuf.extend_from_slice(b"0\r\n\r\n");
+        }
+        Ok(())
+    }
+}
+
+impl<IO> Conn<IO> {
+    fn new(
+        io: IO,
+        peer: Option<SocketAddr>,
+        secure: bool,
+        app: &'static AppService,
+        state: &'static ServerState,
+    ) -> Self {
+        Conn {
+            io,
+            rbuf: BytesMut::with_capacity(READ_SIZE),
+            wbuf: Vec::with_capacity(READ_SIZE),
+            peer,
+            secure,
+            app,
+            state,
+            linger: false,
+            raw: RawHeaders::default(),
+            upgrade: None,
+            served: 0,
+            http2: false,
+        }
+    }
+
+    /// The same connection over another transport, with its buffers and
+    /// its state (the engine of a thread hands its connections over this
+    /// way).
+    #[cfg(unix)]
+    fn try_map_io<J, E>(self, f: impl FnOnce(IO) -> Result<J, E>) -> Result<Conn<J>, E> {
+        Ok(Conn {
+            io: f(self.io)?,
+            rbuf: self.rbuf,
+            wbuf: self.wbuf,
+            peer: self.peer,
+            secure: self.secure,
+            app: self.app,
+            state: self.state,
+            linger: self.linger,
+            raw: self.raw,
+            upgrade: self.upgrade,
+            served: self.served,
+            http2: self.http2,
+        })
+    }
+
+    /// The connection starts with (the beginning of) the HTTP/2 preface.
+    fn is_h2_preface(&self) -> bool {
+        let n = self.rbuf.len().min(H2_PREFACE.len());
+        self.served == 0 && n > 0 && self.rbuf[..n] == H2_PREFACE[..n]
+    }
+
+    /// The request body, if it has already been fully received (the common
+    /// case).
+    #[inline]
+    fn ready_body(&mut self, framing: Framing) -> Option<ReqBody> {
+        match framing {
+            Framing::None => Some(ReqBody::Empty),
+            Framing::Length(n) if n <= self.rbuf.len() as u64 => {
+                Some(ReqBody::Buffered(self.rbuf.split_to(n as usize).freeze()))
+            }
+            _ => None,
+        }
+    }
+
+    #[inline]
+    fn job(&self, req: Request, head: &ParsedHead) -> Job {
+        Job {
+            fut: ResponseFuture::new(self.app, req),
+            is_head: head.method == Method::HEAD,
+            version: head.version,
+            keep_alive: head.keep_alive,
+        }
+    }
+
     /// Serializes the response head (and a small body) into the write
     /// buffer. Returns whether to keep the connection alive, and what is left
     /// to send.
@@ -645,50 +699,97 @@ impl<IO: Io> Conn<IO> {
         };
         (keep_alive, rest)
     }
+}
 
-    async fn write_rest(&mut self, rest: Rest) -> io::Result<()> {
-        match rest {
-            Rest::None => Ok(()),
-            Rest::Bytes(bytes) => self.write_with(&bytes).await,
-            Rest::Stream(stream, chunked) => self.write_stream(stream, chunked).await,
+/// Where a connection handed over by the engine of a thread picks up.
+#[cfg(unix)]
+enum Resume {
+    /// The requests in the read buffer, from the start (a body still
+    /// arriving, an error to answer, HTTP/2).
+    Parse,
+    /// The handler of a request is waiting.
+    Job(Job),
+    /// The head of a response is written: its body, then go on (or close).
+    Rest(Rest, bool),
+    /// A request head that took too long: answer this status and close.
+    Fail(StatusCode),
+}
+
+impl<IO: Io> Conn<IO> {
+    /// After [`run`](Self::run): HTTP/2, an upgraded protocol, or a clean
+    /// close.
+    async fn close(mut self, result: io::Result<()>) {
+        #[cfg(feature = "http2")]
+        if self.http2 {
+            // Préambule HTTP/2 en clair (h2c, « prior knowledge ») : h2 reprend la
+            // connexion avec les octets déjà lus.
+            let Conn {
+                io,
+                rbuf,
+                peer,
+                secure,
+                app,
+                state,
+                ..
+            } = self;
+            let io = crate::http2::Rewind::new(rbuf.freeze(), io);
+            crate::http2::serve(io, peer, secure, app, state).await;
+            return;
+        }
+        if let Some(on_upgrade) = self.upgrade.take() {
+            // `101 Switching Protocols` envoyée : la connexion change de protocole.
+            if result.is_ok() {
+                let Conn { io, rbuf, .. } = self;
+                on_upgrade(Upgraded {
+                    io: Box::new(io),
+                    read: rbuf.to_vec(),
+                })
+                .await;
+            }
+            return;
+        }
+        if result.is_ok() && self.linger {
+            self.linger_close().await;
+        } else if result.is_ok() && self.secure {
+            // TLS : `close_notify` avant de fermer, sinon le client ne sait pas
+            // si la réponse est complète.
+            let _ = tokio::time::timeout(Duration::from_secs(1), self.io.shutdown()).await;
         }
     }
 
-    /// Sends a streamed body, chunk by chunk (each chunk goes out right away:
-    /// ideal for files as well as for events).
-    async fn write_stream<B>(&mut self, mut body: B, chunked: bool) -> io::Result<()>
-    where
-        B: http_body::Body<Data = Bytes, Error = BoxError> + Unpin,
-    {
-        while let Some(frame) = body.frame().await {
-            let frame = frame.map_err(io::Error::other)?;
-            let Ok(data) = frame.into_data() else {
-                continue;
-            };
-            if data.is_empty() {
-                continue;
-            }
-            if chunked {
-                push_hex(&mut self.wbuf, data.len());
-                self.wbuf.extend_from_slice(b"\r\n");
-            }
-            if data.len() <= INLINE_BODY {
-                self.wbuf.extend_from_slice(&data);
-                if chunked {
-                    self.wbuf.extend_from_slice(b"\r\n");
+    /// Picks up a connection handed over by the engine of a thread, then
+    /// serves it like any other.
+    #[cfg(unix)]
+    async fn resume(&mut self, resume: Resume) -> io::Result<()> {
+        let keep_alive = {
+            let _busy = Busy::new(self.state);
+            match resume {
+                Resume::Parse => true,
+                Resume::Job(job) => self.finish(job).await?,
+                Resume::Rest(rest, keep_alive) => {
+                    self.write_rest(rest).await?;
+                    keep_alive
                 }
-                self.flush().await?;
-            } else {
-                self.write_with(&data).await?;
-                if chunked {
-                    self.wbuf.extend_from_slice(b"\r\n");
-                }
+                Resume::Fail(status) => return self.fail(status).await,
             }
+        };
+        if !keep_alive {
+            return self.flush().await;
         }
-        if chunked {
-            self.wbuf.extend_from_slice(b"0\r\n\r\n");
-        }
-        Ok(())
+        self.run().await
+    }
+}
+
+/// A connection the engine of a thread hands over to a task of its own.
+#[cfg(unix)]
+pub(crate) struct Handoff(Conn<tokio::net::TcpStream>, Resume);
+
+#[cfg(unix)]
+impl Handoff {
+    pub(crate) async fn serve(self) {
+        let Handoff(mut conn, resume) = self;
+        let result = conn.resume(resume).await;
+        conn.close(result).await;
     }
 }
 

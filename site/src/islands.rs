@@ -4,7 +4,7 @@
 
 use active::prelude::*;
 
-use crate::data::{SCENARIOS, SERVERS};
+use crate::data::{ACTIX, AXUM, SCENARIOS, SERVERS, VITESSE};
 use crate::highlight::{to_html, tokenize, truncate};
 use crate::i18n::{Lang, number};
 use crate::icons::icon;
@@ -108,12 +108,12 @@ pub fn bench(props: &str) -> Node {
                             .class("bench__badges")
                             .child(span().class("pill pill--hot").text_dyn(move || {
                                 let s = &SCENARIOS[selected.get()];
-                                let ratio = number(lang, s.rps[4] / s.rps[3], 2);
+                                let ratio = number(lang, s.rps[VITESSE] / s.rps[ACTIX], 2);
                                 format!("×{ratio} {} actix-web", l.bench_vs)
                             }))
                             .child(span().class("pill").text_dyn(move || {
                                 let s = &SCENARIOS[selected.get()];
-                                let ratio = number(lang, s.rps[4] / s.rps[2], 1);
+                                let ratio = number(lang, s.rps[VITESSE] / s.rps[AXUM], 1);
                                 format!("×{ratio} {} axum", l.bench_vs)
                             })),
                     ),
@@ -122,7 +122,7 @@ pub fn bench(props: &str) -> Node {
                 div()
                     .class("bench__rows")
                     .children(SERVERS.iter().enumerate().map(|(i, name)| {
-                        let ours = i == SERVERS.len() - 1;
+                        let ours = i == VITESSE;
                         div()
                             .class(if ours { "bar bar--ours" } else { "bar" })
                             .style(format!("--i:{i}"))
@@ -419,9 +419,9 @@ mod tests {
     fn the_server_renders_the_final_state() {
         let bench = active::island("bench", "en", bench).render();
         // Les barres sont pleines et les compteurs à leur valeur.
-        assert!(bench.contains("290,478"), "{bench}");
+        assert!(bench.contains("165,337"), "{bench}");
         assert!(bench.contains("width:100.00%"));
-        assert!(bench.contains("×1.62 vs actix-web"));
+        assert!(bench.contains("×1.19 vs actix-web"));
         assert_eq!(bench.matches("role=\"tab\"").count(), SCENARIOS.len());
         let compare = active::island("compare", "fr", compare).render();
         // Tout le code Vitesse, sans curseur.

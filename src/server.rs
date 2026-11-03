@@ -317,6 +317,8 @@ pub(crate) async fn serve<L: Listener>(
         tokio::time::sleep(Duration::from_millis(5)).await;
     }
     connections.shutdown().await;
+    // Les dernières lignes de `middleware::logger()`.
+    crate::middleware::log_lines::flush();
     Ok(())
 }
 

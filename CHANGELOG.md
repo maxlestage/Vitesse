@@ -8,6 +8,25 @@ project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- **Much faster in a real application** (security headers, CORS, request
+  log, compression, static files; measured with a browser's requests,
+  `examples/bench_app.rs`): a compressed JSON list of 50 users goes from
+  4,684 to **24,818 requests per second (×5.3)**, a compressed 20 KiB
+  stylesheet from 1,667 to **62,697 (×37.6)**.
+  - `middleware::compress()` compresses a response built for one request
+    at a fast level (Brotli 1, gzip 1, as nginx by default) with a window
+    sized to the body, on the thread of the request up to 32 KiB: Brotli 5
+    with a 4 MiB window, on a blocking thread, took most of the time of
+    the request. Responses are a few bytes larger (487 instead of 359 for
+    5 KiB of JSON).
+  - Static files (`ServeDir`, `res::file`) up to 256 KiB are kept in memory
+    (32 MiB in all), checked against the disk with one `stat` per request
+    (on the thread of the request, not through `tokio::fs`), and their
+    compressed versions are made once at the best level (Brotli 11, gzip
+    9): smaller than before, and no compression per request.
+  - `middleware::logger()` writes its lines in batches, every 50 ms and
+    when the server stops, instead of one `write` per request (a third of
+    the throughput of a fast route).
 - Faster by default: the new `mimalloc` feature, **enabled by default**,
   makes the program allocate with mimalloc, as Facile does. Measured
   (server on 2 cores, wrk on 2 others, median of 7 interleaved runs), a

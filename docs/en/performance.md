@@ -74,6 +74,17 @@ Almost all the time spent on a simple request goes into the kernel (reading from
 - **No shared atomic counter per request**: the application is frozen at startup (`&'static`), so handlers, middleware and state are read without `Arc`.
 - **Few copies**: the request travels through middleware and handlers by moving a single pointer, a response weighs only 72 bytes, and the body is only read if the handler asks for it.
 
+### And in a real application
+
+A real application adds middlewares and serves files: security headers (`helmet`), CORS, a request log, compression for browsers, a stylesheet. Measured with the requests of a browser (`examples/bench_app.rs`, server on 2 cores, wrk on 2 others, logs through a pipe), against the previous version of Vitesse:
+
+| Request | Before | Now |
+|---|---:|---:|
+| `GET /api/users` (a JSON list of 50 users, compressed) | 4,684 req/s (393 µs) | **24,818 req/s (79 µs)**, ×5.3 |
+| `GET /static/app.css` (20 KiB, compressed) | 1,667 req/s (1,127 µs) | **62,697 req/s (31 µs)**, ×37.6 |
+
+Three changes make the difference: a response is compressed at a fast level on its own thread ([`compress`](middleware.md#compress)), a static file is kept in memory and compressed once at the best level ([static files](static-files.md#kept-in-memory)), and the log is written in batches ([`logger`](middleware.md#logger)).
+
 Speed does not come at the expense of robustness: see the [limits built into the engine](server.md).
 
 ## Keeping your app fast
@@ -159,7 +170,7 @@ app.get("/pixel", |_| async { Bytes::from_static(b"GIF89a") });
 
 ### Keep global middleware light
 
-Global middleware runs for every request, including 404s. Do expensive checks in route or router middleware, only where they are needed (see [Middleware](middleware.md)). For example, `middleware::logger()` writes a line to standard output for every request: very handy, but measure its cost under heavy load.
+Global middleware runs for every request, including 404s. Do expensive checks in route or router middleware, only where they are needed (see [Middleware](middleware.md)). `middleware::logger()` writes its lines in batches, every 50 ms, so it costs little; a logging middleware of your own that writes every line at once would cost a system call per request.
 
 ### Measure
 

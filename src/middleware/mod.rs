@@ -64,6 +64,10 @@ pub use crate::tower::layer;
 /// ```text
 /// GET /users/42 200 0.084 ms
 /// ```
+///
+/// The lines are written to the standard output in batches, every 50 ms (and
+/// when the server stops): one `write` per request would cost a third of the
+/// throughput of a fast route.
 pub fn logger() -> impl Middleware {
     let color = std::io::stdout().is_terminal();
     move |req: Request, next: Next| async move {
@@ -73,19 +77,85 @@ pub fn logger() -> impl Middleware {
         let res = next.run(req).await;
         let status = res.status_code().as_u16();
         let ms = start.elapsed().as_secs_f64() * 1000.0;
-        let line = if color {
-            let code = match status {
-                500.. => 31,
-                400.. => 33,
-                300.. => 36,
-                _ => 32,
-            };
-            format!("{method} {uri} \x1b[{code}m{status}\x1b[0m {ms:.3} ms\n")
-        } else {
-            format!("{method} {uri} {status} {ms:.3} ms\n")
-        };
-        let _ = std::io::stdout().lock().write_all(line.as_bytes());
+        log_lines::push(|out| {
+            if color {
+                let code = match status {
+                    500.. => 31,
+                    400.. => 33,
+                    300.. => 36,
+                    _ => 32,
+                };
+                let _ = writeln!(out, "{method} {uri} \x1b[{code}m{status}\x1b[0m {ms:.3} ms");
+            } else {
+                let _ = writeln!(out, "{method} {uri} {status} {ms:.3} ms");
+            }
+        });
         res
+    }
+}
+
+/// The lines of [`logger`], kept in memory and written to the standard
+/// output in batches by a thread of their own.
+pub(crate) mod log_lines {
+    use std::io::Write;
+    use std::sync::{Mutex, OnceLock};
+    use std::time::Duration;
+
+    /// How long a line may wait before being written.
+    const PERIOD: Duration = Duration::from_millis(50);
+    /// Beyond this, the request that adds a line writes the batch itself.
+    const FULL: usize = 64 * 1024;
+
+    #[derive(Default)]
+    struct Lines {
+        pending: Mutex<Vec<u8>>,
+        /// Held while a batch is written, so that batches keep their order.
+        writing: Mutex<()>,
+    }
+
+    static LINES: OnceLock<Lines> = OnceLock::new();
+
+    /// Adds a line, written by `write`.
+    pub(crate) fn push(write: impl FnOnce(&mut Vec<u8>)) {
+        let lines = LINES.get_or_init(|| {
+            let _ = std::thread::Builder::new()
+                .name("vitesse-logger".into())
+                .spawn(|| {
+                    loop {
+                        std::thread::sleep(PERIOD);
+                        flush();
+                    }
+                });
+            Lines::default()
+        });
+        let full = match lines.pending.lock() {
+            Ok(mut pending) => {
+                write(&mut pending);
+                pending.len() >= FULL
+            }
+            Err(_) => false,
+        };
+        if full {
+            flush();
+        }
+    }
+
+    /// Writes the lines waiting: by the logging thread, when the batch is
+    /// full, and when the server stops.
+    pub(crate) fn flush() {
+        let Some(lines) = LINES.get() else { return };
+        let Ok(_writing) = lines.writing.lock() else {
+            return;
+        };
+        let batch = match lines.pending.lock() {
+            Ok(mut pending) => std::mem::take(&mut *pending),
+            Err(_) => return,
+        };
+        if !batch.is_empty() {
+            let mut out = std::io::stdout().lock();
+            let _ = out.write_all(&batch);
+            let _ = out.flush();
+        }
     }
 }
 
@@ -539,27 +609,89 @@ mod compression {
             )
     }
 
-    fn encode(bytes: &[u8], encoding: Encoding) -> std::io::Result<Vec<u8>> {
+    /// Up to this size a response is compressed on the thread that serves it;
+    /// above, on tokio's pool of blocking threads.
+    const INLINE: usize = 32 * 1024;
+
+    /// How hard to compress.
+    #[derive(Clone, Copy)]
+    enum Level {
+        /// A response made for one request: Brotli 1 and gzip 1 (nginx's
+        /// `gzip_comp_level` by default), several times faster than the middle
+        /// levels for a few more bytes, which the network carries in less time
+        /// than the extra compression would take.
+        Fast,
+        /// A static file, compressed once for all the requests after it:
+        /// Brotli 11 and gzip 9, the smallest.
+        Best,
+    }
+
+    fn encode(bytes: &[u8], encoding: Encoding, level: Level) -> std::io::Result<Vec<u8>> {
         let out = Vec::with_capacity(bytes.len() / 2);
+        let deflate = match level {
+            Level::Fast => flate2::Compression::fast(),
+            Level::Best => flate2::Compression::best(),
+        };
         match encoding {
             Encoding::Brotli => {
-                let mut writer = brotli::CompressorWriter::new(out, 4096, 5, 22);
+                // La fenêtre à la taille du corps : pas 4 Mio à préparer pour 5 Kio.
+                let window = (usize::BITS - bytes.len().max(2).saturating_sub(1).leading_zeros())
+                    .clamp(10, 22);
+                let quality = match level {
+                    Level::Fast => 1,
+                    Level::Best => 11,
+                };
+                let mut writer = brotli::CompressorWriter::new(out, 4096, quality, window);
                 writer.write_all(bytes)?;
                 Ok(writer.into_inner())
             }
             Encoding::Gzip => {
-                let mut encoder =
-                    flate2::write::GzEncoder::new(out, flate2::Compression::default());
+                let mut encoder = flate2::write::GzEncoder::new(out, deflate);
                 encoder.write_all(bytes)?;
                 encoder.finish()
             }
             Encoding::Deflate => {
-                let mut encoder =
-                    flate2::write::ZlibEncoder::new(out, flate2::Compression::default());
+                let mut encoder = flate2::write::ZlibEncoder::new(out, deflate);
                 encoder.write_all(bytes)?;
                 encoder.finish()
             }
         }
+    }
+
+    /// Gives `res` the body `encoded`, compressed with `encoding`.
+    fn set_encoded(res: &mut Response, encoding: Encoding, encoded: Body) {
+        let headers = res.headers_mut();
+        headers.remove(header::CONTENT_LENGTH);
+        let vary = match headers.get(header::VARY).and_then(|v| v.to_str().ok()) {
+            Some(v) if v.to_ascii_lowercase().contains("accept-encoding") => v.to_owned(),
+            Some(v) => format!("{v}, accept-encoding"),
+            None => "accept-encoding".to_owned(),
+        };
+        res.set_header(header::VARY, vary);
+        res.set_header(header::CONTENT_ENCODING, encoding.name());
+        *res.body_mut() = encoded;
+    }
+
+    /// The compressed form of a static file of the cache, made once (on the
+    /// pool of blocking threads: Brotli 11 takes a while) and shared by every
+    /// request after; `None` if it is not smaller.
+    async fn compressed_file(
+        file: &crate::static_files::CachedFile,
+        encoding: Encoding,
+    ) -> Option<bytes::Bytes> {
+        let cell = &file.compressed[encoding as usize];
+        cell.get_or_init(|| async {
+            let data = file.data.clone();
+            let len = data.len();
+            tokio::task::spawn_blocking(move || encode(&data, encoding, Level::Best))
+                .await
+                .ok()
+                .and_then(Result::ok)
+                .filter(|encoded| encoded.len() < len)
+                .map(bytes::Bytes::from)
+        })
+        .await
+        .clone()
     }
 
     /// Compresses the body of `res` when it is worth it (see [`super::compress`]).
@@ -572,26 +704,33 @@ mod compression {
         if !worth {
             return res;
         }
+        // Un fichier statique gardé en mémoire : compressé une fois pour toutes.
+        if let Some(file) = res
+            .extensions()
+            .get::<crate::static_files::Cached>()
+            .cloned()
+        {
+            if let Some(encoded) = compressed_file(&file.0, encoding).await {
+                set_encoded(&mut res, encoding, Body::from(encoded));
+            }
+            return res;
+        }
         let body = std::mem::take(res.body_mut());
         let Ok(bytes) = body.to_bytes().await else {
             res.set_status(500);
             return res;
         };
-        let original = bytes.clone();
-        match tokio::task::spawn_blocking(move || encode(&bytes, encoding)).await {
-            Ok(Ok(encoded)) => {
-                let headers = res.headers_mut();
-                headers.remove(header::CONTENT_LENGTH);
-                let vary = match headers.get(header::VARY).and_then(|v| v.to_str().ok()) {
-                    Some(v) if v.to_ascii_lowercase().contains("accept-encoding") => v.to_owned(),
-                    Some(v) => format!("{v}, accept-encoding"),
-                    None => "accept-encoding".to_owned(),
-                };
-                res.set_header(header::VARY, vary);
-                res.set_header(header::CONTENT_ENCODING, encoding.name());
-                *res.body_mut() = Body::from(encoded);
-            }
-            _ => *res.body_mut() = Body::from(original),
+        let encoded = if bytes.len() <= INLINE {
+            encode(&bytes, encoding, Level::Fast)
+        } else {
+            let data = bytes.clone();
+            tokio::task::spawn_blocking(move || encode(&data, encoding, Level::Fast))
+                .await
+                .unwrap_or_else(|e| Err(std::io::Error::other(e)))
+        };
+        match encoded {
+            Ok(encoded) => set_encoded(&mut res, encoding, Body::from(encoded)),
+            Err(_) => *res.body_mut() = Body::from(bytes),
         }
         res
     }
@@ -636,23 +775,42 @@ mod compression {
         }
 
         #[test]
-        fn both_encoders_round_trip() {
+        fn both_encoders_round_trip_at_both_levels() {
             use std::io::Read;
 
             let text = "<p>hello</p>".repeat(300);
-            let br = encode(text.as_bytes(), Encoding::Brotli).unwrap();
-            let mut decoded = Vec::new();
-            brotli::Decompressor::new(br.as_slice(), 4096)
-                .read_to_end(&mut decoded)
-                .unwrap();
-            assert_eq!(decoded, text.as_bytes());
-            assert!(br.len() < text.len() / 10);
-            let gz = encode(text.as_bytes(), Encoding::Gzip).unwrap();
-            let mut decoded = String::new();
-            flate2::read::GzDecoder::new(gz.as_slice())
-                .read_to_string(&mut decoded)
-                .unwrap();
-            assert_eq!(decoded, text);
+            for level in [Level::Fast, Level::Best] {
+                let br = encode(text.as_bytes(), Encoding::Brotli, level).unwrap();
+                let mut decoded = Vec::new();
+                brotli::Decompressor::new(br.as_slice(), 4096)
+                    .read_to_end(&mut decoded)
+                    .unwrap();
+                assert_eq!(decoded, text.as_bytes());
+                assert!(br.len() < text.len() / 10);
+                let gz = encode(text.as_bytes(), Encoding::Gzip, level).unwrap();
+                let mut decoded = String::new();
+                flate2::read::GzDecoder::new(gz.as_slice())
+                    .read_to_string(&mut decoded)
+                    .unwrap();
+                assert_eq!(decoded, text);
+                let deflate = encode(text.as_bytes(), Encoding::Deflate, level).unwrap();
+                let mut decoded = String::new();
+                flate2::read::ZlibDecoder::new(deflate.as_slice())
+                    .read_to_string(&mut decoded)
+                    .unwrap();
+                assert_eq!(decoded, text);
+            }
+            // Un corps minuscule et un corps vide : la fenêtre reste dans les bornes de Brotli.
+            for body in ["", "a", &"x".repeat(5000)] {
+                for level in [Level::Fast, Level::Best] {
+                    let br = encode(body.as_bytes(), Encoding::Brotli, level).unwrap();
+                    let mut decoded = Vec::new();
+                    brotli::Decompressor::new(br.as_slice(), 4096)
+                        .read_to_end(&mut decoded)
+                        .unwrap();
+                    assert_eq!(decoded, body.as_bytes());
+                }
+            }
         }
     }
 }

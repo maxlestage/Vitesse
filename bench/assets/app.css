@@ -1,0 +1,131 @@
+/* Feuille de style de démonstration pour le benchmark « application réelle ». */
+.bloc-0 .element-0, .carte-0:hover { font-size: 12px; margin: #f9fafb; line-height: 15px; color: repeat(3, minmax(0, 1fr)); background: #1f2937; }
+.bloc-1 .element-1, .carte-1:hover { gap: 1.5; padding: #f9fafb; color: 8px 16px; background: #f9fafb; line-height: 12px; }
+.bloc-2 .element-2, .carte-2:hover { line-height: 10px; color: 10px; grid-template-columns: repeat(3, minmax(0, 1fr)); background: #1f2937; padding: repeat(3, minmax(0, 1fr)); }
+.bloc-3 .element-3, .carte-3:hover { grid-template-columns: 12px; line-height: 0 auto; color: 1px solid #e5e7eb; padding: 1.5; box-shadow: 0 auto; }
+.bloc-4 .element-4, .carte-4:hover { gap: #f9fafb; background: repeat(3, minmax(0, 1fr)); grid-template-columns: repeat(3, minmax(0, 1fr)); border: 10px; margin: 8px 16px; }
+.bloc-5 .element-5, .carte-5:hover { font-size: repeat(3, minmax(0, 1fr)); background: 8px 16px; gap: flex; border-radius: 10px; color: 12px; }
+.bloc-6 .element-6, .carte-6:hover { line-height: 1px solid #e5e7eb; font-size: 8px 16px; display: 0 auto; grid-template-columns: 0 1px 2px rgba(0,0,0,.08); border-radius: 8px 16px; }
+.bloc-7 .element-7, .carte-7:hover { background: 15px; grid-template-columns: 0 1px 2px rgba(0,0,0,.08); border: flex; gap: 1px solid #e5e7eb; display: repeat(3, minmax(0, 1fr)); }
+.bloc-8 .element-8, .carte-8:hover { background: 15px; box-shadow: 0 auto; gap: flex; line-height: 1.5; margin: #1f2937; }
+.bloc-9 .element-9, .carte-9:hover { border-radius: 0 1px 2px rgba(0,0,0,.08); background: 15px; gap: repeat(3, minmax(0, 1fr)); font-size: flex; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.bloc-10 .element-10, .carte-10:hover { display: 0 1px 2px rgba(0,0,0,.08); background: 10px; border-radius: #f9fafb; border: #1f2937; box-shadow: 0 1px 2px rgba(0,0,0,.08); }
+.bloc-11 .element-11, .carte-11:hover { box-shadow: 0 1px 2px rgba(0,0,0,.08); border: 1.5; grid-template-columns: 10px; display: 15px; border-radius: #1f2937; }
+.bloc-12 .element-12, .carte-12:hover { display: #1f2937; font-size: 8px 16px; margin: 1px solid #e5e7eb; background: 0 auto; box-shadow: 0 1px 2px rgba(0,0,0,.08); }
+.bloc-13 .element-13, .carte-13:hover { padding: 0 auto; line-height: flex; border-radius: 1.5; display: 12px; background: 1px solid #e5e7eb; }
+.bloc-14 .element-14, .carte-14:hover { margin: 15px; line-height: 10px; gap: 1.5; border: 8px 16px; border-radius: 0 auto; }
+.bloc-15 .element-15, .carte-15:hover { background: #1f2937; margin: flex; border-radius: repeat(3, minmax(0, 1fr)); padding: 0 auto; gap: 1px solid #e5e7eb; }
+.bloc-16 .element-16, .carte-16:hover { border: repeat(3, minmax(0, 1fr)); color: repeat(3, minmax(0, 1fr)); margin: 15px; line-height: 0 auto; font-size: 0 1px 2px rgba(0,0,0,.08); }
+.bloc-17 .element-0, .carte-17:hover { gap: 1.5; grid-template-columns: 1.5; color: 1.5; display: #f9fafb; line-height: flex; }
+.bloc-18 .element-1, .carte-18:hover { border-radius: 8px 16px; line-height: flex; color: 0 auto; padding: #f9fafb; background: 15px; }
+.bloc-19 .element-2, .carte-19:hover { grid-template-columns: 12px; color: #f9fafb; background: 15px; border-radius: repeat(3, minmax(0, 1fr)); margin: #1f2937; }
+.bloc-20 .element-3, .carte-20:hover { background: 10px; padding: 1px solid #e5e7eb; grid-template-columns: 15px; line-height: repeat(3, minmax(0, 1fr)); margin: 15px; }
+.bloc-21 .element-4, .carte-21:hover { display: flex; background: flex; border-radius: 1px solid #e5e7eb; box-shadow: #f9fafb; gap: 0 auto; }
+.bloc-22 .element-5, .carte-22:hover { background: 12px; font-size: #1f2937; border: 8px 16px; display: 12px; margin: 15px; }
+.bloc-23 .element-6, .carte-0:hover { margin: 10px; gap: #f9fafb; color: 0 1px 2px rgba(0,0,0,.08); border-radius: 1px solid #e5e7eb; border: 12px; }
+.bloc-24 .element-7, .carte-1:hover { font-size: 10px; margin: 8px 16px; box-shadow: repeat(3, minmax(0, 1fr)); padding: 8px 16px; grid-template-columns: 8px 16px; }
+.bloc-25 .element-8, .carte-2:hover { line-height: 15px; padding: 0 1px 2px rgba(0,0,0,.08); border-radius: #1f2937; gap: #1f2937; display: 1px solid #e5e7eb; }
+.bloc-26 .element-9, .carte-3:hover { display: 0 1px 2px rgba(0,0,0,.08); border: 15px; padding: 15px; font-size: #f9fafb; box-shadow: 8px 16px; }
+.bloc-27 .element-10, .carte-4:hover { background: 8px 16px; padding: flex; display: repeat(3, minmax(0, 1fr)); border-radius: repeat(3, minmax(0, 1fr)); font-size: #1f2937; }
+.bloc-28 .element-11, .carte-5:hover { display: 1.5; border-radius: 0 1px 2px rgba(0,0,0,.08); font-size: 8px 16px; background: flex; gap: 0 auto; }
+.bloc-29 .element-12, .carte-6:hover { line-height: flex; border-radius: 1.5; font-size: 0 1px 2px rgba(0,0,0,.08); background: #f9fafb; box-shadow: 0 1px 2px rgba(0,0,0,.08); }
+.bloc-30 .element-13, .carte-7:hover { margin: repeat(3, minmax(0, 1fr)); box-shadow: flex; border-radius: 10px; color: 0 auto; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.bloc-31 .element-14, .carte-8:hover { grid-template-columns: #1f2937; display: #1f2937; font-size: 0 1px 2px rgba(0,0,0,.08); margin: 10px; gap: #f9fafb; }
+.bloc-32 .element-15, .carte-9:hover { gap: #1f2937; margin: 1px solid #e5e7eb; line-height: 8px 16px; padding: 1px solid #e5e7eb; box-shadow: 12px; }
+.bloc-33 .element-16, .carte-10:hover { padding: 0 auto; grid-template-columns: #1f2937; font-size: 0 1px 2px rgba(0,0,0,.08); border: 15px; line-height: flex; }
+.bloc-34 .element-0, .carte-11:hover { border-radius: 12px; grid-template-columns: 0 auto; gap: 12px; line-height: 12px; margin: #1f2937; }
+.bloc-35 .element-1, .carte-12:hover { display: 0 auto; margin: 0 auto; grid-template-columns: flex; color: repeat(3, minmax(0, 1fr)); border-radius: 0 1px 2px rgba(0,0,0,.08); }
+.bloc-36 .element-2, .carte-13:hover { background: #f9fafb; gap: 12px; color: #1f2937; font-size: 8px 16px; display: 8px 16px; }
+.bloc-37 .element-3, .carte-14:hover { border: 12px; color: #1f2937; background: #f9fafb; gap: flex; display: 15px; }
+.bloc-38 .element-4, .carte-15:hover { grid-template-columns: 0 1px 2px rgba(0,0,0,.08); gap: 1px solid #e5e7eb; box-shadow: flex; border-radius: 12px; padding: 12px; }
+.bloc-39 .element-5, .carte-16:hover { display: 12px; gap: 8px 16px; padding: flex; border-radius: 0 auto; border: 1.5; }
+.bloc-40 .element-6, .carte-17:hover { background: 10px; line-height: 8px 16px; display: 1.5; font-size: #f9fafb; box-shadow: 8px 16px; }
+.bloc-41 .element-7, .carte-18:hover { border-radius: 0 auto; border: 1px solid #e5e7eb; background: 0 auto; margin: flex; font-size: 8px 16px; }
+.bloc-42 .element-8, .carte-19:hover { box-shadow: 10px; background: 8px 16px; line-height: 0 auto; display: 0 1px 2px rgba(0,0,0,.08); margin: 1.5; }
+.bloc-43 .element-9, .carte-20:hover { gap: 15px; line-height: 15px; font-size: #f9fafb; border-radius: 0 1px 2px rgba(0,0,0,.08); padding: 15px; }
+.bloc-44 .element-10, .carte-21:hover { color: 0 1px 2px rgba(0,0,0,.08); font-size: #1f2937; gap: 1.5; display: 15px; grid-template-columns: 12px; }
+.bloc-45 .element-11, .carte-22:hover { grid-template-columns: 8px 16px; border: #f9fafb; gap: #f9fafb; background: 1px solid #e5e7eb; box-shadow: 1px solid #e5e7eb; }
+.bloc-46 .element-12, .carte-0:hover { color: 10px; margin: 1px solid #e5e7eb; border: 1.5; border-radius: 0 auto; line-height: 12px; }
+.bloc-47 .element-13, .carte-1:hover { gap: 1px solid #e5e7eb; grid-template-columns: #1f2937; display: 0 1px 2px rgba(0,0,0,.08); font-size: 0 auto; background: 1.5; }
+.bloc-48 .element-14, .carte-2:hover { background: #f9fafb; border: repeat(3, minmax(0, 1fr)); color: 8px 16px; box-shadow: #f9fafb; border-radius: 1px solid #e5e7eb; }
+.bloc-49 .element-15, .carte-3:hover { background: 1px solid #e5e7eb; display: repeat(3, minmax(0, 1fr)); color: 0 auto; font-size: #1f2937; line-height: 12px; }
+.bloc-50 .element-16, .carte-4:hover { box-shadow: #1f2937; padding: 0 auto; background: 8px 16px; margin: 1px solid #e5e7eb; border: 10px; }
+.bloc-51 .element-0, .carte-5:hover { border: 12px; gap: 10px; padding: 0 auto; box-shadow: 1px solid #e5e7eb; display: 15px; }
+.bloc-52 .element-1, .carte-6:hover { color: 0 1px 2px rgba(0,0,0,.08); border: 12px; box-shadow: 12px; grid-template-columns: 8px 16px; gap: 12px; }
+.bloc-53 .element-2, .carte-7:hover { display: 10px; padding: flex; box-shadow: 12px; background: 1.5; line-height: 12px; }
+.bloc-54 .element-3, .carte-8:hover { border: 0 1px 2px rgba(0,0,0,.08); padding: 0 1px 2px rgba(0,0,0,.08); border-radius: 10px; font-size: 0 auto; grid-template-columns: 1.5; }
+.bloc-55 .element-4, .carte-9:hover { font-size: 10px; color: 0 1px 2px rgba(0,0,0,.08); margin: 1px solid #e5e7eb; border-radius: 1.5; background: 0 auto; }
+.bloc-56 .element-5, .carte-10:hover { color: repeat(3, minmax(0, 1fr)); background: 8px 16px; line-height: 0 1px 2px rgba(0,0,0,.08); gap: 1px solid #e5e7eb; border: #1f2937; }
+.bloc-57 .element-6, .carte-11:hover { display: #1f2937; margin: 1px solid #e5e7eb; border-radius: 15px; border: 15px; box-shadow: 12px; }
+.bloc-58 .element-7, .carte-12:hover { font-size: 15px; padding: 0 auto; color: #1f2937; border: 15px; border-radius: 1.5; }
+.bloc-59 .element-8, .carte-13:hover { background: 8px 16px; display: 12px; border: #1f2937; gap: #f9fafb; padding: 1px solid #e5e7eb; }
+.bloc-60 .element-9, .carte-14:hover { background: #1f2937; margin: 1px solid #e5e7eb; line-height: 1px solid #e5e7eb; color: 10px; grid-template-columns: 8px 16px; }
+.bloc-61 .element-10, .carte-15:hover { background: 15px; grid-template-columns: 0 1px 2px rgba(0,0,0,.08); gap: flex; margin: 0 auto; line-height: 1px solid #e5e7eb; }
+.bloc-62 .element-11, .carte-16:hover { box-shadow: 0 1px 2px rgba(0,0,0,.08); grid-template-columns: 0 1px 2px rgba(0,0,0,.08); margin: 12px; color: 0 auto; line-height: 12px; }
+.bloc-63 .element-12, .carte-17:hover { gap: #1f2937; grid-template-columns: #1f2937; color: 0 auto; padding: 10px; background: 15px; }
+.bloc-64 .element-13, .carte-18:hover { background: 10px; line-height: #1f2937; display: 10px; gap: 12px; color: 10px; }
+.bloc-65 .element-14, .carte-19:hover { padding: #f9fafb; display: 0 1px 2px rgba(0,0,0,.08); border: 12px; color: 12px; border-radius: #f9fafb; }
+.bloc-66 .element-15, .carte-20:hover { border-radius: #f9fafb; gap: 1px solid #e5e7eb; background: 8px 16px; display: 0 1px 2px rgba(0,0,0,.08); border: 8px 16px; }
+.bloc-67 .element-16, .carte-21:hover { padding: #f9fafb; border-radius: flex; display: 10px; grid-template-columns: 1px solid #e5e7eb; line-height: #1f2937; }
+.bloc-68 .element-0, .carte-22:hover { grid-template-columns: 15px; border-radius: 1px solid #e5e7eb; padding: 10px; background: 0 1px 2px rgba(0,0,0,.08); margin: 0 1px 2px rgba(0,0,0,.08); }
+.bloc-69 .element-1, .carte-0:hover { border: flex; grid-template-columns: #1f2937; border-radius: flex; margin: 1px solid #e5e7eb; color: 10px; }
+.bloc-70 .element-2, .carte-1:hover { background: flex; padding: flex; display: flex; border: #f9fafb; gap: 12px; }
+.bloc-71 .element-3, .carte-2:hover { padding: 1px solid #e5e7eb; border: flex; background: #f9fafb; display: 12px; color: flex; }
+.bloc-72 .element-4, .carte-3:hover { border: repeat(3, minmax(0, 1fr)); line-height: #f9fafb; padding: 0 auto; grid-template-columns: 0 1px 2px rgba(0,0,0,.08); background: 12px; }
+.bloc-73 .element-5, .carte-4:hover { border: #f9fafb; font-size: 0 1px 2px rgba(0,0,0,.08); margin: 15px; gap: 8px 16px; box-shadow: flex; }
+.bloc-74 .element-6, .carte-5:hover { display: flex; line-height: 10px; color: flex; margin: 1.5; grid-template-columns: 1px solid #e5e7eb; }
+.bloc-75 .element-7, .carte-6:hover { box-shadow: 15px; margin: #f9fafb; line-height: 15px; font-size: #1f2937; grid-template-columns: 15px; }
+.bloc-76 .element-8, .carte-7:hover { font-size: 0 1px 2px rgba(0,0,0,.08); line-height: 1px solid #e5e7eb; background: 1px solid #e5e7eb; padding: 15px; color: #f9fafb; }
+.bloc-77 .element-9, .carte-8:hover { line-height: 1.5; box-shadow: 1px solid #e5e7eb; grid-template-columns: #1f2937; background: 1px solid #e5e7eb; font-size: #f9fafb; }
+.bloc-78 .element-10, .carte-9:hover { color: 1px solid #e5e7eb; border-radius: 1.5; border: 12px; margin: 15px; padding: 8px 16px; }
+.bloc-79 .element-11, .carte-10:hover { font-size: 0 1px 2px rgba(0,0,0,.08); line-height: #f9fafb; color: #1f2937; border-radius: 0 1px 2px rgba(0,0,0,.08); padding: 1.5; }
+.bloc-80 .element-12, .carte-11:hover { display: #1f2937; grid-template-columns: 12px; margin: 0 auto; border: 0 auto; box-shadow: flex; }
+.bloc-81 .element-13, .carte-12:hover { line-height: 0 1px 2px rgba(0,0,0,.08); font-size: 0 1px 2px rgba(0,0,0,.08); border: 10px; grid-template-columns: 1px solid #e5e7eb; gap: 1.5; }
+.bloc-82 .element-14, .carte-13:hover { border-radius: #f9fafb; padding: 0 auto; border: 10px; display: 0 auto; line-height: #f9fafb; }
+.bloc-83 .element-15, .carte-14:hover { padding: flex; gap: 15px; display: flex; border-radius: 1.5; box-shadow: 0 auto; }
+.bloc-84 .element-16, .carte-15:hover { gap: 15px; padding: 12px; border-radius: #f9fafb; background: 15px; margin: 8px 16px; }
+.bloc-85 .element-0, .carte-16:hover { font-size: 0 1px 2px rgba(0,0,0,.08); border: 1.5; grid-template-columns: 1.5; padding: 1.5; color: 0 1px 2px rgba(0,0,0,.08); }
+.bloc-86 .element-1, .carte-17:hover { gap: #1f2937; padding: flex; line-height: 1px solid #e5e7eb; border: repeat(3, minmax(0, 1fr)); font-size: 15px; }
+.bloc-87 .element-2, .carte-18:hover { margin: #f9fafb; border-radius: 1px solid #e5e7eb; gap: 8px 16px; grid-template-columns: 1.5; padding: 1.5; }
+.bloc-88 .element-3, .carte-19:hover { border-radius: 0 auto; display: #1f2937; line-height: 1.5; border: 0 1px 2px rgba(0,0,0,.08); color: flex; }
+.bloc-89 .element-4, .carte-20:hover { grid-template-columns: 12px; display: flex; color: flex; background: 8px 16px; line-height: #f9fafb; }
+.bloc-90 .element-5, .carte-21:hover { padding: 0 1px 2px rgba(0,0,0,.08); margin: 0 1px 2px rgba(0,0,0,.08); border-radius: 10px; gap: flex; background: #f9fafb; }
+.bloc-91 .element-6, .carte-22:hover { gap: repeat(3, minmax(0, 1fr)); color: #1f2937; border-radius: 10px; margin: 0 1px 2px rgba(0,0,0,.08); padding: 1px solid #e5e7eb; }
+.bloc-92 .element-7, .carte-0:hover { margin: 0 1px 2px rgba(0,0,0,.08); border-radius: #f9fafb; border: #f9fafb; gap: #f9fafb; line-height: 1px solid #e5e7eb; }
+.bloc-93 .element-8, .carte-1:hover { gap: 8px 16px; grid-template-columns: repeat(3, minmax(0, 1fr)); padding: #1f2937; line-height: #1f2937; border: 12px; }
+.bloc-94 .element-9, .carte-2:hover { border: flex; display: 12px; box-shadow: 8px 16px; font-size: 12px; padding: 8px 16px; }
+.bloc-95 .element-10, .carte-3:hover { color: 8px 16px; line-height: flex; border: 10px; box-shadow: 10px; gap: 1.5; }
+.bloc-96 .element-11, .carte-4:hover { background: 8px 16px; border: flex; padding: #1f2937; line-height: 0 1px 2px rgba(0,0,0,.08); font-size: 15px; }
+.bloc-97 .element-12, .carte-5:hover { box-shadow: #1f2937; line-height: 1px solid #e5e7eb; font-size: 0 1px 2px rgba(0,0,0,.08); border-radius: 12px; padding: #f9fafb; }
+.bloc-98 .element-13, .carte-6:hover { padding: 8px 16px; display: flex; box-shadow: 8px 16px; border: 1px solid #e5e7eb; grid-template-columns: 1px solid #e5e7eb; }
+.bloc-99 .element-14, .carte-7:hover { background: flex; grid-template-columns: 1.5; display: 10px; margin: #1f2937; padding: repeat(3, minmax(0, 1fr)); }
+.bloc-100 .element-15, .carte-8:hover { margin: repeat(3, minmax(0, 1fr)); line-height: 0 auto; color: 1.5; padding: #1f2937; grid-template-columns: 0 1px 2px rgba(0,0,0,.08); }
+.bloc-101 .element-16, .carte-9:hover { color: 0 1px 2px rgba(0,0,0,.08); margin: #f9fafb; line-height: #f9fafb; display: 0 auto; font-size: 15px; }
+.bloc-102 .element-0, .carte-10:hover { padding: 1px solid #e5e7eb; margin: 10px; gap: 0 1px 2px rgba(0,0,0,.08); display: 1.5; color: 15px; }
+.bloc-103 .element-1, .carte-11:hover { font-size: #f9fafb; display: 1px solid #e5e7eb; margin: #f9fafb; background: 15px; color: 1.5; }
+.bloc-104 .element-2, .carte-12:hover { background: 1px solid #e5e7eb; gap: 1.5; padding: #f9fafb; line-height: #1f2937; font-size: 0 1px 2px rgba(0,0,0,.08); }
+.bloc-105 .element-3, .carte-13:hover { display: 8px 16px; padding: 15px; font-size: 15px; gap: 0 1px 2px rgba(0,0,0,.08); box-shadow: flex; }
+.bloc-106 .element-4, .carte-14:hover { color: #1f2937; border-radius: 1.5; line-height: #1f2937; padding: flex; grid-template-columns: #f9fafb; }
+.bloc-107 .element-5, .carte-15:hover { color: 15px; border: 1px solid #e5e7eb; padding: 15px; background: repeat(3, minmax(0, 1fr)); font-size: #1f2937; }
+.bloc-108 .element-6, .carte-16:hover { border: 0 1px 2px rgba(0,0,0,.08); font-size: repeat(3, minmax(0, 1fr)); box-shadow: 10px; grid-template-columns: #f9fafb; color: #1f2937; }
+.bloc-109 .element-7, .carte-17:hover { padding: 1px solid #e5e7eb; background: 1.5; display: flex; grid-template-columns: 0 auto; line-height: flex; }
+.bloc-110 .element-8, .carte-18:hover { margin: 15px; color: 15px; border: flex; box-shadow: 15px; padding: repeat(3, minmax(0, 1fr)); }
+.bloc-111 .element-9, .carte-19:hover { background: 8px 16px; gap: 1.5; padding: #f9fafb; line-height: 10px; margin: #1f2937; }
+.bloc-112 .element-10, .carte-20:hover { display: 1.5; gap: #f9fafb; border-radius: #f9fafb; font-size: 1px solid #e5e7eb; margin: repeat(3, minmax(0, 1fr)); }
+.bloc-113 .element-11, .carte-21:hover { background: 0 1px 2px rgba(0,0,0,.08); padding: flex; box-shadow: 0 auto; line-height: 8px 16px; display: 0 auto; }
+.bloc-114 .element-12, .carte-22:hover { line-height: 1px solid #e5e7eb; display: 1px solid #e5e7eb; grid-template-columns: 1px solid #e5e7eb; padding: repeat(3, minmax(0, 1fr)); background: 1px solid #e5e7eb; }
+.bloc-115 .element-13, .carte-0:hover { font-size: 8px 16px; border: 0 auto; border-radius: 8px 16px; padding: 8px 16px; display: 0 auto; }
+.bloc-116 .element-14, .carte-1:hover { border: 1.5; grid-template-columns: 1px solid #e5e7eb; padding: 8px 16px; font-size: 12px; background: 12px; }
+.bloc-117 .element-15, .carte-2:hover { padding: #f9fafb; border-radius: #1f2937; background: flex; display: 8px 16px; color: flex; }
+.bloc-118 .element-16, .carte-3:hover { font-size: #1f2937; color: 8px 16px; border: repeat(3, minmax(0, 1fr)); padding: repeat(3, minmax(0, 1fr)); background: 8px 16px; }
+.bloc-119 .element-0, .carte-4:hover { background: repeat(3, minmax(0, 1fr)); font-size: 1px solid #e5e7eb; gap: 10px; margin: #1f2937; display: #f9fafb; }
+.bloc-120 .element-1, .carte-5:hover { border-radius: #1f2937; grid-template-columns: 15px; box-shadow: 15px; font-size: 0 auto; padding: #1f2937; }
+.bloc-121 .element-2, .carte-6:hover { padding: 15px; border: 1.5; color: 10px; box-shadow: 15px; grid-template-columns: 0 auto; }
+.bloc-122 .element-3, .carte-7:hover { grid-template-columns: flex; border: 12px; background: flex; padding: #f9fafb; color: 1.5; }
+.bloc-123 .element-4, .carte-8:hover { background: 10px; line-height: 0 auto; gap: 1.5; margin: 0 1px 2px rgba(0,0,0,.08); box-shadow: 1px solid #e5e7eb; }
+.bloc-124 .element-5, .carte-9:hover { line-height: 1px solid #e5e7eb; border: 0 1px 2px rgba(0,0,0,.08); border-radius: repeat(3, minmax(0, 1fr)); box-shadow: 15px; color: 1.5; }
+.bloc-125 .element-6, .carte-10:hover { line-height: 0 1px 2px rgba(0,0,0,.08); color: 1.5; font-size: 8px 16px; padding: #1f2937; box-shadow: 1.5; }
+.bloc-126 .element-7, .carte-11:hover { margin: repeat(3, minmax(0, 1fr)); line-height: 15px; background: flex; grid-template-columns: 0 auto; border-radius: 0 auto; }
+.bloc-127 .element-8, .carte-12:hover { color: #f9fafb; box-shadow: repeat(3, minmax(0, 1fr)); gap: repeat(3, minmax(0, 1fr)); margin: 15px; line-height: 0 1px 2px rgba(0,0,0,.08); }
+.bloc-128 .element-9, .carte-13:hover { gap: 0 auto; margin: 12px; border-radius: 0 auto; font-size: #f9fafb; border: #f9fafb; }
+.bloc-129 .element-10, .carte-14:hover { line-height: #1f2937; display: flex; padding: 15px; border: #1f2937; margin: repeat(3, minmax(0, 1fr)); }

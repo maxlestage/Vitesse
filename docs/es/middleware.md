@@ -262,7 +262,7 @@ El módulo `vitesse::middleware` (accesible como `middleware::` con el preludio)
 
 ### `logger`
 
-Escribe una línea por petición en la salida estándar: método, URL, estado y duración. El estado aparece en color cuando la salida es una terminal.
+Escribe una línea por petición en la salida estándar: método, URL, estado y duración. El estado aparece en color cuando la salida es una terminal. Las líneas se escriben por lotes, cada 50 ms y al detenerse el servidor: una escritura en la salida estándar por cada petición costaría un tercio del rendimiento de una ruta rápida.
 
 ```rust
 app.middleware(middleware::logger());
@@ -538,7 +538,12 @@ vitesse = { git = "https://github.com/maxlestage/Vitesse", features = ["compress
 app.middleware(middleware::compress());
 ```
 
-Solo se comprimen los cuerpos que merecen la pena: HTML, CSS, JavaScript, JSON, XML, SVG, WebAssembly y los demás tipos de texto, de 1 KiB o más, de tamaño conocido (no en streaming, así que los [Server-Sent Events](responses.md#server-sent-events) también pasan tal cual) y no codificados ya. Las imágenes, los vídeos y los archivos comprimidos pasan tal cual. La respuesta recibe `Content-Encoding` y `Vary: Accept-Encoding`, y la compresión corre en un hilo bloqueante, así que los workers siguen atendiendo otras peticiones. Añádelo antes que los demás middlewares, para que todas las respuestas pasen por él.
+Solo se comprimen los cuerpos que merecen la pena: HTML, CSS, JavaScript, JSON, XML, SVG, WebAssembly y los demás tipos de texto, de 1 KiB o más, de tamaño conocido (no en streaming, así que los [Server-Sent Events](responses.md#server-sent-events) también pasan tal cual) y no codificados ya. Las imágenes, los vídeos y los archivos comprimidos pasan tal cual. La respuesta recibe `Content-Encoding` y `Vary: Accept-Encoding`. Añádelo antes que los demás middlewares, para que todas las respuestas pasen por él.
+
+Está hecho para ser rápido:
+
+- **Una respuesta construida para una petición** (JSON, una página HTML) se comprime a un nivel rápido (Brotli 1, gzip 1, como nginx por defecto), varias veces más rápido que en los niveles intermedios a cambio de unos pocos bytes más, que la red transporta en menos tiempo del que llevaría la compresión adicional. Hasta 32 KiB se hace en el hilo de la petición, sin el viaje de ida y vuelta a un hilo bloqueante; por encima, en un hilo bloqueante, así que los workers siguen atendiendo otras peticiones.
+- **Un archivo estático** servido por [`ServeDir` o `res::file`](static-files.md#guardados-en-memoria) se comprime **una sola vez**, al mejor nivel (Brotli 11, gzip 9), y se guarda con el archivo: las peticiones siguientes reciben la versión más pequeña sin comprimir nada. Un archivo modificado en el disco se vuelve a comprimir.
 
 ### `decompress`
 

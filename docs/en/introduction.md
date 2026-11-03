@@ -69,25 +69,24 @@ You don't need to be a Rust expert. Most handlers are a few lines long, and this
 
 ## How fast is it?
 
-Requests per second, with the server's CPU time per request in brackets (lower is better):
+Requests per second, with the server's CPU time per request in brackets (lower is better), measured with Vitesse's new engine per thread:
 
-| Scenario | Express 5 | Drogon 1.9 (C++) | axum 0.8 | actix-web 4 | **Vitesse** |
-|---|---:|---:|---:|---:|---:|
-| `GET /` (text) | 5,921 (180 µs) | 203,244 (9.7 µs) | 168,165 (11.7 µs) | 274,195 (7.1 µs) | **291,415 (6.1 µs)** |
-| `GET /json` | 5,765 (184 µs) | 120,489 (16.5 µs) | 165,988 (11.9 µs) | 248,987 (7.9 µs) | **313,438 (5.9 µs)** |
-| `GET /json` sent by a browser (12 headers) | 5,627 (188 µs) | 92,041 (21.7 µs) | 131,710 (15.0 µs) | 179,505 (10.9 µs) | **290,478 (6.8 µs)** |
-| `GET /users/:id` (parameter + JSON) | 5,627 (187 µs) | 98,486 (20.1 µs) | 151,303 (13.1 µs) | 209,173 (9.4 µs) | **304,323 (6.2 µs)** |
-| `POST /echo` (reads and returns JSON) | 4,538 (235 µs) | 69,876 (28.4 µs) | 105,570 (18.8 µs) | 170,129 (11.7 µs) | **253,941 (7.6 µs)** |
-| `GET /` pipelined ×16 | 8,352 (128 µs) | 724,059 (2.7 µs) | 213,678 (9.3 µs) | 1,272,510 (1.6 µs) | **2,781,541 (0.64 µs)** |
+| Scenario | axum 0.8 | actix-web 4 | **Vitesse** |
+|---|---:|---:|---:|
+| `GET /` (text) | 104,439 (18.8 µs) | 174,475 (11.0 µs) | **175,956 (10.1 µs)** |
+| `GET /json` | 101,206 (19.3 µs) | 152,498 (12.6 µs) | **173,191 (10.4 µs)** |
+| `GET /json` sent by a browser (12 headers) | 86,681 (22.7 µs) | 138,917 (14.1 µs) | **165,337 (11.0 µs)** |
+| `GET /users/:id` (parameter + JSON) | 96,321 (20.1 µs) | 152,877 (12.8 µs) | **178,731 (10.0 µs)** |
+| `POST /echo` (reads and returns JSON) | 81,171 (24.4 µs) | 115,069 (17.1 µs) | **171,438 (10.8 µs)** |
+| `GET /` pipelined ×16 | 171,985 (11.5 µs) | 983,771 (2.0 µs) | **1,770,173 (0.97 µs)** |
 
 In short:
 
-- **Against actix-web**, often called the fastest Rust framework: up to **+62%** throughput with a real browser request, +45 to +49% with parameters or a JSON body, **2.2 times more** with pipelining, and 15 to 59% less CPU per request.
-- **Against axum**: 1.7 to 2.4 times more requests per second, half the CPU per request, and 13 times more with pipelining.
-- **Against Drogon (C++)**: 1.4 to 3.8 times faster.
-- **Against Express**: about 50 times faster.
+- **Against actix-web**, often called the fastest Rust framework: +0.8% on `GET /`, where both hit the kernel's floor, +13.6% on `GET /json`, +19% with a real browser request, +16.9% with a parameter, **+49%** on the JSON echo, **1.8 times more** with pipelining, and 8 to 52% less CPU per request.
+- **Against axum**: 1.7 to 2.1 times more requests per second, about half the CPU per request, and 10 times more with pipelining.
+- **Against Drogon (C++) and Express**: measured in an earlier session, on another machine, before the engine per thread. Vitesse was then 1.4 to 3.8 times faster than Drogon and about 50 times faster than Express.
 
-All of these ran on a 4 vCPU VM, with the server pinned to 2 cores, wrk on the other 2, 128 keep-alive connections and 10 s per scenario. The Express server used for these numbers has since been removed from the repository to keep it 100% Rust (it is still in the git history), and the benchmark now compares Drogon, axum, actix-web and Vitesse. The [Performance](performance.md) page covers the methodology, how to reproduce the numbers (with the Rust runner in `bench/runner`) and why Vitesse is fast. The raw results are also in the README.
+All the numbers in the table were measured on November 3, 2026, in a single session, on a 4 vCPU VM: the server pinned to 2 cores, wrk on the other 2, 128 keep-alive connections, 5 s per run and the median of 3 runs, with the servers one after the other. Versions: axum 0.8, actix-web 4.18 and Rust 1.97; Vitesse uses its default allocator (mimalloc), axum and actix-web the system allocator. This VM is slower than the one used for earlier measurements, so compare the columns with each other, not with older numbers. Drogon and Express could not be measured again on this machine; the Express server has since been removed from the repository to keep it 100% Rust (it is still in the git history), and the benchmark now compares Drogon, axum, actix-web and Vitesse. The [Performance](performance.md) page covers the methodology, how to reproduce the numbers (with the Rust runner in `bench/runner`) and why Vitesse is fast. The raw results are also in the README.
 
 ## Current limitations
 

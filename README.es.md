@@ -78,6 +78,12 @@ servidor por cada petición (cuanto menos, mejor):
   de CPU por petición y 13 veces más con pipelining.
 - **Frente a Drogon (C++)**: de 1,4 a 3,8 veces más rápido.
 - **Frente a Express**: unas 50 veces más rápido.
+- **En una aplicación real** (cabeceras de seguridad, CORS, registro de
+  peticiones, compresión para los navegadores, archivos estáticos): una
+  lista JSON comprimida se sirve **5,3 veces más rápido** que con la versión
+  anterior de Vitesse, y una hoja de estilos comprimida **37 veces más
+  rápido**, ya que un archivo estático se comprime una sola vez y se guarda
+  en memoria ([detalles](docs/es/performance.md#y-en-una-aplicación-real)).
 
 **¿Por qué la diferencia con actix es menor en `GET /`?** En la petición más
 simple, todos los servidores rápidos chocan con el mismo suelo: unos 4,7 µs

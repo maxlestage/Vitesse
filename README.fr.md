@@ -78,6 +78,12 @@ pour chaque requête (plus c'est bas, mieux c'est) :
   moins de CPU par requête, et 13 fois plus en pipeline.
 - **Contre Drogon (C++)** : de 1,4 à 3,8 fois plus rapide.
 - **Contre Express** : environ 50 fois plus rapide.
+- **Dans une vraie application** (en-têtes de sécurité, CORS, journal des
+  requêtes, compression pour les navigateurs, fichiers statiques) : une liste
+  JSON compressée est servie **5,3 fois plus vite** que par la version
+  précédente de Vitesse, et une feuille de style compressée **37 fois plus
+  vite**, puisqu'un fichier statique est désormais compressé une fois et
+  gardé en mémoire ([détails](docs/fr/performance.md#et-dans-une-vraie-application)).
 
 **Pourquoi l'écart avec actix est plus faible sur `GET /` ?** Sur la requête
 la plus simple, tous les serveurs rapides butent sur le même plancher : environ

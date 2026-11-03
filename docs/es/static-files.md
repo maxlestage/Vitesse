@@ -110,6 +110,10 @@ Para reanudar una descarga, un cliente puede añadir `If-Range`: el rango solo s
 
 Los archivos de hasta 256 KiB se leen de una vez; los más grandes se envían por partes de 64 KiB, con su `Content-Length` exacto. Así, el uso de memoria se mantiene constante, incluso con un vídeo de varios gigabytes. Para una petición `HEAD`, solo se envían las cabeceras.
 
+## Guardados en memoria
+
+Los archivos de hasta 256 KiB se guardan en memoria una vez leídos (32 MiB en total) y se sirven desde ahí sin volver a tocar el disco: cada petición solo comprueba con un `stat` que el archivo sigue teniendo el mismo tamaño y la misma fecha de modificación, y lo vuelve a leer si cambió. Los metadatos se leen en el hilo de la petición, lo que cuesta un microsegundo para un archivo que el sistema conoce, en lugar de un viaje de ida y vuelta a un hilo bloqueante. Con [`middleware::compress()`](middleware.md#compress), sus versiones comprimidas se hacen una vez y se guardan con ellos.
+
 ## Tipos MIME
 
 | Extensiones | `Content-Type` |

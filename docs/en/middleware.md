@@ -262,7 +262,7 @@ The `vitesse::middleware` module (available as `middleware::` with the prelude) 
 
 ### `logger`
 
-Prints one line per request on standard output: method, URL, status and duration. The status is colored when the output is a terminal.
+Prints one line per request on standard output: method, URL, status and duration. The status is colored when the output is a terminal. The lines are written in batches, every 50 ms and when the server stops: a write to standard output for each request would cost a third of the throughput of a fast route.
 
 ```rust
 app.middleware(middleware::logger());
@@ -538,7 +538,12 @@ vitesse = { git = "https://github.com/maxlestage/Vitesse", features = ["compress
 app.middleware(middleware::compress());
 ```
 
-Only bodies worth it are compressed: HTML, CSS, JavaScript, JSON, XML, SVG, WebAssembly and the other text-like types, of 1 KiB or more, with a known size (not streamed, so [Server-Sent Events](responses.md#server-sent-events) pass through too) and not encoded already. Images, videos and archives pass through. The response gets `Content-Encoding` and `Vary: Accept-Encoding`, and the compression runs on a blocking thread, so the workers keep answering other requests. Add it before the other middlewares, so that every response goes through it.
+Only bodies worth it are compressed: HTML, CSS, JavaScript, JSON, XML, SVG, WebAssembly and the other text-like types, of 1 KiB or more, with a known size (not streamed, so [Server-Sent Events](responses.md#server-sent-events) pass through too) and not encoded already. Images, videos and archives pass through. The response gets `Content-Encoding` and `Vary: Accept-Encoding`. Add it before the other middlewares, so that every response goes through it.
+
+It is made to be fast:
+
+- **A response built for one request** (JSON, an HTML page) is compressed at a fast level (Brotli 1, gzip 1, as nginx does by default), several times faster than the middle levels for a few more bytes, which the network carries in less time than the extra compression would take. Up to 32 KiB it is done on the thread of the request, without the round trip through a blocking thread; above, on a blocking thread, so the workers keep answering other requests.
+- **A static file** served by [`ServeDir` or `res::file`](static-files.md#kept-in-memory) is compressed **once**, at the best level (Brotli 11, gzip 9), and kept with the file: the requests after it get the smallest version without compressing anything. A file changed on disk is compressed again.
 
 ### `decompress`
 

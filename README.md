@@ -76,6 +76,12 @@ each request (lower is better):
   per request, and 13 times more with pipelining.
 - **Against Drogon (C++)**: 1.4 to 3.8 times faster.
 - **Against Express**: about 50 times faster.
+- **In a real application** (security headers, CORS, request log,
+  compression for browsers, static files): a compressed JSON list is served
+  **5.3 times faster** than by the previous version of Vitesse, and a
+  compressed stylesheet **37 times faster**, since a static file is now
+  compressed once and kept in memory
+  ([details](docs/en/performance.md#and-in-a-real-application)).
 
 **Why is the gap with actix smaller on `GET /`?** On the simplest request,
 every fast server hits the same floor: about 4.7 µs of kernel work per

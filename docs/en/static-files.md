@@ -110,6 +110,10 @@ To resume a download, a client may add `If-Range`: the range is then only served
 
 Files up to 256 KiB are read in one go; larger files are streamed in 64 KiB chunks, with their exact `Content-Length`. Memory use therefore stays constant, even for a video of several gigabytes. For a `HEAD` request, only the headers are sent.
 
+## Kept in memory
+
+The files up to 256 KiB are kept in memory once read (32 MiB in all), and served from there without touching the disk again: each request only checks with one `stat` that the file still has the same size and modification date, and reads it again when it changed. The metadata is read on the thread of the request, which costs a microsecond for a file the system knows, instead of a round trip through a blocking thread. With [`middleware::compress()`](middleware.md#compress), their compressed versions are made once and kept with them.
+
 ## MIME types
 
 | Extensions | `Content-Type` |

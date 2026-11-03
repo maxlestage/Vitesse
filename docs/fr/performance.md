@@ -74,6 +74,17 @@ La quasi-totalité du temps d'une requête simple est passée dans le noyau (lec
 - **Zéro compteur atomique partagé par requête** : l'application est figée au démarrage (`&'static`), handlers, middlewares et état sont lus sans `Arc`.
 - **Peu de copies** : la requête traverse middlewares et handlers en ne déplaçant qu'un pointeur, la réponse ne pèse que 72 octets, et le corps n'est lu que si le handler le demande.
 
+### Et dans une vraie application
+
+Une vraie application ajoute des middlewares et sert des fichiers : des en-têtes de sécurité (`helmet`), CORS, un journal des requêtes, la compression pour les navigateurs, une feuille de style. Mesuré avec les requêtes d'un navigateur (`examples/bench_app.rs`, serveur sur 2 cœurs, wrk sur 2 autres, journal à travers un tube), face à la version précédente de Vitesse :
+
+| Requête | Avant | Maintenant |
+|---|---:|---:|
+| `GET /api/users` (une liste JSON de 50 utilisateurs, compressée) | 4 684 req/s (393 µs) | **24 818 req/s (79 µs)**, ×5,3 |
+| `GET /static/app.css` (20 Kio, compressée) | 1 667 req/s (1 127 µs) | **62 697 req/s (31 µs)**, ×37,6 |
+
+Trois changements font la différence : une réponse est compressée à un niveau rapide sur son propre thread ([`compress`](middleware.md#compress)), un fichier statique est gardé en mémoire et compressé une fois au meilleur niveau ([fichiers statiques](static-files.md#gardés-en-mémoire)), et le journal est écrit par lots ([`logger`](middleware.md#logger)).
+
 La vitesse ne se fait pas au détriment de la robustesse : voir les [limites intégrées au moteur](server.md).
 
 ## Garder une application rapide
@@ -159,7 +170,7 @@ app.get("/pixel", |_| async { Bytes::from_static(b"GIF89a") });
 
 ### Gardez les middlewares globaux légers
 
-Les middlewares globaux s'exécutent pour chaque requête, 404 comprises. Faites les vérifications coûteuses dans des middlewares de route ou de routeur, seulement là où elles sont utiles (voir [Middlewares](middleware.md)). Par exemple, `middleware::logger()` écrit une ligne sur la sortie standard à chaque requête : très pratique, mais mesurez son coût sous forte charge.
+Les middlewares globaux s'exécutent pour chaque requête, 404 comprises. Faites les vérifications coûteuses dans des middlewares de route ou de routeur, seulement là où elles sont utiles (voir [Middlewares](middleware.md)). `middleware::logger()` écrit ses lignes par lots, toutes les 50 ms : il coûte peu ; un middleware de journal à vous qui écrirait chaque ligne aussitôt coûterait un appel système par requête.
 
 ### Mesurez
 

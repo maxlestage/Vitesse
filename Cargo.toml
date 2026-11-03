@@ -107,6 +107,10 @@ compress = ["dep:brotli", "dep:flate2"]
 mimalloc = ["dep:mimalloc"]
 
 [[example]]
+name = "bench_app"
+required-features = ["compress"]
+
+[[example]]
 name = "chat"
 required-features = ["ws"]
 

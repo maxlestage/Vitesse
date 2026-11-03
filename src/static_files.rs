@@ -1,14 +1,15 @@
 //! Static files (`express.static`, `res.sendFile`).
 
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::fs::Metadata;
 use std::future::Future;
 use std::io::{self, SeekFrom};
 use std::path::{Component, Path, PathBuf};
 use std::pin::Pin;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, OnceLock};
 use std::task::{Context, Poll};
-use std::time::{Duration, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use bytes::Bytes;
 use http::header::{self, HeaderValue};
@@ -27,6 +28,86 @@ use crate::util::{http_date, mime_for, percent_decode};
 /// streamed.
 const SMALL_FILE: u64 = 256 * 1024;
 const CHUNK: usize = 64 * 1024;
+/// The small files kept in memory, in all: beyond, the cache starts again
+/// empty.
+const CACHE_BYTES: usize = 32 * 1024 * 1024;
+
+/// A small file kept in memory as it was read, with the size and the date of
+/// modification it had then: while they do not change, it is served without
+/// reading the disk again.
+#[derive(Debug)]
+pub(crate) struct CachedFile {
+    len: u64,
+    modified: Option<SystemTime>,
+    pub(crate) data: Bytes,
+    /// Its forms compressed by [`middleware::compress()`](crate::middleware::compress)
+    /// (Brotli, gzip, deflate), made once at the best quality; `None` when
+    /// that does not make it smaller.
+    #[cfg(feature = "compress")]
+    pub(crate) compressed: [tokio::sync::OnceCell<Option<Bytes>>; 3],
+}
+
+/// Marks a response whose body is a whole file of the cache (an extension of
+/// the response), for the compression middleware.
+#[cfg(feature = "compress")]
+#[derive(Clone, Debug)]
+pub(crate) struct Cached(pub(crate) Arc<CachedFile>);
+
+#[derive(Default)]
+struct FileCache {
+    files: HashMap<PathBuf, Arc<CachedFile>>,
+    bytes: usize,
+}
+
+fn file_cache() -> &'static Mutex<FileCache> {
+    static CACHE: OnceLock<Mutex<FileCache>> = OnceLock::new();
+    CACHE.get_or_init(Mutex::default)
+}
+
+/// The file kept for `path`, if it is still the one on disk.
+fn cached(path: &Path, meta: &Metadata) -> Option<Arc<CachedFile>> {
+    let cache = file_cache().lock().ok()?;
+    let file = cache.files.get(path)?;
+    (file.len == meta.len() && file.modified == meta.modified().ok()).then(|| file.clone())
+}
+
+/// Keeps `data`, the content of `path` read with `meta`. Requests that
+/// arrive together all read the file before one of them keeps it: they share
+/// the first one kept, and so its compressed forms, made once.
+fn keep(path: &Path, meta: &Metadata, data: Bytes) -> Arc<CachedFile> {
+    let (len, modified) = (meta.len(), meta.modified().ok());
+    let file = Arc::new(CachedFile {
+        len,
+        modified,
+        data,
+        #[cfg(feature = "compress")]
+        compressed: Default::default(),
+    });
+    if let Ok(mut cache) = file_cache().lock() {
+        if let Some(kept) = cache
+            .files
+            .get(path)
+            .filter(|f| f.len == len && f.modified == modified)
+        {
+            return kept.clone();
+        }
+        if cache.bytes + file.data.len() > CACHE_BYTES {
+            *cache = FileCache::default();
+        }
+        cache.bytes += file.data.len();
+        if let Some(old) = cache.files.insert(path.to_owned(), file.clone()) {
+            cache.bytes -= old.data.len();
+        }
+    }
+    file
+}
+
+/// The metadata of a file, read on the thread of the request: a `stat` of a
+/// file whose inode is in memory takes a microsecond, a round trip through
+/// tokio's pool of blocking threads (`tokio::fs`) ten times more.
+fn metadata(path: &Path) -> io::Result<Metadata> {
+    std::fs::metadata(path)
+}
 
 /// Serves the files of a directory.
 ///
@@ -106,7 +187,7 @@ impl ServeDir {
             path.push(segment);
         }
 
-        let mut meta = tokio::fs::metadata(&path).await.ok()?;
+        let mut meta = metadata(&path).ok()?;
         if meta.is_dir() {
             let index = self.index.as_ref()?;
             // Comme Express : `/docs` -> `/docs/` pour que les liens relatifs marchent.
@@ -119,7 +200,7 @@ impl ServeDir {
                 return Some(crate::Redirect::permanent(location).into_response());
             }
             path.push(index);
-            meta = tokio::fs::metadata(&path).await.ok()?;
+            meta = metadata(&path).ok()?;
         }
         if !meta.is_file() {
             return None;
@@ -223,7 +304,7 @@ impl Future for WithConditional {
 /// and `206` when the request asks for it.
 pub(crate) async fn send_file(path: &Path) -> Response {
     let conditional = CURRENT.with(|c| c.borrow().clone());
-    match tokio::fs::metadata(path).await {
+    match metadata(path) {
         Ok(meta) if meta.is_file() => {
             file_response(path, &meta, conditional.as_deref(), false, 0).await
         }
@@ -308,21 +389,46 @@ async fn file_response(
         return res.header(header::CONTENT_LENGTH, count);
     }
 
-    match read_file(path, start, count, len).await {
-        Ok(body) => res.send(body),
+    match read_file(path, meta, start, count).await {
+        Ok((body, cached)) => {
+            #[cfg_attr(not(feature = "compress"), allow(unused_mut))]
+            let mut res = res.send(body);
+            #[cfg(feature = "compress")]
+            if let Some(file) = cached {
+                res.extensions_mut().insert(Cached(file));
+            }
+            #[cfg(not(feature = "compress"))]
+            let _ = cached;
+            res
+        }
         Err(e) => Error::internal("failed to read the file")
             .with_source(e)
             .into_response(),
     }
 }
 
-/// Reads `count` bytes starting at `start`: in one go if that is small,
-/// as a stream otherwise.
-async fn read_file(path: &Path, start: u64, count: u64, len: u64) -> io::Result<Body> {
+/// Reads `count` bytes starting at `start`: from the cache or in one go if
+/// that is small, as a stream otherwise. A whole small file is kept in the
+/// cache, and given back with the body.
+async fn read_file(
+    path: &Path,
+    meta: &Metadata,
+    start: u64,
+    count: u64,
+) -> io::Result<(Body, Option<Arc<CachedFile>>)> {
+    let len = meta.len();
     if start == 0 && count == len && count <= SMALL_FILE {
-        let data = tokio::fs::read(path).await?;
-        // Le fichier a pu changer entre-temps : on s'en tient à ce qu'on a lu.
-        return Ok(Body::from(data));
+        if let Some(file) = cached(path, meta) {
+            return Ok((Body::from(file.data.clone()), Some(file)));
+        }
+        let data = Bytes::from(tokio::fs::read(path).await?);
+        // Le fichier a pu changer entre-temps : on s'en tient à ce qu'on a lu,
+        // et on ne le garde que s'il a la taille annoncée.
+        if data.len() as u64 != len {
+            return Ok((Body::from(data), None));
+        }
+        let file = keep(path, meta, data);
+        return Ok((Body::from(file.data.clone()), Some(file)));
     }
     let mut file = tokio::fs::File::open(path).await?;
     if start > 0 {
@@ -331,13 +437,14 @@ async fn read_file(path: &Path, start: u64, count: u64, len: u64) -> io::Result<
     if count <= SMALL_FILE {
         let mut data = vec![0; count as usize];
         file.read_exact(&mut data).await?;
-        return Ok(Body::from(data));
+        return Ok((Body::from(data), None));
     }
-    Ok(Body::wrap(FileBody {
+    let body = Body::wrap(FileBody {
         file,
         remaining: count,
         buf: vec![0; CHUNK],
-    }))
+    });
+    Ok((body, None))
 }
 
 /// Parses a `Range: bytes=a-b` header (a single range).

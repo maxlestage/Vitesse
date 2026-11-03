@@ -110,6 +110,10 @@ Pour reprendre un téléchargement, un client peut ajouter `If-Range` : la plage
 
 Les fichiers jusqu'à 256 Kio sont lus d'un coup ; les plus gros sont envoyés en flux, par morceaux de 64 Kio, avec leur `Content-Length` exact. La mémoire utilisée reste donc constante, même pour une vidéo de plusieurs gigaoctets. Pour une requête `HEAD`, seuls les en-têtes sont envoyés.
 
+## Gardés en mémoire
+
+Les fichiers jusqu'à 256 Kio sont gardés en mémoire une fois lus (32 Mio en tout), et servis de là sans retoucher le disque : chaque requête vérifie seulement, par un `stat`, que le fichier a toujours la même taille et la même date de modification, et le relit s'il a changé. Les métadonnées sont lues sur le thread de la requête, ce qui coûte une microseconde pour un fichier que le système connaît, au lieu d'un aller-retour par un thread bloquant. Avec [`middleware::compress()`](middleware.md#compress), leurs versions compressées sont faites une fois et gardées avec eux.
+
 ## Les types MIME
 
 | Extensions | `Content-Type` |

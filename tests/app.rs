@@ -573,6 +573,15 @@ async fn static_files() {
         Some("attachment; filename=\"salut.txt\"")
     );
 
+    // Gardé en mémoire, le fichier suit le disque : même taille, autre
+    // contenu (et autre date), puis supprimé.
+    assert_eq!(c.get("/static/hello.txt").await.text(), "bonjour le monde");
+    std::thread::sleep(std::time::Duration::from_millis(20));
+    std::fs::write(dir.join("hello.txt"), "BONJOUR LE MONDE").unwrap();
+    assert_eq!(c.get("/static/hello.txt").await.text(), "BONJOUR LE MONDE");
+    std::fs::remove_file(dir.join("hello.txt")).unwrap();
+    assert_eq!(c.get("/static/hello.txt").await.status(), 404);
+
     std::fs::remove_dir_all(&dir).ok();
 }
 

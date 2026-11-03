@@ -74,6 +74,17 @@ Casi todo el tiempo de una petición sencilla se pasa en el kernel (leyendo y es
 - **Ningún contador atómico compartido por petición**: la aplicación se congela al arrancar (`&'static`), así que handlers, middlewares y estado se leen sin `Arc`.
 - **Pocas copias**: la petición recorre middlewares y handlers moviendo un solo puntero, una respuesta pesa solo 72 bytes y el cuerpo solo se lee si el handler lo pide.
 
+### Y en una aplicación real
+
+Una aplicación real añade middlewares y sirve archivos: cabeceras de seguridad (`helmet`), CORS, un registro de peticiones, compresión para los navegadores, una hoja de estilos. Medido con las peticiones de un navegador (`examples/bench_app.rs`, servidor en 2 núcleos, wrk en otros 2, registro a través de una tubería), frente a la versión anterior de Vitesse:
+
+| Petición | Antes | Ahora |
+|---|---:|---:|
+| `GET /api/users` (una lista JSON de 50 usuarios, comprimida) | 4.684 req/s (393 µs) | **24.818 req/s (79 µs)**, ×5,3 |
+| `GET /static/app.css` (20 KiB, comprimida) | 1.667 req/s (1.127 µs) | **62.697 req/s (31 µs)**, ×37,6 |
+
+Tres cambios marcan la diferencia: una respuesta se comprime a un nivel rápido en su propio hilo ([`compress`](middleware.md#compress)), un archivo estático se guarda en memoria y se comprime una vez al mejor nivel ([archivos estáticos](static-files.md#guardados-en-memoria)), y el registro se escribe por lotes ([`logger`](middleware.md#logger)).
+
 La velocidad no se consigue a costa de la robustez: consulta los [límites integrados en el motor](server.md).
 
 ## Mantener rápida tu aplicación
@@ -159,7 +170,7 @@ app.get("/pixel", |_| async { Bytes::from_static(b"GIF89a") });
 
 ### Mantén ligeros los middlewares globales
 
-Los middlewares globales se ejecutan en cada petición, incluidos los 404. Haz las comprobaciones costosas en middlewares de ruta o de router, solo donde hacen falta (consulta [Middlewares](middleware.md)). Por ejemplo, `middleware::logger()` escribe una línea en la salida estándar por cada petición: muy práctico, pero mide su coste con mucha carga.
+Los middlewares globales se ejecutan en cada petición, incluidos los 404. Haz las comprobaciones costosas en middlewares de ruta o de router, solo donde hacen falta (consulta [Middlewares](middleware.md)). `middleware::logger()` escribe sus líneas por lotes, cada 50 ms, así que cuesta poco; un middleware de registro propio que escribiera cada línea al momento costaría una llamada al sistema por petición.
 
 ### Mide
 

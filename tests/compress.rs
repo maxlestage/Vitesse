@@ -149,3 +149,79 @@ async fn decompresses_request_bodies() {
     // Sans `Content-Encoding`, rien ne change.
     assert_eq!(client.post("/echo").body("abc").await.text(), "- 3");
 }
+
+/// A static file is compressed once at the best quality, for every request
+/// after; changed on disk, it is read and compressed again.
+#[tokio::test]
+async fn static_files_are_compressed_once_and_follow_the_disk() {
+    let dir = std::env::temp_dir().join(format!("vitesse-compress-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let css = |n: usize| {
+        (0..n)
+            .map(|i| format!(".c{i} {{ color: #{:06x}; }}\n", i * 977))
+            .collect::<String>()
+    };
+    let first = css(400);
+    std::fs::write(dir.join("site.css"), &first).unwrap();
+    let mut app = App::new();
+    app.middleware(middleware::compress());
+    app.static_dir("/static", &dir);
+    let client = TestClient::new(app);
+
+    let brotli = |bytes: &[u8]| {
+        let mut out = Vec::new();
+        brotli::Decompressor::new(bytes, 4096)
+            .read_to_end(&mut out)
+            .unwrap();
+        String::from_utf8(out).unwrap()
+    };
+    let mut sizes = Vec::new();
+    for _ in 0..3 {
+        let res = client
+            .get("/static/site.css")
+            .header("accept-encoding", "br")
+            .await;
+        assert_eq!(res.status(), 200);
+        assert_eq!(res.header("content-encoding"), Some("br"));
+        assert_eq!(res.header("vary"), Some("accept-encoding"));
+        assert_eq!(brotli(res.bytes().as_ref()), first);
+        sizes.push(res.bytes().len());
+    }
+    // The same compressed bytes each time, smaller than a fast compression.
+    assert!(sizes.windows(2).all(|w| w[0] == w[1]), "{sizes:?}");
+    let mut fast = brotli::CompressorWriter::new(Vec::new(), 4096, 1, 22);
+    std::io::Write::write_all(&mut fast, first.as_bytes()).unwrap();
+    assert!(sizes[0] < fast.into_inner().len());
+
+    let res = client
+        .get("/static/site.css")
+        .header("accept-encoding", "gzip")
+        .await;
+    assert_eq!(res.header("content-encoding"), Some("gzip"));
+    let mut text = String::new();
+    flate2::read::GzDecoder::new(res.bytes().as_ref())
+        .read_to_string(&mut text)
+        .unwrap();
+    assert_eq!(text, first);
+    // Without compression, the file as it is; and a range is never compressed.
+    assert_eq!(client.get("/static/site.css").await.text(), first);
+    let res = client
+        .get("/static/site.css")
+        .header("accept-encoding", "br")
+        .header("range", "bytes=0-99")
+        .await;
+    assert_eq!(res.status(), 206);
+    assert_eq!(res.text(), first[..100]);
+
+    // Changed on disk (another size, and another date): read and compressed again.
+    std::thread::sleep(std::time::Duration::from_millis(20));
+    let second = css(500);
+    std::fs::write(dir.join("site.css"), &second).unwrap();
+    let res = client
+        .get("/static/site.css")
+        .header("accept-encoding", "br")
+        .await;
+    assert_eq!(brotli(res.bytes().as_ref()), second);
+    assert_eq!(client.get("/static/site.css").await.text(), second);
+    let _ = std::fs::remove_dir_all(&dir);
+}

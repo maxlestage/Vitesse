@@ -69,25 +69,24 @@ No necesitas ser experto en Rust. La mayoría de los handlers ocupan pocas líne
 
 ## ¿Qué tan rápido es?
 
-Peticiones por segundo y, entre paréntesis, el tiempo de CPU que consume el servidor por petición (cuanto más bajo, mejor):
+Peticiones por segundo y, entre paréntesis, el tiempo de CPU que consume el servidor por petición (cuanto más bajo, mejor), medidos con el nuevo motor por hilo de Vitesse:
 
-| Escenario | Express 5 | Drogon 1.9 (C++) | axum 0.8 | actix-web 4 | **Vitesse** |
-|---|---:|---:|---:|---:|---:|
-| `GET /` (texto) | 5 921 (180 µs) | 203 244 (9,7 µs) | 168 165 (11,7 µs) | 274 195 (7,1 µs) | **291 415 (6,1 µs)** |
-| `GET /json` | 5 765 (184 µs) | 120 489 (16,5 µs) | 165 988 (11,9 µs) | 248 987 (7,9 µs) | **313 438 (5,9 µs)** |
-| `GET /json` enviado por un navegador (12 cabeceras) | 5 627 (188 µs) | 92 041 (21,7 µs) | 131 710 (15,0 µs) | 179 505 (10,9 µs) | **290 478 (6,8 µs)** |
-| `GET /users/:id` (parámetro + JSON) | 5 627 (187 µs) | 98 486 (20,1 µs) | 151 303 (13,1 µs) | 209 173 (9,4 µs) | **304 323 (6,2 µs)** |
-| `POST /echo` (lee y devuelve JSON) | 4 538 (235 µs) | 69 876 (28,4 µs) | 105 570 (18,8 µs) | 170 129 (11,7 µs) | **253 941 (7,6 µs)** |
-| `GET /` con pipelining ×16 | 8 352 (128 µs) | 724 059 (2,7 µs) | 213 678 (9,3 µs) | 1 272 510 (1,6 µs) | **2 781 541 (0,64 µs)** |
+| Escenario | axum 0.8 | actix-web 4 | **Vitesse** |
+|---|---:|---:|---:|
+| `GET /` (texto) | 104 439 (18,8 µs) | 174 475 (11,0 µs) | **175 956 (10,1 µs)** |
+| `GET /json` | 101 206 (19,3 µs) | 152 498 (12,6 µs) | **173 191 (10,4 µs)** |
+| `GET /json` enviado por un navegador (12 cabeceras) | 86 681 (22,7 µs) | 138 917 (14,1 µs) | **165 337 (11,0 µs)** |
+| `GET /users/:id` (parámetro + JSON) | 96 321 (20,1 µs) | 152 877 (12,8 µs) | **178 731 (10,0 µs)** |
+| `POST /echo` (lee y devuelve JSON) | 81 171 (24,4 µs) | 115 069 (17,1 µs) | **171 438 (10,8 µs)** |
+| `GET /` con pipelining ×16 | 171 985 (11,5 µs) | 983 771 (2,0 µs) | **1 770 173 (0,97 µs)** |
 
 En resumen:
 
-- **Frente a actix-web**, al que a menudo se considera el framework de Rust más rápido: hasta un **+62 %** de rendimiento con una petición real de navegador, entre un +45 y un +49 % con parámetros o un cuerpo JSON, **2,2 veces más** con pipelining y entre un 15 y un 59 % menos de CPU por petición.
-- **Frente a axum**: entre 1,7 y 2,4 veces más peticiones por segundo, la mitad de CPU por petición y 13 veces más con pipelining.
-- **Frente a Drogon (C++)**: entre 1,4 y 3,8 veces más rápido.
-- **Frente a Express**: unas 50 veces más rápido.
+- **Frente a actix-web**, al que a menudo se considera el framework de Rust más rápido: un +0,8 % en `GET /`, donde ambos chocan con el suelo del kernel, un +13,6 % en `GET /json`, un +19 % con una petición real de navegador, un +16,9 % con un parámetro, un **+49 %** en el eco JSON, **1,8 veces más** con pipelining y entre un 8 y un 52 % menos de CPU por petición.
+- **Frente a axum**: entre 1,7 y 2,1 veces más peticiones por segundo, alrededor de la mitad de CPU por petición y 10 veces más con pipelining.
+- **Frente a Drogon (C++) y Express**: se midieron en una sesión anterior, en otra máquina, antes del motor por hilo. Vitesse era entonces entre 1,4 y 3,8 veces más rápido que Drogon y unas 50 veces más rápido que Express.
 
-Todas estas mediciones se hicieron en una VM de 4 vCPU: el servidor fijado en 2 núcleos, wrk en los otros 2, 128 conexiones keep-alive y 10 s por escenario. El servidor Express usado para estas cifras se retiró después del repositorio para que siga siendo 100 % Rust (sigue en el historial de git), y el benchmark compara ahora Drogon, axum, actix-web y Vitesse. La página de [Rendimiento](performance.md) explica la metodología, cómo reproducir las cifras (con la herramienta en Rust de `bench/runner`) y por qué Vitesse es tan rápido. Los resultados en bruto también están en el README.
+Todas las cifras de la tabla se midieron el 3 de noviembre de 2026, en una sola sesión, en una VM de 4 vCPU: el servidor fijado en 2 núcleos, wrk en los otros 2, 128 conexiones keep-alive, 5 s por ejecución y la mediana de 3 ejecuciones, un servidor detrás de otro. Versiones: axum 0.8, actix-web 4.18 y Rust 1.97; Vitesse usa su asignador por defecto (mimalloc), y axum y actix-web el asignador del sistema. Esta VM es más lenta que la de las mediciones anteriores, así que compara las columnas entre sí, no con cifras más antiguas. Drogon y Express no se pudieron volver a medir en esta máquina; el servidor Express se retiró después del repositorio para que siga siendo 100 % Rust (sigue en el historial de git), y el benchmark compara ahora Drogon, axum, actix-web y Vitesse. La página de [Rendimiento](performance.md) explica la metodología, cómo reproducir las cifras (con la herramienta en Rust de `bench/runner`) y por qué Vitesse es tan rápido. Los resultados en bruto también están en el README.
 
 ## Limitaciones actuales
 

@@ -4,34 +4,33 @@ Vitesse a été conçu pour ajouter le moins de travail possible autour de ce qu
 
 ## Benchmark
 
-Requêtes par seconde, et entre parenthèses le temps CPU consommé par le serveur pour chaque requête (plus c'est bas, mieux c'est) :
+Requêtes par seconde, et entre parenthèses le temps CPU consommé par le serveur pour chaque requête (plus c'est bas, mieux c'est), mesurées avec le nouveau moteur par thread de Vitesse :
 
-| Scénario | Express 5 | Drogon 1.9 (C++) | axum 0.8 | actix-web 4 | **Vitesse** |
-|---|---:|---:|---:|---:|---:|
-| `GET /` (texte) | 5 921 (180 µs) | 203 244 (9,7 µs) | 168 165 (11,7 µs) | 274 195 (7,1 µs) | **291 415 (6,1 µs)** |
-| `GET /json` | 5 765 (184 µs) | 120 489 (16,5 µs) | 165 988 (11,9 µs) | 248 987 (7,9 µs) | **313 438 (5,9 µs)** |
-| `GET /json` envoyé par un navigateur (12 en-têtes) | 5 627 (188 µs) | 92 041 (21,7 µs) | 131 710 (15,0 µs) | 179 505 (10,9 µs) | **290 478 (6,8 µs)** |
-| `GET /users/:id` (paramètre + JSON) | 5 627 (187 µs) | 98 486 (20,1 µs) | 151 303 (13,1 µs) | 209 173 (9,4 µs) | **304 323 (6,2 µs)** |
-| `POST /echo` (lit et renvoie du JSON) | 4 538 (235 µs) | 69 876 (28,4 µs) | 105 570 (18,8 µs) | 170 129 (11,7 µs) | **253 941 (7,6 µs)** |
-| `GET /` pipeliné ×16 | 8 352 (128 µs) | 724 059 (2,7 µs) | 213 678 (9,3 µs) | 1 272 510 (1,6 µs) | **2 781 541 (0,64 µs)** |
+| Scénario | axum 0.8 | actix-web 4 | **Vitesse** |
+|---|---:|---:|---:|
+| `GET /` (texte) | 104 439 (18,8 µs) | 174 475 (11,0 µs) | **175 956 (10,1 µs)** |
+| `GET /json` | 101 206 (19,3 µs) | 152 498 (12,6 µs) | **173 191 (10,4 µs)** |
+| `GET /json` envoyé par un navigateur (12 en-têtes) | 86 681 (22,7 µs) | 138 917 (14,1 µs) | **165 337 (11,0 µs)** |
+| `GET /users/:id` (paramètre + JSON) | 96 321 (20,1 µs) | 152 877 (12,8 µs) | **178 731 (10,0 µs)** |
+| `POST /echo` (lit et renvoie du JSON) | 81 171 (24,4 µs) | 115 069 (17,1 µs) | **171 438 (10,8 µs)** |
+| `GET /` pipeliné ×16 | 171 985 (11,5 µs) | 983 771 (2,0 µs) | **1 770 173 (0,97 µs)** |
 
-- **Contre actix-web**, le framework Rust réputé le plus rapide : jusqu'à **+62 %** de débit avec une vraie requête de navigateur, +45 à +49 % avec des paramètres ou un corps JSON, **2,2 fois plus** en pipeline, et 15 à 59 % de CPU en moins par requête.
-- **Contre axum** : de 1,7 à 2,4 fois plus de requêtes par seconde, deux fois moins de CPU par requête, et 13 fois plus en pipeline.
-- **Contre Drogon (C++)** : de 1,4 à 3,8 fois plus rapide.
-- **Contre Express** : environ 50 fois plus rapide.
+- **Contre actix-web**, le framework Rust réputé le plus rapide : +0,8 % sur `GET /`, où tous deux butent sur le plancher du noyau, +13,6 % sur `GET /json`, +19 % avec une vraie requête de navigateur, +16,9 % avec un paramètre, **+49 %** sur l'écho JSON, **1,8 fois plus** en pipeline, et 8 à 52 % de CPU en moins par requête.
+- **Contre axum** : de 1,7 à 2,1 fois plus de requêtes par seconde, environ deux fois moins de CPU par requête, et 10 fois plus en pipeline.
+- **Contre Drogon (C++) et Express** : mesurés lors d'une session antérieure, sur une autre machine, avant le moteur par thread. Vitesse était alors de 1,4 à 3,8 fois plus rapide que Drogon et environ 50 fois plus rapide qu'Express.
 
 > [!NOTE]
-> Les chiffres d'Express (Express 5.3.0 sur Node 22.22) ont été mesurés dans la même session que les autres. Le serveur Express a depuis été retiré du dépôt pour que le projet reste 100 % Rust, sans JavaScript : il reste dans l'historique git (`git show 484eed3:bench/express/server.js`), et l'outil de benchmark compare désormais Drogon, axum, actix-web et Vitesse.
+> Drogon et Express n'ont pas pu être remesurés sur cette machine : la comparaison ci-dessus vient d'une session antérieure, avec Drogon 1.9.13 (GCC 13, `-O3`) et Express 5.3.0 sur Node 22.22. Le serveur Express a depuis été retiré du dépôt pour que le projet reste 100 % Rust, sans JavaScript : il reste dans l'historique git (`git show 484eed3:bench/express/server.js`), et l'outil de benchmark compare désormais Drogon, axum, actix-web et Vitesse.
 
 ### Pourquoi l'écart avec actix est-il plus faible sur `GET /` ?
 
-Sur la requête la plus simple, tous les serveurs rapides butent sur le même plancher : environ 4,7 µs de travail du noyau par requête (lecture, écriture et, sur la boucle locale, le traitement de la réception côté client, imputé à l'envoi du serveur). Vitesse n'ajoute que ~1,4 µs par-dessus, actix ~2,4 µs et axum ~7 µs. Dès que la requête ressemble à une vraie requête (en-têtes de navigateur, paramètres, corps JSON, pipelining), c'est le code du framework qui fait la différence, et l'écart se creuse. En production, à travers un vrai réseau, la part du noyau côté serveur est plus faible : l'avantage de Vitesse n'en est que plus visible.
+Sur la requête la plus simple, tous les serveurs rapides butent sur le même plancher : sur cette machine, environ 8 µs de travail du noyau par requête (lecture, écriture et, sur la boucle locale, le traitement de la réception côté client, imputé à l'envoi du serveur). Vitesse n'ajoute que ~2 µs par-dessus, actix ~3 µs et axum ~11 µs. Dès que la requête ressemble à une vraie requête (en-têtes de navigateur, paramètres, corps JSON, pipelining), c'est le code du framework qui fait la différence, et l'écart se creuse. En production, à travers un vrai réseau, la part du noyau côté serveur est plus faible : l'avantage de Vitesse n'en est que plus visible.
 
 ## Méthodologie
 
-- **Machine** : une VM à 4 vCPU. Le serveur est épinglé sur 2 cœurs et wrk sur les 2 autres : le générateur de charge ne prend jamais de temps CPU au serveur.
-- **Charge** : 128 connexions keep-alive, 10 secondes par scénario, après 2 secondes d'échauffement, sur la même machine et dans la même session pour tous les serveurs.
-- **Versions** : Node 22.22 / Express 5.3.0, Drogon 1.9.13 (GCC 13, `-O3`), axum 0.8, actix-web 4.15, Rust 1.97, et l'allocateur système partout.
+- **Machine** : une VM à 4 vCPU, plus lente que celle des mesures précédentes (comparez donc les colonnes entre elles, pas avec d'anciens chiffres). Le serveur est épinglé sur 2 cœurs et wrk sur les 2 autres : le générateur de charge ne prend jamais de temps CPU au serveur.
+- **Charge** : 128 connexions keep-alive, 5 secondes par exécution et la médiane de 3 exécutions pour chaque scénario, les serveurs l'un après l'autre, le tout dans une seule session, le 3 novembre 2026.
+- **Versions** : axum 0.8, actix-web 4.18, Rust 1.97. Vitesse utilise son allocateur par défaut (mimalloc), axum et actix-web l'allocateur système.
 - **Scénarios** : le scénario « navigateur » envoie les 12 en-têtes d'une vraie requête de Chrome (environ 650 octets) ; `POST /echo` envoie un petit document JSON que le serveur analyse et renvoie ; le scénario pipeliné envoie 16 requêtes d'un coup sur chaque connexion.
 - **Temps CPU par requête** : le temps CPU (utilisateur + système) consommé par le processus serveur pendant le scénario, divisé par le nombre de requêtes servies. Sans pipeline, les serveurs les plus rapides saturent wrk lui-même : le temps CPU mesuré côté serveur est alors le juge le plus fiable.
 

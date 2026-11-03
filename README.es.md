@@ -59,25 +59,28 @@ fn main() -> std::io::Result<()> {
 ## Benchmark
 
 Peticiones por segundo y, entre paréntesis, el tiempo de CPU que consume el
-servidor por cada petición (cuanto menos, mejor):
+servidor por cada petición (cuanto menos, mejor), medidos con el nuevo motor
+por hilo de Vitesse:
 
-| Escenario | Express 5 | Drogon 1.9 (C++) | axum 0.8 | actix-web 4 | **Vitesse** |
-|---|---:|---:|---:|---:|---:|
-| `GET /` (texto) | 5.921 (180 µs) | 203.244 (9,7 µs) | 168.165 (11,7 µs) | 274.195 (7,1 µs) | **291.415 (6,1 µs)** |
-| `GET /json` | 5.765 (184 µs) | 120.489 (16,5 µs) | 165.988 (11,9 µs) | 248.987 (7,9 µs) | **313.438 (5,9 µs)** |
-| `GET /json` enviado por un navegador (12 cabeceras) | 5.627 (188 µs) | 92.041 (21,7 µs) | 131.710 (15,0 µs) | 179.505 (10,9 µs) | **290.478 (6,8 µs)** |
-| `GET /users/:id` (parámetro + JSON) | 5.627 (187 µs) | 98.486 (20,1 µs) | 151.303 (13,1 µs) | 209.173 (9,4 µs) | **304.323 (6,2 µs)** |
-| `POST /echo` (lee y devuelve JSON) | 4.538 (235 µs) | 69.876 (28,4 µs) | 105.570 (18,8 µs) | 170.129 (11,7 µs) | **253.941 (7,6 µs)** |
-| `GET /` con pipelining ×16 | 8.352 (128 µs) | 724.059 (2,7 µs) | 213.678 (9,3 µs) | 1.272.510 (1,6 µs) | **2.781.541 (0,64 µs)** |
+| Escenario | axum 0.8 | actix-web 4 | **Vitesse** |
+|---|---:|---:|---:|
+| `GET /` (texto) | 104.439 (18,8 µs) | 174.475 (11,0 µs) | **175.956 (10,1 µs)** |
+| `GET /json` | 101.206 (19,3 µs) | 152.498 (12,6 µs) | **173.191 (10,4 µs)** |
+| `GET /json` enviado por un navegador (12 cabeceras) | 86.681 (22,7 µs) | 138.917 (14,1 µs) | **165.337 (11,0 µs)** |
+| `GET /users/:id` (parámetro + JSON) | 96.321 (20,1 µs) | 152.877 (12,8 µs) | **178.731 (10,0 µs)** |
+| `POST /echo` (lee y devuelve JSON) | 81.171 (24,4 µs) | 115.069 (17,1 µs) | **171.438 (10,8 µs)** |
+| `GET /` con pipelining ×16 | 171.985 (11,5 µs) | 983.771 (2,0 µs) | **1.770.173 (0,97 µs)** |
 
 - **Frente a actix-web**, el framework de Rust con fama de ser el más
-  rápido: hasta un **+62 %** de rendimiento con una petición real de
-  navegador, del +45 al +49 % con parámetros o un cuerpo JSON, **2,2 veces
-  más** con pipelining y entre un 15 y un 59 % menos de CPU por petición.
-- **Frente a axum**: de 1,7 a 2,4 veces más peticiones por segundo, la mitad
-  de CPU por petición y 13 veces más con pipelining.
-- **Frente a Drogon (C++)**: de 1,4 a 3,8 veces más rápido.
-- **Frente a Express**: unas 50 veces más rápido.
+  rápido: un +0,8 % en `GET /`, donde ambos chocan con el suelo del kernel,
+  un +13,6 % en `GET /json`, un +19 % con una petición real de navegador, un
+  +16,9 % con un parámetro, un **+49 %** en el eco JSON, **1,8 veces más**
+  con pipelining y entre un 8 y un 52 % menos de CPU por petición.
+- **Frente a axum**: de 1,7 a 2,1 veces más peticiones por segundo, alrededor
+  de la mitad de CPU por petición y 10 veces más con pipelining.
+- **Frente a Drogon (C++) y Express**: se midieron en una sesión anterior, en
+  otra máquina, antes del motor por hilo. Vitesse era entonces de 1,4 a 3,8
+  veces más rápido que Drogon y unas 50 veces más rápido que Express.
 - **En una aplicación real** (cabeceras de seguridad, CORS, registro de
   peticiones, compresión para los navegadores, archivos estáticos): una
   lista JSON comprimida se sirve **5,3 veces más rápido** que con la versión
@@ -86,30 +89,33 @@ servidor por cada petición (cuanto menos, mejor):
   en memoria ([detalles](docs/es/performance.md#y-en-una-aplicación-real)).
 
 **¿Por qué la diferencia con actix es menor en `GET /`?** En la petición más
-simple, todos los servidores rápidos chocan con el mismo suelo: unos 4,7 µs
-de trabajo del kernel por petición (lectura, escritura y, en la interfaz de
-loopback, el procesamiento de la recepción del lado del cliente, que se
-imputa al envío del servidor). Vitesse solo añade ~1,4 µs encima, actix
-~2,4 µs y axum ~7 µs. En cuanto la petición se parece a una real (cabeceras
-de navegador, parámetros, cuerpo JSON, pipelining), el código del framework
-marca la diferencia y la brecha se amplía. En producción, a través de una
-red real, la parte del trabajo del kernel del lado del servidor es menor,
-así que la ventaja de Vitesse se nota todavía más.
+simple, todos los servidores rápidos chocan con el mismo suelo: en esta
+máquina, unos 8 µs de trabajo del kernel por petición (lectura, escritura y,
+en la interfaz de loopback, el procesamiento de la recepción del lado del
+cliente, que se imputa al envío del servidor). Vitesse solo añade ~2 µs
+encima, actix ~3 µs y axum ~11 µs. En cuanto la petición se parece a una
+real (cabeceras de navegador, parámetros, cuerpo JSON, pipelining), el
+código del framework marca la diferencia y la brecha se amplía. En
+producción, a través de una red real, la parte del trabajo del kernel del
+lado del servidor es menor, así que la ventaja de Vitesse se nota todavía
+más.
 
-<sub>VM de 4 vCPU: servidor fijado en 2 núcleos, wrk
-en los otros 2, 128 conexiones keep-alive, 10 s por escenario, misma máquina
-y misma sesión para todos. Node 22.22 / Express 5.3.0, Drogon 1.9.13 (GCC 13,
-`-O3`), axum 0.8, actix-web 4.15, Rust 1.97, asignador del sistema en todos.
-Sin pipelining, los servidores más rápidos saturan wrk: el tiempo de CPU por
-petición, medido del lado del servidor, es entonces el juez más fiable. Las
-mediciones varían unos pocos puntos porcentuales de una ejecución a otra.
-Para reproducirlo:
+<sub>Medido el 3 de noviembre de 2026, en una sola sesión, en una VM de
+4 vCPU: servidor fijado en 2 núcleos, wrk en los otros 2, 128 conexiones
+keep-alive, 5 s por ejecución, mediana de 3 ejecuciones, un servidor detrás
+de otro. axum 0.8, actix-web 4.18, Rust 1.97; Vitesse con su asignador por
+defecto (mimalloc), axum y actix-web con el asignador del sistema. Esta VM es
+más lenta que la de las mediciones anteriores: compara las columnas entre
+sí, no con cifras más antiguas. Sin pipelining, los servidores más rápidos
+saturan wrk: el tiempo de CPU por petición, medido del lado del servidor, es
+entonces el juez más fiable. Las mediciones varían unos pocos puntos
+porcentuales de una ejecución a otra. Para reproducirlo:
 `cargo run --release --manifest-path bench/runner/Cargo.toml` (código de
-los servidores en `bench/`). El servidor Express, medido en la misma sesión,
-se retiró después del repositorio para que el proyecto siga siendo 100 %
-Rust, sin JavaScript: sigue en el historial de git
-(`git show 484eed3:bench/express/server.js`), y la herramienta de benchmark
-compara ahora Drogon, axum, actix-web y Vitesse.</sub>
+los servidores en `bench/`). Drogon y Express no se pudieron volver a medir
+en esta máquina. El servidor Express se retiró después del repositorio para
+que el proyecto siga siendo 100 % Rust, sin JavaScript: sigue en el
+historial de git (`git show 484eed3:bench/express/server.js`), y la
+herramienta de benchmark compara ahora Drogon, axum, actix-web y Vitesse.</sub>
 
 ## Instalación
 

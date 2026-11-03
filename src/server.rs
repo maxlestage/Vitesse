@@ -14,6 +14,8 @@ use tokio::task::JoinSet;
 
 use crate::app::AppService;
 use crate::handler::{BoxFuture, panic_response};
+#[cfg(unix)]
+use crate::http1::Handoff;
 use crate::http1::{ServerState, serve_connection};
 use crate::request::Request;
 use crate::response::Response;
@@ -235,10 +237,22 @@ pub(crate) trait Listener: Send {
     fn next_connection(
         &self,
     ) -> impl Future<Output = io::Result<(Self::Io, Option<SocketAddr>)>> + Send;
+
+    /// A plain TCP connection, which the engine of the thread can serve
+    /// (see `http1::engine`); given back otherwise.
+    #[cfg(unix)]
+    fn into_tcp(io: Self::Io) -> Result<tokio::net::TcpStream, Self::Io> {
+        Err(io)
+    }
 }
 
 impl Listener for TcpListener {
     type Io = tokio::net::TcpStream;
+
+    #[cfg(unix)]
+    fn into_tcp(io: Self::Io) -> Result<tokio::net::TcpStream, Self::Io> {
+        Ok(io)
+    }
 
     async fn next_connection(&self) -> io::Result<(Self::Io, Option<SocketAddr>)> {
         let (stream, peer) = self.accept().await?;
@@ -267,19 +281,42 @@ pub(crate) async fn serve<L: Listener>(
     let state: &'static ServerState = Box::leak(Box::default());
     let mut connections = JoinSet::new();
     let mut shutdown = pin!(shutdown);
+    // Les connexions HTTP/1 en clair d'un runtime `current_thread` : servies
+    // par le moteur du thread, sans tâche par connexion (voir `http1::engine`).
+    let mut engine = Engine::for_this_thread(app, state);
+    let (period, idle_ticks, head_ticks) = app.config.ticks();
+    let mut tick = tokio::time::interval_at(tokio::time::Instant::now() + period, period);
+    tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
 
     loop {
-        if connections.len() >= app.config.max_connections {
+        if connections.len() + engine.len() >= app.config.max_connections {
             // Plein : on attend qu'une connexion se termine avant d'en accepter une autre.
             tokio::select! {
                 biased;
                 _ = &mut shutdown => break,
-                _ = connections.join_next() => continue,
+                // Vide, `join_next` répondrait aussitôt : la boucle tournerait à vide.
+                _ = connections.join_next(), if !connections.is_empty() => continue,
+                handoffs = engine.turn() => {
+                    spawn_all(&mut connections, handoffs);
+                    continue;
+                }
+                _ = tick.tick(), if engine.is_on() => {
+                    spawn_all(&mut connections, engine.tick(idle_ticks, head_ticks));
+                    continue;
+                }
             }
         }
         let (stream, peer) = tokio::select! {
             biased;
             _ = &mut shutdown => break,
+            handoffs = engine.turn() => {
+                spawn_all(&mut connections, handoffs);
+                continue;
+            }
+            _ = tick.tick(), if engine.is_on() => {
+                spawn_all(&mut connections, engine.tick(idle_ticks, head_ticks));
+                continue;
+            }
             accepted = listener.next_connection() => match accepted {
                 Ok(conn) => conn,
                 Err(e) => {
@@ -303,6 +340,18 @@ pub(crate) async fn serve<L: Listener>(
             while connections.try_join_next().is_some() {}
             continue;
         }
+        #[cfg(unix)]
+        let stream = if engine.is_on() {
+            match L::into_tcp(stream) {
+                Ok(tcp) => {
+                    engine.add(tcp, peer);
+                    continue;
+                }
+                Err(stream) => stream,
+            }
+        } else {
+            stream
+        };
         connections.spawn(serve_connection(stream, peer, false, app, state));
         // Libère les connexions terminées.
         while connections.try_join_next().is_some() {}
@@ -313,6 +362,15 @@ pub(crate) async fn serve<L: Listener>(
     drop(listener);
     state.stop();
     let deadline = tokio::time::Instant::now() + app.config.shutdown_timeout;
+    // Celles du moteur n'ont pas de requête en cours : seules les réponses
+    // qui partent encore ont jusqu'à l'échéance.
+    while !engine.close_idle() && tokio::time::Instant::now() < deadline {
+        tokio::select! {
+            handoffs = engine.turn() => spawn_all(&mut connections, handoffs),
+            () = tokio::time::sleep(Duration::from_millis(5)) => {}
+        }
+    }
+    drop(engine);
     while state.busy() > 0 && tokio::time::Instant::now() < deadline {
         tokio::time::sleep(Duration::from_millis(5)).await;
     }
@@ -321,6 +379,94 @@ pub(crate) async fn serve<L: Listener>(
     crate::middleware::log_lines::flush();
     Ok(())
 }
+
+/// The connections the engine of the thread hands over, each to a task.
+fn spawn_all(connections: &mut JoinSet<()>, handoffs: Vec<Handoff>) {
+    for handoff in handoffs {
+        #[cfg(unix)]
+        connections.spawn(handoff.serve());
+        #[cfg(not(unix))]
+        match handoff {}
+    }
+}
+
+/// The engine of the thread, when there is one (see `http1::engine`); on
+/// other systems, or in a multi-threaded runtime, or over TLS, none: every
+/// connection is a task.
+#[derive(Default)]
+struct Engine(#[cfg(unix)] Option<crate::http1::engine::Engine>);
+
+#[cfg(unix)]
+impl Engine {
+    fn for_this_thread(app: &'static AppService, state: &'static ServerState) -> Engine {
+        #[cfg(feature = "tls")]
+        if app.tls.is_some() {
+            return Engine(None);
+        }
+        Engine(crate::http1::engine::Engine::for_this_thread(app, state))
+    }
+
+    fn is_on(&self) -> bool {
+        self.0.is_some()
+    }
+
+    fn len(&self) -> usize {
+        self.0.as_ref().map_or(0, |e| e.len())
+    }
+
+    async fn turn(&mut self) -> Vec<Handoff> {
+        match &mut self.0 {
+            Some(engine) => engine.turn().await,
+            None => pending().await,
+        }
+    }
+
+    fn tick(&mut self, idle_ticks: u32, head_ticks: u32) -> Vec<Handoff> {
+        self.0
+            .as_mut()
+            .map_or_else(Vec::new, |e| e.tick(idle_ticks, head_ticks))
+    }
+
+    fn close_idle(&mut self) -> bool {
+        self.0.as_mut().is_none_or(|e| e.close_idle())
+    }
+
+    fn add(&mut self, tcp: tokio::net::TcpStream, peer: Option<SocketAddr>) {
+        if let Some(engine) = &mut self.0 {
+            engine.add(tcp, peer);
+        }
+    }
+}
+
+#[cfg(not(unix))]
+impl Engine {
+    fn for_this_thread(_: &'static AppService, _: &'static ServerState) -> Engine {
+        Engine()
+    }
+
+    fn is_on(&self) -> bool {
+        false
+    }
+
+    fn len(&self) -> usize {
+        0
+    }
+
+    async fn turn(&mut self) -> Vec<Handoff> {
+        pending().await
+    }
+
+    fn tick(&mut self, _: u32, _: u32) -> Vec<Handoff> {
+        Vec::new()
+    }
+
+    fn close_idle(&mut self) -> bool {
+        true
+    }
+}
+
+#[cfg(not(unix))]
+type Handoff = std::convert::Infallible;
 
 fn is_transient(e: &io::Error) -> bool {
     matches!(

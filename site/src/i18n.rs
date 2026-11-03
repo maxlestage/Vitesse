@@ -241,7 +241,7 @@ pub struct Texts {
 
 pub const FR: Texts = Texts {
     meta_title: "Vitesse — le framework web Rust à la Express",
-    meta_description: "Vitesse apporte l'API d'Express (app.get, req.params, res.json) au Rust natif, avec son propre moteur HTTP/1.1 : plus rapide qu'actix-web, axum et Drogon. Docs en français, anglais et espagnol.",
+    meta_description: "Vitesse apporte l'API d'Express (app.get, req.params, res.json) au Rust natif, avec son propre moteur HTTP/1.1 : plus rapide qu'actix-web et axum. Docs en français, anglais et espagnol.",
     docs_meta: "Documentation Vitesse",
     skip: "Aller au contenu",
     nav_links: [
@@ -255,13 +255,13 @@ pub const FR: Texts = Texts {
     brand_aria: "Vitesse, retour en haut",
     menu: "Menu",
     lang_aria: "Langue",
-    hero_badge: "Nouveau · 2,78 millions de requêtes/s sur 2 cœurs",
+    hero_badge: "Nouveau · un moteur par thread, 1,77 million de requêtes/s sur 2 cœurs",
     hero_title: ["Le confort d'Express.", "La vitesse de", "Rust."],
     hero_sub: ["Un framework web ", " pour Rust."],
     hero_words: ["natif", "minimaliste", "ultra-rapide", "sûr", "familier"],
     hero_lead: [
         "Vitesse reprend l'API que vous connaissez déjà — ",
-        " — et la propulse avec son propre moteur HTTP/1.1. Plus rapide qu'actix-web, axum et Drogon.",
+        " — et la propulse avec son propre moteur HTTP/1.1. Plus rapide qu'actix-web et axum.",
     ],
     hero_start: "Commencer",
     hero_perf: "Voir les performances",
@@ -270,7 +270,7 @@ pub const FR: Texts = Texts {
     marquee_aria: "Points forts",
     marquee: [
         "L'API d'Express",
-        "2,78 M req/s",
+        "1,77 M req/s",
         "Moteur HTTP/1.1 maison",
         "Zéro regex",
         "Un thread par cœur",
@@ -287,20 +287,20 @@ pub const FR: Texts = Texts {
         ),
         item(
             "plus rapide qu'actix-web",
-            "Avec une vraie requête de navigateur, et ×2,2 en pipeline.",
+            "Avec une vraie requête de navigateur, et ×1,8 en pipeline.",
         ),
         item(
             "de CPU par requête",
-            "Contre 7,1 µs pour actix-web et 11,7 µs pour axum.",
+            "Pour GET /users/:id, contre 12,8 µs pour actix-web et 20,1 µs pour axum.",
         ),
         item(
-            "plus rapide qu'Express",
-            "De 49 à 56 fois selon le scénario, sur le même matériel.",
+            "plus rapide qu'axum en pipeline",
+            "Et de 1,7 à 2,1 fois sans pipeline, avec deux fois moins de CPU.",
         ),
     ],
     bench_label: "Performances",
     bench_title: "Plus rapide qu'actix\u{2011}web. Bien plus rapide que le reste.",
-    bench_lead: "Mêmes routes, même machine, même session : Express, Drogon (C++), axum, actix-web et Vitesse face au même générateur de charge.",
+    bench_lead: "Mêmes routes, même machine, même session : axum, actix-web et Vitesse face au même générateur de charge, chaque serveur sur deux cœurs.",
     features_label: "Fonctionnalités",
     features_title: "Tout ce qu'Express sait faire. En Rust, sans compromis.",
     features_lead: "Un cœur volontairement petit, comme Express, et tout ce qu'il faut pour une vraie application.",
@@ -433,7 +433,7 @@ pub const FR: Texts = Texts {
 
 pub const EN: Texts = Texts {
     meta_title: "Vitesse — the Express-style web framework for Rust",
-    meta_description: "Vitesse brings the Express API (app.get, req.params, res.json) to native Rust, with its own HTTP/1.1 engine: faster than actix-web, axum and Drogon. Docs in English, French and Spanish.",
+    meta_description: "Vitesse brings the Express API (app.get, req.params, res.json) to native Rust, with its own HTTP/1.1 engine: faster than actix-web and axum. Docs in English, French and Spanish.",
     docs_meta: "Vitesse docs",
     skip: "Skip to content",
     nav_links: ["Performance", "Features", "From Express", "Get started"],
@@ -442,13 +442,13 @@ pub const EN: Texts = Texts {
     brand_aria: "Vitesse, back to top",
     menu: "Menu",
     lang_aria: "Language",
-    hero_badge: "New · 2.78 million requests/s on 2 cores",
+    hero_badge: "New · an engine per thread, 1.77 million requests/s on 2 cores",
     hero_title: ["The comfort of Express.", "The speed of", "Rust."],
     hero_sub: ["A ", " web framework for Rust."],
     hero_words: ["native", "minimalist", "blazing-fast", "safe", "familiar"],
     hero_lead: [
         "Vitesse takes the API you already know — ",
-        " — and powers it with its own HTTP/1.1 engine. Faster than actix-web, axum and Drogon.",
+        " — and powers it with its own HTTP/1.1 engine. Faster than actix-web and axum.",
     ],
     hero_start: "Get started",
     hero_perf: "See the benchmarks",
@@ -457,7 +457,7 @@ pub const EN: Texts = Texts {
     marquee_aria: "Highlights",
     marquee: [
         "The Express API",
-        "2.78M req/s",
+        "1.77M req/s",
         "Home-grown HTTP/1.1 engine",
         "Zero regex",
         "One thread per core",
@@ -474,20 +474,20 @@ pub const EN: Texts = Texts {
         ),
         item(
             "faster than actix-web",
-            "With a real browser request, and ×2.2 when pipelined.",
+            "With a real browser request, and ×1.8 when pipelined.",
         ),
         item(
             "of CPU per request",
-            "Versus 7.1 µs for actix-web and 11.7 µs for axum.",
+            "For GET /users/:id, versus 12.8 µs for actix-web and 20.1 µs for axum.",
         ),
         item(
-            "faster than Express",
-            "49 to 56 times depending on the scenario, on the same hardware.",
+            "faster than axum when pipelined",
+            "And 1.7 to 2.1 times without pipelining, with half the CPU.",
         ),
     ],
     bench_label: "Performance",
     bench_title: "Faster than actix\u{2011}web. Far faster than the rest.",
-    bench_lead: "Same routes, same machine, same session: Express, Drogon (C++), axum, actix-web and Vitesse against the same load generator.",
+    bench_lead: "Same routes, same machine, same session: axum, actix-web and Vitesse against the same load generator, each server on two cores.",
     features_label: "Features",
     features_title: "Everything Express can do. In Rust, without compromise.",
     features_lead: "A deliberately small core, like Express, and everything a real application needs.",
@@ -620,7 +620,7 @@ pub const EN: Texts = Texts {
 
 pub const ES: Texts = Texts {
     meta_title: "Vitesse — el framework web de Rust al estilo Express",
-    meta_description: "Vitesse lleva la API de Express (app.get, req.params, res.json) a Rust nativo, con su propio motor HTTP/1.1: más rápido que actix-web, axum y Drogon. Documentación en español, inglés y francés.",
+    meta_description: "Vitesse lleva la API de Express (app.get, req.params, res.json) a Rust nativo, con su propio motor HTTP/1.1: más rápido que actix-web y axum. Documentación en español, inglés y francés.",
     docs_meta: "Documentación de Vitesse",
     skip: "Ir al contenido",
     nav_links: ["Rendimiento", "Funciones", "Desde Express", "Empezar"],
@@ -629,7 +629,7 @@ pub const ES: Texts = Texts {
     brand_aria: "Vitesse, volver arriba",
     menu: "Menú",
     lang_aria: "Idioma",
-    hero_badge: "Novedad · 2,78 millones de peticiones/s en 2 núcleos",
+    hero_badge: "Novedad · un motor por hilo, 1,77 millones de peticiones/s en 2 núcleos",
     hero_title: ["La comodidad de Express.", "La velocidad de", "Rust."],
     hero_sub: ["Un framework web ", " para Rust."],
     hero_words: [
@@ -641,7 +641,7 @@ pub const ES: Texts = Texts {
     ],
     hero_lead: [
         "Vitesse retoma la API que ya conoces — ",
-        " — y la impulsa con su propio motor HTTP/1.1. Más rápido que actix-web, axum y Drogon.",
+        " — y la impulsa con su propio motor HTTP/1.1. Más rápido que actix-web y axum.",
     ],
     hero_start: "Empezar",
     hero_perf: "Ver el rendimiento",
@@ -650,7 +650,7 @@ pub const ES: Texts = Texts {
     marquee_aria: "Puntos fuertes",
     marquee: [
         "La API de Express",
-        "2,78 M pet/s",
+        "1,77 M pet/s",
         "Motor HTTP/1.1 propio",
         "Cero regex",
         "Un hilo por núcleo",
@@ -667,20 +667,20 @@ pub const ES: Texts = Texts {
         ),
         item(
             "más rápido que actix-web",
-            "Con una petición real de navegador, y ×2,2 en pipeline.",
+            "Con una petición real de navegador, y ×1,8 en pipeline.",
         ),
         item(
             "de CPU por petición",
-            "Frente a 7,1 µs de actix-web y 11,7 µs de axum.",
+            "Con GET /users/:id, frente a 12,8 µs de actix-web y 20,1 µs de axum.",
         ),
         item(
-            "más rápido que Express",
-            "De 49 a 56 veces según el escenario, en el mismo hardware.",
+            "más rápido que axum en pipeline",
+            "Y de 1,7 a 2,1 veces sin pipeline, con la mitad de CPU.",
         ),
     ],
     bench_label: "Rendimiento",
     bench_title: "Más rápido que actix\u{2011}web. Mucho más rápido que el resto.",
-    bench_lead: "Mismas rutas, misma máquina, misma sesión: Express, Drogon (C++), axum, actix-web y Vitesse frente al mismo generador de carga.",
+    bench_lead: "Mismas rutas, misma máquina, misma sesión: axum, actix-web y Vitesse frente al mismo generador de carga, cada servidor en dos núcleos.",
     features_label: "Funcionalidades",
     features_title: "Todo lo que hace Express. En Rust, sin concesiones.",
     features_lead: "Un núcleo deliberadamente pequeño, como Express, y todo lo necesario para una aplicación real.",

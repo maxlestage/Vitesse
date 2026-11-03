@@ -356,6 +356,10 @@ mod tests {
             .rate_limit(2, Duration::from_millis(100))
             .start();
         let starts = Arc::new(Mutex::new(Vec::new()));
+        // The window opens when the queue lets the first job start, which a job
+        // records later than that on a busy machine: measured from before the
+        // dispatch, the wait holds whatever the load.
+        let dispatched = std::time::Instant::now();
         for _ in 0..3 {
             let starts = starts.clone();
             queue.dispatch(move || {
@@ -371,7 +375,7 @@ mod tests {
         let starts = starts.lock().unwrap();
         assert_eq!(starts.len(), 3);
         // The third start waited for the window of the first.
-        assert!(starts[2].duration_since(starts[0]) >= Duration::from_millis(90));
+        assert!(starts[2].duration_since(dispatched) >= Duration::from_millis(100));
         assert!(begin.elapsed() >= Duration::from_millis(30));
     }
 }

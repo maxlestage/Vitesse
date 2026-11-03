@@ -370,6 +370,7 @@ pub(crate) async fn serve<L: Listener>(
             () = tokio::time::sleep(Duration::from_millis(5)) => {}
         }
     }
+    #[cfg(unix)]
     drop(engine);
     while state.busy() > 0 && tokio::time::Instant::now() < deadline {
         tokio::time::sleep(Duration::from_millis(5)).await;
@@ -381,13 +382,17 @@ pub(crate) async fn serve<L: Listener>(
 }
 
 /// The connections the engine of the thread hands over, each to a task.
+#[cfg(unix)]
 fn spawn_all(connections: &mut JoinSet<()>, handoffs: Vec<Handoff>) {
     for handoff in handoffs {
-        #[cfg(unix)]
         connections.spawn(handoff.serve());
-        #[cfg(not(unix))]
-        match handoff {}
     }
+}
+
+/// Without an engine, there is nothing to hand over.
+#[cfg(not(unix))]
+fn spawn_all(_: &mut JoinSet<()>, handoffs: Vec<Handoff>) {
+    debug_assert!(handoffs.is_empty());
 }
 
 /// The engine of the thread, when there is one (see `http1::engine`); on

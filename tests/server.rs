@@ -161,9 +161,7 @@ async fn the_engine_hands_connections_over_in_order() {
         .await
         .unwrap();
     tokio::time::sleep(Duration::from_millis(50)).await;
-    tcp.write_all(b"world")
-        .await
-        .unwrap();
+    tcp.write_all(b"world").await.unwrap();
     tcp.write_all(b"GET /big HTTP/1.1\r\nhost: x\r\n\r\nGET / HTTP/1.1\r\nhost: x\r\nconnection: close\r\n\r\n")
         .await
         .unwrap();

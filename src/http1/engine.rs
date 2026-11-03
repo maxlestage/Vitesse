@@ -23,6 +23,10 @@ use super::*;
 
 /// Events read from the epoll at a time.
 const EVENTS: usize = 1024;
+/// How long the engine keeps looking for events after a busy turn, before
+/// letting the thread sleep: more requests are usually on their way, and
+/// waking a sleeping thread costs more than these looks (as Facile does).
+const SPIN: Duration = Duration::from_micros(15);
 
 /// A connection of the engine, and how long it has been quiet.
 struct Slot {
@@ -133,7 +137,7 @@ impl Engine {
         let inner = &mut self.inner;
         let poll = guard.get_inner_mut();
         let (handoffs, drained) =
-            std::future::poll_fn(|cx| Poll::Ready(inner.drain(poll, cx))).await;
+            std::future::poll_fn(|cx| Poll::Ready(inner.drain(poll, cx, true))).await;
         if drained {
             guard.clear_ready();
         }
@@ -194,9 +198,20 @@ impl Engine {
 
 impl Inner {
     /// Serves every connection ready. Also says whether the epoll was emptied.
-    fn drain(&mut self, poll: &mut mio::Poll, cx: &mut Context<'_>) -> (Vec<Handoff>, bool) {
+    ///
+    /// After a busy turn, with `spin`, it looks again for [`SPIN`]: work that
+    /// arrives then is served, and the epoll is said not emptied, so that
+    /// tokio comes back right after its other tasks.
+    fn drain(
+        &mut self,
+        poll: &mut mio::Poll,
+        cx: &mut Context<'_>,
+        spin: bool,
+    ) -> (Vec<Handoff>, bool) {
         let mut handoffs = Vec::new();
         let mut ready = Vec::new();
+        let mut busy = false;
+        let mut spin_from = None;
         loop {
             match poll.poll(&mut self.events, Some(Duration::ZERO)) {
                 Ok(()) => {}
@@ -206,12 +221,26 @@ impl Inner {
             ready.clear();
             ready.extend(self.events.iter().map(|event| event.token().0));
             if ready.is_empty() {
-                return (handoffs, true);
+                if !spin || !busy {
+                    return (handoffs, true);
+                }
+                let start = *spin_from.get_or_insert_with(std::time::Instant::now);
+                if start.elapsed() >= SPIN {
+                    return (handoffs, true);
+                }
+                std::hint::spin_loop();
+                continue;
             }
             for &index in &ready {
                 self.serve(poll.registry(), index, cx, &mut handoffs);
             }
-            if ready.len() < EVENTS {
+            if spin_from.is_some() {
+                // Du travail arrivé pendant l'attente : tokio reprend la main
+                // pour ses autres tâches, et revient aussitôt.
+                return (handoffs, false);
+            }
+            busy = true;
+            if ready.len() < EVENTS && !spin {
                 return (handoffs, true);
             }
         }

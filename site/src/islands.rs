@@ -419,9 +419,9 @@ mod tests {
     fn the_server_renders_the_final_state() {
         let bench = active::island("bench", "en", bench).render();
         // Les barres sont pleines et les compteurs à leur valeur.
-        assert!(bench.contains("165,337"), "{bench}");
+        assert!(bench.contains("349,424"), "{bench}");
         assert!(bench.contains("width:100.00%"));
-        assert!(bench.contains("×1.19 vs actix-web"));
+        assert!(bench.contains("×1.36 vs actix-web"));
         assert_eq!(bench.matches("role=\"tab\"").count(), SCENARIOS.len());
         let compare = active::island("compare", "fr", compare).render();
         // Tout le code Vitesse, sans curseur.

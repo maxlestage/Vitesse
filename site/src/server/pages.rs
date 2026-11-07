@@ -772,10 +772,10 @@ fn marquee(t: &Texts) -> Element {
 
 fn stats(lang: Lang, t: &Texts) -> Element {
     let values: [(f64, usize, &str, &str); 4] = [
-        (1.77, 2, "", " M"),
-        (1.19, 2, "×", ""),
-        (10.0, 1, "", " µs"),
-        (10.0, 0, "×", ""),
+        (3.29, 2, "", " M"),
+        (1.36, 2, "×", ""),
+        (5.2, 1, "", " µs"),
+        (9.0, 0, "×", ""),
     ];
     section()
         .class("section")

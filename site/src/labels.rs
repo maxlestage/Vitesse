@@ -91,7 +91,7 @@ const FR: Labels = Labels {
         item("Hello World", "GET / : la réponse la plus simple possible"),
     ],
     bench_vs: "face à",
-    bench_note: "VM 4 vCPU : serveur sur 2 cœurs, wrk sur les 2 autres, 128 connexions keep-alive, 10 s par scénario. À droite, le temps CPU consommé par le serveur pour chaque requête. ",
+    bench_note: "VM 4 vCPU : serveur sur 2 cœurs, wrk sur les 2 autres, 128 connexions keep-alive, médiane de trois mesures de 5 s par scénario (novembre 2026). À droite, le temps CPU consommé par le serveur pour chaque requête. ",
     bench_reproduce: "Reproduire le benchmark",
     examples: [
         Example {
@@ -168,7 +168,7 @@ const EN: Labels = Labels {
         item("Hello World", "GET /: the simplest possible response"),
     ],
     bench_vs: "vs",
-    bench_note: "4 vCPU VM: server on 2 cores, wrk on the other 2, 128 keep-alive connections, 10 s per scenario. On the right, the CPU time the server spends on each request. ",
+    bench_note: "4 vCPU VM: server on 2 cores, wrk on the other 2, 128 keep-alive connections, median of three 5 s runs per scenario (November 2026). On the right, the CPU time the server spends on each request. ",
     bench_reproduce: "Reproduce the benchmark",
     examples: [
         Example {
@@ -242,7 +242,7 @@ const ES: Labels = Labels {
         item("Hello World", "GET /: la respuesta más simple posible"),
     ],
     bench_vs: "frente a",
-    bench_note: "VM de 4 vCPU: servidor en 2 núcleos, wrk en los otros 2, 128 conexiones keep-alive, 10 s por escenario. A la derecha, el tiempo de CPU que el servidor dedica a cada petición. ",
+    bench_note: "VM de 4 vCPU: servidor en 2 núcleos, wrk en los otros 2, 128 conexiones keep-alive, mediana de tres medidas de 5 s por escenario (noviembre de 2026). A la derecha, el tiempo de CPU que el servidor dedica a cada petición. ",
     bench_reproduce: "Reproducir el benchmark",
     examples: [
         Example {

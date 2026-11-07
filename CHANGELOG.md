@@ -8,6 +8,12 @@ project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- **Benchmark measured again** (November 7, 2026, on a faster machine):
+  3.29 million requests per second pipelined on two cores, twice actix-web;
+  +36% with a real browser request, +61% on the JSON echo, 6 to 58% less CPU
+  per request; with 2,048 connections, 3.0 million against 1.27 million. The
+  engine reads the clock for the `date` header once per batch of events
+  instead of once per connection (−2% CPU per request on `GET /json`).
 - **An engine per thread**: with one thread per core (the default on
   Linux) and in any `current_thread` runtime, the plain HTTP/1.1
   connections of a thread are watched by an epoll (kqueue) of their own.

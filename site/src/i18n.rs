@@ -255,7 +255,7 @@ pub const FR: Texts = Texts {
     brand_aria: "Vitesse, retour en haut",
     menu: "Menu",
     lang_aria: "Langue",
-    hero_badge: "Nouveau · un moteur par thread, 1,77 million de requêtes/s sur 2 cœurs",
+    hero_badge: "Nouveau · un moteur par thread, 3,29 millions de requêtes/s sur 2 cœurs",
     hero_title: ["Le confort d'Express.", "La vitesse de", "Rust."],
     hero_sub: ["Un framework web ", " pour Rust."],
     hero_words: ["natif", "minimaliste", "ultra-rapide", "sûr", "familier"],
@@ -270,7 +270,7 @@ pub const FR: Texts = Texts {
     marquee_aria: "Points forts",
     marquee: [
         "L'API d'Express",
-        "1,77 M req/s",
+        "3,29 M req/s",
         "Moteur HTTP/1.1 maison",
         "Zéro regex",
         "Un thread par cœur",
@@ -287,15 +287,15 @@ pub const FR: Texts = Texts {
         ),
         item(
             "plus rapide qu'actix-web",
-            "Avec une vraie requête de navigateur, et ×1,8 en pipeline.",
+            "Avec une vraie requête de navigateur, et ×2 en pipeline.",
         ),
         item(
             "de CPU par requête",
-            "Pour GET /users/:id, contre 12,8 µs pour actix-web et 20,1 µs pour axum.",
+            "Pour GET /users/:id, contre 6,4 µs pour actix-web et 9,6 µs pour axum.",
         ),
         item(
             "plus rapide qu'axum en pipeline",
-            "Et de 1,7 à 2,1 fois sans pipeline, avec deux fois moins de CPU.",
+            "Et de 1,5 à 2,2 fois sans pipeline, avec 1,7 à 2,3 fois moins de CPU.",
         ),
     ],
     bench_label: "Performances",
@@ -442,7 +442,7 @@ pub const EN: Texts = Texts {
     brand_aria: "Vitesse, back to top",
     menu: "Menu",
     lang_aria: "Language",
-    hero_badge: "New · an engine per thread, 1.77 million requests/s on 2 cores",
+    hero_badge: "New · an engine per thread, 3.29 million requests/s on 2 cores",
     hero_title: ["The comfort of Express.", "The speed of", "Rust."],
     hero_sub: ["A ", " web framework for Rust."],
     hero_words: ["native", "minimalist", "blazing-fast", "safe", "familiar"],
@@ -457,7 +457,7 @@ pub const EN: Texts = Texts {
     marquee_aria: "Highlights",
     marquee: [
         "The Express API",
-        "1.77M req/s",
+        "3.29M req/s",
         "Home-grown HTTP/1.1 engine",
         "Zero regex",
         "One thread per core",
@@ -474,15 +474,15 @@ pub const EN: Texts = Texts {
         ),
         item(
             "faster than actix-web",
-            "With a real browser request, and ×1.8 when pipelined.",
+            "With a real browser request, and ×2 when pipelined.",
         ),
         item(
             "of CPU per request",
-            "For GET /users/:id, versus 12.8 µs for actix-web and 20.1 µs for axum.",
+            "For GET /users/:id, versus 6.4 µs for actix-web and 9.6 µs for axum.",
         ),
         item(
             "faster than axum when pipelined",
-            "And 1.7 to 2.1 times without pipelining, with half the CPU.",
+            "And 1.5 to 2.2 times without pipelining, with 1.7 to 2.3 times less CPU.",
         ),
     ],
     bench_label: "Performance",
@@ -629,7 +629,7 @@ pub const ES: Texts = Texts {
     brand_aria: "Vitesse, volver arriba",
     menu: "Menú",
     lang_aria: "Idioma",
-    hero_badge: "Novedad · un motor por hilo, 1,77 millones de peticiones/s en 2 núcleos",
+    hero_badge: "Novedad · un motor por hilo, 3,29 millones de peticiones/s en 2 núcleos",
     hero_title: ["La comodidad de Express.", "La velocidad de", "Rust."],
     hero_sub: ["Un framework web ", " para Rust."],
     hero_words: [
@@ -650,7 +650,7 @@ pub const ES: Texts = Texts {
     marquee_aria: "Puntos fuertes",
     marquee: [
         "La API de Express",
-        "1,77 M pet/s",
+        "3,29 M pet/s",
         "Motor HTTP/1.1 propio",
         "Cero regex",
         "Un hilo por núcleo",
@@ -667,15 +667,15 @@ pub const ES: Texts = Texts {
         ),
         item(
             "más rápido que actix-web",
-            "Con una petición real de navegador, y ×1,8 en pipeline.",
+            "Con una petición real de navegador, y ×2 en pipeline.",
         ),
         item(
             "de CPU por petición",
-            "Con GET /users/:id, frente a 12,8 µs de actix-web y 20,1 µs de axum.",
+            "Con GET /users/:id, frente a 6,4 µs de actix-web y 9,6 µs de axum.",
         ),
         item(
             "más rápido que axum en pipeline",
-            "Y de 1,7 a 2,1 veces sin pipeline, con la mitad de CPU.",
+            "Y de 1,5 a 2,2 veces sin pipeline, con 1,7 a 2,3 veces menos CPU.",
         ),
     ],
     bench_label: "Rendimiento",

@@ -231,6 +231,8 @@ impl Inner {
                 std::hint::spin_loop();
                 continue;
             }
+            // The `date` header of this batch: one look at the clock for all of it.
+            date::refresh();
             for &index in &ready {
                 self.serve(poll.registry(), index, cx, &mut handoffs);
             }
@@ -376,7 +378,6 @@ impl Inner {
 /// at once, like the inner loop of [`Conn::run`]. `quiet` starts again at
 /// each request.
 fn process(conn: &mut Conn<TcpStream>, quiet: &mut u32, cx: &mut Context<'_>) -> Step {
-    date::refresh();
     let mut busy = None;
     loop {
         let head = match parse_head(&conn.rbuf, &mut conn.raw) {

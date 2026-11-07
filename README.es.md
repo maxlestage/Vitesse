@@ -50,8 +50,8 @@ fn main() -> std::io::Result<()> {
   una cola de tareas con reintentos y límite de ritmo, un planificador, una
   caché de respuestas, grupos de middlewares con nombre, rutas tipadas y
   aserciones de prueba con tarro de cookies.
-- **Rápido**: más rápido que actix-web, axum y Drogon en el benchmark de
-  abajo.
+- **Rápido**: hasta el doble de rápido que actix-web y nueve veces más que
+  axum en el benchmark de abajo, con menos CPU por petición.
 - **Robusto**: los pánicos se convierten en respuestas `500`, los límites de
   tamaño y los tiempos de espera vienen integrados, y el servidor se apaga de
   forma ordenada.
@@ -64,20 +64,23 @@ por hilo de Vitesse:
 
 | Escenario | axum 0.8 | actix-web 4 | **Vitesse** |
 |---|---:|---:|---:|
-| `GET /` (texto) | 104.439 (18,8 µs) | 174.475 (11,0 µs) | **175.956 (10,1 µs)** |
-| `GET /json` | 101.206 (19,3 µs) | 152.498 (12,6 µs) | **173.191 (10,4 µs)** |
-| `GET /json` enviado por un navegador (12 cabeceras) | 86.681 (22,7 µs) | 138.917 (14,1 µs) | **165.337 (11,0 µs)** |
-| `GET /users/:id` (parámetro + JSON) | 96.321 (20,1 µs) | 152.877 (12,8 µs) | **178.731 (10,0 µs)** |
-| `POST /echo` (lee y devuelve JSON) | 81.171 (24,4 µs) | 115.069 (17,1 µs) | **171.438 (10,8 µs)** |
-| `GET /` con pipelining ×16 | 171.985 (11,5 µs) | 983.771 (2,0 µs) | **1.770.173 (0,97 µs)** |
+| `GET /` (texto) | 233.459 (8,4 µs) | **359.229 (5,4 µs)** | 347.836 (**5,1 µs**) |
+| `GET /json` | 215.706 (9,1 µs) | 346.652 (5,6 µs) | **350.972 (5,1 µs)** |
+| `GET /json` enviado por un navegador (12 cabeceras) | 179.989 (11,0 µs) | 256.421 (7,7 µs) | **349.424 (5,3 µs)** |
+| `GET /users/:id` (parámetro + JSON) | 204.665 (9,6 µs) | 304.271 (6,4 µs) | **359.307 (5,2 µs)** |
+| `POST /echo` (lee y devuelve JSON) | 164.843 (12,0 µs) | 227.272 (8,7 µs) | **365.321 (5,3 µs)** |
+| `GET /` con pipelining ×16 | 366.673 (5,4 µs) | 1.612.135 (1,2 µs) | **3.288.486 (0,51 µs)** |
 
 - **Frente a actix-web**, el framework de Rust con fama de ser el más
-  rápido: un +0,8 % en `GET /`, donde ambos chocan con el suelo del kernel,
-  un +13,6 % en `GET /json`, un +19 % con una petición real de navegador, un
-  +16,9 % con un parámetro, un **+49 %** en el eco JSON, **1,8 veces más**
-  con pipelining y entre un 8 y un 52 % menos de CPU por petición.
-- **Frente a axum**: de 1,7 a 2,1 veces más peticiones por segundo, alrededor
-  de la mitad de CPU por petición y 10 veces más con pipelining.
+  rápido: un +1,2 % en `GET /json` y un −3 % en `GET /`, donde ambos están
+  frenados por el kernel y el generador de carga (Vitesse consume aun así un
+  6 % menos de CPU), un **+36 %** con una petición real de navegador, un
+  **+18 %** con un parámetro, un **+61 %** en el eco JSON, **el doble** con
+  pipelining y entre un 6 y un 58 % menos de CPU por petición. Con 2.048
+  conexiones, con pipelining: 3,0 millones de peticiones por segundo frente
+  a 1,27 millones (×2,4).
+- **Frente a axum**: de 1,5 a 2,2 veces más peticiones por segundo, de 1,7 a
+  2,3 veces menos CPU por petición y 9 veces más con pipelining.
 - **Frente a Drogon (C++) y Express**: se midieron en una sesión anterior, en
   otra máquina, antes del motor por hilo. Vitesse era entonces de 1,4 a 3,8
   veces más rápido que Drogon y unas 50 veces más rápido que Express.
@@ -88,24 +91,24 @@ por hilo de Vitesse:
   rápido**, ya que un archivo estático se comprime una sola vez y se guarda
   en memoria ([detalles](docs/es/performance.md#y-en-una-aplicación-real)).
 
-**¿Por qué la diferencia con actix es menor en `GET /`?** En la petición más
-simple, todos los servidores rápidos chocan con el mismo suelo: en esta
-máquina, unos 8 µs de trabajo del kernel por petición (lectura, escritura y,
-en la interfaz de loopback, el procesamiento de la recepción del lado del
-cliente, que se imputa al envío del servidor). Vitesse solo añade ~2 µs
-encima, actix ~3 µs y axum ~11 µs. En cuanto la petición se parece a una
-real (cabeceras de navegador, parámetros, cuerpo JSON, pipelining), el
-código del framework marca la diferencia y la brecha se amplía. En
-producción, a través de una red real, la parte del trabajo del kernel del
-lado del servidor es menor, así que la ventaja de Vitesse se nota todavía
-más.
+**¿Por qué la diferencia con actix es pequeña en `GET /`?** En la petición
+más simple, la mayor parte de los ~5 µs que cuesta una petición es trabajo
+del kernel (lectura, escritura y, en la interfaz de loopback, la recepción
+del lado del cliente imputada al envío del servidor), y el propio generador
+de carga se queda sin aliento: ninguno de los dos servidores usa sus dos
+núcleos por completo. El código del framework apenas pesa, y ambos chocan
+con el mismo suelo. En cuanto la petición se parece a una real (cabeceras de
+navegador, parámetros, cuerpo JSON, pipelining), ese código marca la
+diferencia y la brecha se amplía. En producción, a través de una red real,
+la parte del trabajo del kernel del lado del servidor es menor, así que la
+ventaja de Vitesse se nota todavía más.
 
-<sub>Medido el 3 de noviembre de 2026, en una sola sesión, en una VM de
+<sub>Medido el 7 de noviembre de 2026, en una sola sesión, en una VM de
 4 vCPU: servidor fijado en 2 núcleos, wrk en los otros 2, 128 conexiones
 keep-alive, 5 s por ejecución, mediana de 3 ejecuciones, un servidor detrás
 de otro. axum 0.8, actix-web 4.18, Rust 1.97; Vitesse con su asignador por
 defecto (mimalloc), axum y actix-web con el asignador del sistema. Esta VM es
-más lenta que la de las mediciones anteriores: compara las columnas entre
+más rápida que la de las mediciones anteriores: compara las columnas entre
 sí, no con cifras más antiguas. Sin pipelining, los servidores más rápidos
 saturan wrk: el tiempo de CPU por petición, medido del lado del servidor, es
 entonces el juez más fiable. Las mediciones varían unos pocos puntos

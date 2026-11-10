@@ -401,14 +401,13 @@ impl Request {
         // En HTTP/2 et HTTP/3, l'hôte est dans `:authority` (l'URI) : on le
         // remet dans `Host` pour que `req.header("host")` fonctionne comme en
         // HTTP/1.1.
-        if !parts.headers.contains_key(header::HOST) {
-            if let Some(host) = parts
+        if !parts.headers.contains_key(header::HOST)
+            && let Some(host) = parts
                 .uri
                 .authority()
                 .and_then(|a| HeaderValue::from_str(a.as_str()).ok())
-            {
-                parts.headers.insert(header::HOST, host);
-            }
+        {
+            parts.headers.insert(header::HOST, host);
         }
         let mut inner = Inner::take(shared);
         inner.method = parts.method;
@@ -694,10 +693,10 @@ impl Request {
     /// Express 5): `Host`, the authority of an HTTP/2 or HTTP/3 request, or,
     /// behind a trusted proxy, `X-Forwarded-Host`.
     pub fn host(&self) -> Option<&str> {
-        if self.trusts_proxy() {
-            if let Some(host) = self.forwarded("x-forwarded-host") {
-                return Some(host);
-            }
+        if self.trusts_proxy()
+            && let Some(host) = self.forwarded("x-forwarded-host")
+        {
+            return Some(host);
         }
         match self.header(header::HOST) {
             Some(host) => Some(host),
@@ -739,15 +738,15 @@ impl Request {
     pub fn cookie(&self, name: &str) -> Option<&str> {
         for s in self.header_all("cookie") {
             for pair in s.split(';') {
-                if let Some((k, v)) = pair.split_once('=') {
-                    if k.trim() == name {
-                        let v = v.trim();
-                        return Some(
-                            v.strip_prefix('"')
-                                .and_then(|v| v.strip_suffix('"'))
-                                .unwrap_or(v),
-                        );
-                    }
+                if let Some((k, v)) = pair.split_once('=')
+                    && k.trim() == name
+                {
+                    let v = v.trim();
+                    return Some(
+                        v.strip_prefix('"')
+                            .and_then(|v| v.strip_suffix('"'))
+                            .unwrap_or(v),
+                    );
                 }
             }
         }

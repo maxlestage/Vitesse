@@ -127,7 +127,7 @@ cargo add vitesse --git https://github.com/maxlestage/Vitesse
 cargo add serde --features derive   # pour vos structures JSON
 ```
 
-Vitesse demande Rust 1.85 ou plus récent. Pas besoin de `#[tokio::main]` :
+Vitesse demande Rust 1.88 ou plus récent. Pas besoin de `#[tokio::main]` :
 `app.run(port)` crée le runtime, utilise tous les cœurs et s'arrête
 proprement sur `Ctrl+C` / `SIGTERM`. Si vous avez déjà un runtime tokio,
 utilisez plutôt `app.listen(port).await`.
@@ -393,7 +393,7 @@ pour le navigateur et vérifie qu'il s'exporte toujours en fichiers statiques.
 
 ```sh
 rustup target add wasm32-unknown-unknown
-cargo install wasm-bindgen-cli --version 0.2.129   # la version de site/Cargo.lock
+cargo install wasm-bindgen-cli --version 0.2.130   # la version de site/Cargo.lock
 cd site
 # 1. Le code du navigateur (îlots et animations) → site/pkg
 cargo build --lib --target wasm32-unknown-unknown --profile wasm-release

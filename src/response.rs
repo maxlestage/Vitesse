@@ -345,12 +345,11 @@ impl Response {
 
     /// Logs the cause of an unhandled 5xx error.
     pub(crate) fn log_server_error(&self) {
-        if let Some(err) = &self.error {
-            if err.status().is_server_error() {
-                if let Some(source) = err.source() {
-                    eprintln!("[vitesse] error {}: {source}", err.status().as_u16());
-                }
-            }
+        if let Some(err) = &self.error
+            && err.status().is_server_error()
+            && let Some(source) = err.source()
+        {
+            eprintln!("[vitesse] error {}: {source}", err.status().as_u16());
         }
     }
 

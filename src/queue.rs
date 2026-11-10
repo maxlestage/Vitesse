@@ -261,10 +261,10 @@ async fn dispatcher(
             while starts.front().is_some_and(|start| *start + period <= now) {
                 starts.pop_front();
             }
-            if starts.len() >= jobs {
-                if let Some(first) = starts.pop_front() {
-                    tokio::time::sleep_until(first + period).await;
-                }
+            if starts.len() >= jobs
+                && let Some(first) = starts.pop_front()
+            {
+                tokio::time::sleep_until(first + period).await;
             }
             starts.push_back(Instant::now());
         }

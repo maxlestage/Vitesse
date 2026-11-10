@@ -4,7 +4,7 @@ Cette page vous guide pour installer Rust, créer un projet et y ajouter Vitesse
 
 ## Prérequis
 
-Vitesse demande **Rust 1.85 ou plus récent**, car il utilise l'édition 2024. Installez Rust avec [rustup](https://rustup.rs), l'installateur officiel. Il gère les versions de Rust comme `nvm` gère celles de Node.js.
+Vitesse demande **Rust 1.88 ou plus récent**, car il utilise l'édition 2024 et ses dépendances l'exigent. Installez Rust avec [rustup](https://rustup.rs), l'installateur officiel. Il gère les versions de Rust comme `nvm` gère celles de Node.js.
 
 Sous macOS, Linux ou WSL :
 

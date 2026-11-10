@@ -63,12 +63,12 @@ pub(crate) fn parse_pattern(pattern: &str) -> Result<Vec<Segment<'_>>, String> {
         segments.push(segment);
     }
     // Les paramètres optionnels ne peuvent être qu'à la fin : `/archive/:year?/:month?`.
-    if let Some(first) = segments.iter().position(is_optional) {
-        if !segments[first..].iter().all(is_optional) {
-            return Err(format!(
-                "in '{pattern}', only the last segments can be optional"
-            ));
-        }
+    if let Some(first) = segments.iter().position(is_optional)
+        && !segments[first..].iter().all(is_optional)
+    {
+        return Err(format!(
+            "in '{pattern}', only the last segments can be optional"
+        ));
     }
     for constraint in segments.iter().flat_map(constraints) {
         compile(constraint).map_err(|e| {
@@ -723,30 +723,30 @@ impl Node {
                     return Some(v);
                 }
             }
-        } else if let Some((_, child)) = self.statics.iter().find(|(k, _)| **k == *seg) {
-            if let Some(v) = child.find(next, next_offset, captures, ci) {
-                return Some(v);
-            }
+        } else if let Some((_, child)) = self.statics.iter().find(|(k, _)| **k == *seg)
+            && let Some(v) = child.find(next, next_offset, captures, ci)
+        {
+            return Some(v);
         }
 
         for (matcher, child) in &self.patterns {
             let mark = captures.len();
-            if matcher.matches(seg, offset, captures, ci) {
-                if let Some(v) = child.find(next, next_offset, captures, ci) {
-                    return Some(v);
-                }
+            if matcher.matches(seg, offset, captures, ci)
+                && let Some(v) = child.find(next, next_offset, captures, ci)
+            {
+                return Some(v);
             }
             captures.truncate(mark);
         }
 
-        if let Some(child) = &self.param {
-            if !seg.is_empty() {
-                captures.push((offset, offset + seg.len()));
-                if let Some(v) = child.find(next, next_offset, captures, ci) {
-                    return Some(v);
-                }
-                captures.pop();
+        if let Some(child) = &self.param
+            && !seg.is_empty()
+        {
+            captures.push((offset, offset + seg.len()));
+            if let Some(v) = child.find(next, next_offset, captures, ci) {
+                return Some(v);
             }
+            captures.pop();
         }
 
         if let Some(w) = self.wildcard {

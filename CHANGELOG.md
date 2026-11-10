@@ -8,6 +8,15 @@ project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- **Dependencies at their latest version**, new major versions included:
+  minijinja 2 → 3 (`templates`; `vitesse::templates::minijinja` is now
+  minijinja 3, so an environment given to `App::templates` comes from
+  minijinja 3; templates of `app.views(...)` are still read once and kept
+  in memory), getrandom 0.2 → 0.4 (`session`), tower-http 0.6 → 0.7 (tests
+  only), and the website's wasm-bindgen 0.2.129 → 0.2.130 (with
+  wasm-bindgen-cli 0.2.130).
+- **Minimum Rust version: 1.88** (was 1.85), the version that recent
+  dependencies (sha2, encoding_rs, time, rcgen) require.
 - **Benchmark measured again** (November 7, 2026, on a faster machine):
   3.29 million requests per second pipelined on two cores, twice actix-web;
   +36% with a real browser request, +61% on the JSON echo, 6 to 58% less CPU

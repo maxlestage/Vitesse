@@ -733,12 +733,11 @@ impl App {
         if !self.params.is_empty() || pre_handler.is_some() || !pre_handler_async.is_empty() {
             for methods in self.tree.values_mut() {
                 for route in methods.routes_mut() {
-                    if route.own {
-                        if let Some(wrapped) =
+                    if route.own
+                        && let Some(wrapped) =
                             crate::hooks::with_params(&self.params, &route.names, &route.handler)
-                        {
-                            route.handler = wrapped;
-                        }
+                    {
+                        route.handler = wrapped;
                     }
                     if !pre_handler_async.is_empty() {
                         route.handler = Arc::new(crate::handler::Chained::new(

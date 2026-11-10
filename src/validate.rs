@@ -300,15 +300,14 @@ impl<'v, T: ?Sized> Field<'v, T> {
     /// }
     /// ```
     pub fn message(self, message: impl Into<String>) -> Self {
-        if self.failed {
-            if let Some(last) = self
+        if self.failed
+            && let Some(last) = self
                 .validator
                 .errors
                 .get_mut(&self.name)
                 .and_then(|m| m.last_mut())
-            {
-                *last = message.into();
-            }
+        {
+            *last = message.into();
         }
         self
     }

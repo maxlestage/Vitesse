@@ -44,7 +44,7 @@ La API es parecida a propósito, pero los handlers devuelven su respuesta en lug
 
 ### ¿Qué versión de Rust necesito?
 
-Rust 1.85 o posterior (la edición 2024), como indica `rust-version` en el `Cargo.toml` de Vitesse. Actualiza con `rustup update`.
+Rust 1.88 o posterior (la edición 2024), como indica `rust-version` en el `Cargo.toml` de Vitesse. Actualiza con `rustup update`.
 
 ### ¿Funciona en Windows y macOS?
 

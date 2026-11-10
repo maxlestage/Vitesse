@@ -48,7 +48,7 @@ pub(crate) fn render(
         .get_template(name)
         .map_err(|e| Error::internal("Internal Server Error").with_source(e))?;
     template
-        .render(context)
+        .render(minijinja::value::Serde(context))
         .map(Html)
         .map_err(|e| Error::internal("Internal Server Error").with_source(e))
 }
@@ -57,5 +57,7 @@ pub(crate) fn render(
 pub(crate) fn from_dir(dir: std::path::PathBuf) -> minijinja::Environment<'static> {
     let mut env = minijinja::Environment::new();
     env.set_loader(minijinja::path_loader(dir));
+    // Lus une fois, puis gardés en mémoire (pas de `stat` à chaque rendu) : voir plus haut.
+    env.set_auto_reload(false);
     env
 }

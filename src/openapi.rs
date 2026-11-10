@@ -213,10 +213,10 @@ impl OpenApi {
     #[cfg(feature = "schemars")]
     pub fn schema_type<T: schemars::JsonSchema>(mut self) -> Self {
         let (schema, definitions) = typed::schema_for::<T>(typed::Contract::Serialize);
-        if let Some(name) = typed::reference_name(&schema) {
-            if !definitions.contains_key(&name) {
-                self.schemas.insert(name, schema);
-            }
+        if let Some(name) = typed::reference_name(&schema)
+            && !definitions.contains_key(&name)
+        {
+            self.schemas.insert(name, schema);
         }
         self.schemas.extend(definitions);
         self
@@ -627,10 +627,10 @@ pub(crate) fn document(spec: &OpenApi, routes: &[ApiRoute]) -> Value {
     // spec, which win.
     let mut schemas = Map::new();
     for route in routes {
-        if let Some(doc) = &route.doc {
-            if !doc.hidden {
-                schemas.extend(doc.schemas.clone());
-            }
+        if let Some(doc) = &route.doc
+            && !doc.hidden
+        {
+            schemas.extend(doc.schemas.clone());
         }
     }
     schemas.extend(spec.schemas.clone());

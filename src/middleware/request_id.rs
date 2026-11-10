@@ -93,10 +93,10 @@ impl Middleware for SetRequestId {
         req.set(RequestId(id));
         Box::pin(async move {
             let mut res = next.run(req).await;
-            if let Some(value) = value {
-                if !res.headers().contains_key(&self.header) {
-                    res.headers_mut().insert(self.header.clone(), value);
-                }
+            if let Some(value) = value
+                && !res.headers().contains_key(&self.header)
+            {
+                res.headers_mut().insert(self.header.clone(), value);
             }
             res
         })

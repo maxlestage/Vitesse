@@ -44,7 +44,7 @@ The API is deliberately close, but handlers return their response instead of mut
 
 ### Which Rust version do I need?
 
-Rust 1.85 or later (the 2024 edition), as declared by `rust-version` in Vitesse's `Cargo.toml`. Update with `rustup update`.
+Rust 1.88 or later (the 2024 edition), as declared by `rust-version` in Vitesse's `Cargo.toml`. Update with `rustup update`.
 
 ### Does it work on Windows and macOS?
 

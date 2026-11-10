@@ -4,7 +4,7 @@ Esta página te guía para instalar Rust, crear un proyecto y agregarle Vitesse.
 
 ## Requisitos previos
 
-Vitesse necesita **Rust 1.85 o posterior**, porque usa la edición 2024. Instala Rust con [rustup](https://rustup.rs), el instalador oficial. Gestiona las versiones de Rust igual que `nvm` gestiona las de Node.js.
+Vitesse necesita **Rust 1.88 o posterior**, porque usa la edición 2024 y sus dependencias lo exigen. Instala Rust con [rustup](https://rustup.rs), el instalador oficial. Gestiona las versiones de Rust igual que `nvm` gestiona las de Node.js.
 
 En macOS, Linux o WSL:
 

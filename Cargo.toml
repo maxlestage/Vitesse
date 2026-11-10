@@ -2,7 +2,7 @@
 name = "vitesse"
 version = "0.2.0"
 edition = "2024"
-rust-version = "1.85"
+rust-version = "1.88"
 description = "An Express.js-style web framework in native Rust, built for speed: familiar API (app.get, req.params, middleware, Router), its own HTTP/1.1 engine on tokio, WebSocket and HTTP/3 (QUIC)."
 authors = ["Maxime Nathan Lestage"]
 license-file = "LICENSE"
@@ -60,10 +60,10 @@ h2 = { version = "0.4", optional = true }
 # Cookies signés et sessions (`session`) : HMAC-SHA256 et aléa du système.
 hmac = { version = "0.13", optional = true }
 sha2 = { version = "0.11", optional = true }
-getrandom = { version = "0.2", optional = true }
+getrandom = { version = "0.4", optional = true }
 
 # Gabarits HTML (`templates`) : `app.views(...)` et `req.render(...)`.
-minijinja = { version = "2", features = ["loader", "json"], optional = true }
+minijinja = { version = "3", features = ["json", "serde"], optional = true }
 
 # Interopérabilité avec tower (`tower`) : couches tower-http, service hyper.
 tower-layer = { version = "0.3", optional = true }
@@ -144,7 +144,7 @@ serde = { version = "1", features = ["derive"] }
 tokio = { version = "1", features = ["full"] }
 # Des couches tower réelles pour tester `vitesse::tower`.
 tower05 = { package = "tower", version = "0.5", features = ["limit", "util"] }
-tower-http = { version = "0.6", features = ["set-header", "validate-request", "limit", "normalize-path", "cors"] }
+tower-http = { version = "0.7", features = ["set-header", "validate-request", "limit", "normalize-path", "cors"] }
 
 [profile.release]
 lto = "fat"

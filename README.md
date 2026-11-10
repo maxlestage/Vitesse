@@ -122,7 +122,7 @@ cargo add vitesse --git https://github.com/maxlestage/Vitesse
 cargo add serde --features derive   # for your JSON structs
 ```
 
-Vitesse requires Rust 1.85 or later. No `#[tokio::main]` needed:
+Vitesse requires Rust 1.88 or later. No `#[tokio::main]` needed:
 `app.run(port)` creates the runtime, uses every core and shuts down
 gracefully on `Ctrl+C` / `SIGTERM`. If you already run a tokio runtime, use
 `app.listen(port).await` instead.
@@ -382,7 +382,7 @@ checks that it can still be exported to static files.
 
 ```sh
 rustup target add wasm32-unknown-unknown
-cargo install wasm-bindgen-cli --version 0.2.129   # the version in site/Cargo.lock
+cargo install wasm-bindgen-cli --version 0.2.130   # the version in site/Cargo.lock
 cd site
 # 1. The browser bundle (islands and animations) → site/pkg
 cargo build --lib --target wasm32-unknown-unknown --profile wasm-release

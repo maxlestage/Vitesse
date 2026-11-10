@@ -32,12 +32,13 @@ pub(crate) fn percent_decode(input: &str) -> Cow<'_, str> {
     let mut i = first;
     while i < bytes.len() {
         let b = bytes[i];
-        if b == b'%' && i + 2 < bytes.len() {
-            if let (Some(h), Some(l)) = (hex_val(bytes[i + 1]), hex_val(bytes[i + 2])) {
-                out.push((h << 4) | l);
-                i += 3;
-                continue;
-            }
+        if b == b'%'
+            && i + 2 < bytes.len()
+            && let (Some(h), Some(l)) = (hex_val(bytes[i + 1]), hex_val(bytes[i + 2]))
+        {
+            out.push((h << 4) | l);
+            i += 3;
+            continue;
         }
         out.push(b);
         i += 1;

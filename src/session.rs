@@ -143,7 +143,7 @@ fn base64url_decode(text: &str) -> Option<Vec<u8>> {
 /// A new session id: 128 random bits from the operating system.
 fn new_id() -> String {
     let mut bytes = [0u8; 16];
-    getrandom::getrandom(&mut bytes).expect("the operating system's random generator failed");
+    getrandom::fill(&mut bytes).expect("the operating system's random generator failed");
     base64url(&bytes)
 }
 
@@ -488,10 +488,10 @@ impl Middleware for Sessions {
                 snapshot
             };
             if destroyed {
-                if let Some(id) = &old_id {
-                    if let Err(e) = self.store.delete(id).await {
-                        eprintln!("[vitesse] session store error: {e}");
-                    }
+                if let Some(id) = &old_id
+                    && let Err(e) = self.store.delete(id).await
+                {
+                    eprintln!("[vitesse] session store error: {e}");
                 }
                 if had_cookie {
                     res = res.cookie(self.cookie(String::new(), secure, Duration::ZERO));

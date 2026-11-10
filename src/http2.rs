@@ -321,10 +321,10 @@ async fn respond_with(
             send.send_reset(h2::Reason::INTERNAL_ERROR);
             return;
         };
-        if let Ok(data) = frame.into_data() {
-            if send_data(&mut send, data).await.is_err() {
-                return;
-            }
+        if let Ok(data) = frame.into_data()
+            && send_data(&mut send, data).await.is_err()
+        {
+            return;
         }
     }
     let _ = send.send_data(Bytes::new(), true);

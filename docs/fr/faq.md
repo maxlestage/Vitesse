@@ -44,7 +44,7 @@ L'API est volontairement proche, mais les handlers renvoient leur réponse au li
 
 ### Quelle version de Rust faut-il ?
 
-Rust 1.85 ou plus récent (l'édition 2024), comme l'indique `rust-version` dans le `Cargo.toml` de Vitesse. Mettez à jour avec `rustup update`.
+Rust 1.88 ou plus récent (l'édition 2024), comme l'indique `rust-version` dans le `Cargo.toml` de Vitesse. Mettez à jour avec `rustup update`.
 
 ### Fonctionne-t-il sous Windows et macOS ?
 

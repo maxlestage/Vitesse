@@ -660,16 +660,16 @@ impl UnixServer {
 pub(crate) fn bind_unix(path: &std::path::Path) -> io::Result<tokio::net::UnixListener> {
     use std::os::unix::fs::FileTypeExt;
 
-    if let Ok(meta) = std::fs::symlink_metadata(path) {
-        if meta.file_type().is_socket() {
-            if std::os::unix::net::UnixStream::connect(path).is_ok() {
-                return Err(io::Error::new(
-                    io::ErrorKind::AddrInUse,
-                    format!("{} is used by a running server", path.display()),
-                ));
-            }
-            std::fs::remove_file(path)?;
+    if let Ok(meta) = std::fs::symlink_metadata(path)
+        && meta.file_type().is_socket()
+    {
+        if std::os::unix::net::UnixStream::connect(path).is_ok() {
+            return Err(io::Error::new(
+                io::ErrorKind::AddrInUse,
+                format!("{} is used by a running server", path.display()),
+            ));
         }
+        std::fs::remove_file(path)?;
     }
     tokio::net::UnixListener::bind(path)
 }

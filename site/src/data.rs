@@ -14,11 +14,12 @@ pub const AUTHOR: &str = "Maxime Nathan Lestage";
 
 /// Les projets frères de Vitesse, du même auteur : (nom, site). Le pied de page les
 /// présente dans cet ordre ; `i18n::Texts::footer_projects` décrit chacun dans le même ordre.
-pub const ECOSYSTEM: [(&str, &str); 5] = [
+pub const ECOSYSTEM: [(&str, &str); 6] = [
     ("Active", "https://active-c1883a966650.herokuapp.com/"),
     ("Vitesse", "https://vitesse-f16135654c3d.herokuapp.com/"),
     ("Securite", "https://securite-2db4c1994be7.herokuapp.com/"),
     ("Memoire", "https://memoire-7f4525f1fdaf.herokuapp.com/"),
+    ("Nuage DB", "https://github.com/maxlestage/Nuage"),
     ("Paquets", "https://paquets-90dfc06b6fea.herokuapp.com/"),
 ];
 

@@ -467,7 +467,7 @@ body.has-cursor .cursor {
 .nav--scrolled {
   padding-top: 12px;
   padding-bottom: 12px;
-  background: rgba(7, 7, 11, 0.62);
+  background: rgba(7, 7, 11, 0.94);
   backdrop-filter: blur(18px) saturate(140%);
   -webkit-backdrop-filter: blur(18px) saturate(140%);
   border-bottom-color: var(--border);
@@ -475,6 +475,27 @@ body.has-cursor .cursor {
 
 .nav--hidden:not(.nav--open) {
   transform: translateY(-110%);
+}
+
+/* Le fond n'attend pas le script : s'il ne tourne pas (une vieille copie en cache,
+   JavaScript coupé), la barre devient opaque dès que la page défile, avec une animation
+   liée au défilement là où le navigateur la connaît (les petits écrans ont toujours leur
+   fond, voir max-width: 900px). */
+@keyframes nav-solid {
+  to {
+    background: rgba(7, 7, 11, 0.94);
+    border-bottom-color: var(--border);
+    backdrop-filter: blur(18px) saturate(140%);
+    -webkit-backdrop-filter: blur(18px) saturate(140%);
+  }
+}
+
+@supports (animation-timeline: scroll()) {
+  .nav:not(.nav--scrolled) {
+    animation: nav-solid linear both;
+    animation-timeline: scroll(root block);
+    animation-range: 0 60px;
+  }
 }
 
 .nav__brand {
@@ -3739,6 +3760,15 @@ body.has-cursor .cursor {
   .nav__links,
   .nav__cta {
     display: none;
+  }
+
+  /* Sur téléphone et tablette, la barre a toujours son fond : la page ne passe jamais
+     sous le logo, les langues et le menu, quoi que fasse le script. */
+  .nav {
+    background: rgba(7, 7, 11, 0.94);
+    border-bottom-color: var(--border);
+    backdrop-filter: blur(18px) saturate(140%);
+    -webkit-backdrop-filter: blur(18px) saturate(140%);
   }
 
   .nav__burger {

@@ -43,6 +43,9 @@ enum Step {
     Done,
     /// The write buffer is full: send it, then come back.
     Flush,
+    /// Send the write buffer followed by this body (without copying it into
+    /// the buffer), then come back.
+    Send(Bytes),
     /// The rest is for the asynchronous engine.
     Handoff(Resume),
 }
@@ -270,6 +273,11 @@ impl Inner {
             match process(&mut slot.conn, &mut slot.quiet, cx) {
                 Step::Done => {}
                 Step::Flush => continue,
+                Step::Send(body) => match self.send(registry, index, &body) {
+                    Ok(true) => continue,
+                    Ok(false) => return,
+                    Err(_) => return self.close(registry, index),
+                },
                 Step::Handoff(resume) => {
                     handoffs.extend(self.handoff(registry, index, resume));
                     return;
@@ -345,6 +353,56 @@ impl Inner {
             registry.reregister(&mut slot.conn.io, Token(index), interest)?;
         }
         Ok(done)
+    }
+
+    /// Sends the write buffer followed by `body`, in one system call if the
+    /// socket has room. What does not fit is kept in the write buffer, like
+    /// in [`flush`](Self::flush): the bytes sent are the same, in the same
+    /// order. `Ok(false)`: the connection now waits until it can write.
+    fn send(&mut self, registry: &Registry, index: usize, body: &[u8]) -> io::Result<bool> {
+        let Some(slot) = self.slots[index].as_mut() else {
+            return Ok(false);
+        };
+        let conn = &mut slot.conn;
+        let head = conn.wbuf.len();
+        let total = head + body.len();
+        let mut sent = 0;
+        while sent < total {
+            let result = if sent < head {
+                conn.io
+                    .write_vectored(&[io::IoSlice::new(&conn.wbuf[sent..]), io::IoSlice::new(body)])
+            } else {
+                conn.io.write(&body[sent - head..])
+            };
+            match result {
+                Ok(0) => return Err(io::ErrorKind::WriteZero.into()),
+                Ok(n) => sent += n,
+                Err(e) if e.kind() == io::ErrorKind::WouldBlock => break,
+                Err(e) if e.kind() == io::ErrorKind::Interrupted => {}
+                Err(e) => return Err(e),
+            }
+        }
+        if sent == total {
+            conn.wbuf.clear();
+            return Ok(true);
+        }
+        // Le socket est plein : le reste attend dans le tampon d'écriture.
+        if sent < head {
+            conn.wbuf.extend_from_slice(body);
+            conn.wbuf.drain(..sent);
+        } else {
+            conn.wbuf.clear();
+            conn.wbuf.extend_from_slice(&body[sent - head..]);
+        }
+        if !slot.writing {
+            slot.writing = true;
+            registry.reregister(
+                &mut slot.conn.io,
+                Token(index),
+                Interest::READABLE | Interest::WRITABLE,
+            )?;
+        }
+        Ok(false)
     }
 
     /// Hands a connection over to the asynchronous engine; `None` if tokio
@@ -424,6 +482,12 @@ fn process(conn: &mut Conn<TcpStream>, quiet: &mut u32, cx: &mut Context<'_>) ->
         let (keep_alive, rest) = conn.encode(&mut res, &job);
         match rest {
             Rest::None => {}
+            // Un corps de taille moyenne : envoyé après la tête, sans copie.
+            Rest::Bytes(bytes)
+                if bytes.len() <= WRITE_HIGH_WATER && keep_alive && conn.upgrade.is_none() =>
+            {
+                return Step::Send(bytes);
+            }
             Rest::Bytes(bytes) if bytes.len() <= WRITE_HIGH_WATER => {
                 conn.wbuf.extend_from_slice(&bytes)
             }

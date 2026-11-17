@@ -6,8 +6,23 @@ project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-11-17
+
 ### Changed
 
+- **Medium-sized bodies are no longer copied before being sent.** In the
+  engine of a thread, a response body of 16 to 64 KiB (an uncompressed
+  static file, a large JSON document) used to be copied into the write
+  buffer behind its head; it now goes out right after the head in the same
+  system call (`writev`), and only what the socket cannot take at once is
+  kept in the buffer. Same bytes, in the same order. Measured on the
+  uncompressed 20 KiB stylesheet of `examples/bench_app.rs` (server on 2
+  cores, wrk on 2 others, 5 series of 9 to 11 interleaved runs): copies
+  fall from 8.0% to 2.2% of the server's time, −15 to −18% user CPU per
+  request and −2 to −7% CPU per request in all (median −6.5%); requests per
+  second do not change beyond the noise. Smaller bodies, compressed
+  responses and HTTP/2 (which already sends the body without copying it)
+  are unchanged.
 - **Dependencies at their latest version**, new major versions included:
   minijinja 2 → 3 (`templates`; `vitesse::templates::minijinja` is now
   minijinja 3, so an environment given to `App::templates` comes from
@@ -296,5 +311,6 @@ or actix-web"):
   `Cargo.toml` is tagged (`v0.1.0` for `0.1.0`), released on GitHub with its
   section of `CHANGELOG.md` as notes, and published on crates.io.
 
+[0.2.1]: https://crates.io/crates/vitesse/0.2.1
 [0.2.0]: https://crates.io/crates/vitesse/0.2.0
 [0.1.0]: https://crates.io/crates/vitesse/0.1.0

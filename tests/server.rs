@@ -192,3 +192,53 @@ async fn the_engine_hands_connections_over_in_order() {
         client.await.unwrap();
     }
 }
+
+/// Bodies of a medium size go out after their head without being copied
+/// into the write buffer: when the client reads slowly and the socket fills
+/// up, what is left waits in the buffer, and the bytes arrive whole and in
+/// order, pipelined responses included.
+#[tokio::test]
+async fn medium_bodies_arrive_whole_when_the_client_reads_slowly() {
+    fn body(n: usize) -> String {
+        let letter = char::from(b'a' + (n % 26) as u8);
+        format!("{n}:{}", letter.to_string().repeat(40_000))
+    }
+    let mut app = App::new();
+    app.get("/", |_| async { "fast" });
+    app.get("/mid/:n", |req: Request| async move {
+        body(req.param("n").unwrap().parse().unwrap())
+    });
+    let addr = start(app).await;
+    let socket = tokio::net::TcpSocket::new_v4().unwrap();
+    socket.set_recv_buffer_size(4096).unwrap();
+    let mut tcp = socket.connect(addr).await.unwrap();
+    let mut req = String::new();
+    for n in 0..160 {
+        req.push_str(&format!("GET /mid/{n} HTTP/1.1\r\nhost: x\r\n\r\n"));
+        if n % 3 == 0 {
+            req.push_str("GET / HTTP/1.1\r\nhost: x\r\n\r\n");
+        }
+    }
+    req.push_str("GET /mid/160 HTTP/1.1\r\nhost: x\r\nconnection: close\r\n\r\n");
+    tcp.write_all(req.as_bytes()).await.unwrap();
+    // Le socket du serveur se remplit avant que le client ne lise.
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    let out = read_all(&mut tcp).await;
+    let bodies: Vec<&str> = out
+        .split("HTTP/1.1 200 OK\r\n")
+        .skip(1)
+        .map(|r| r.split_once("\r\n\r\n").map_or("", |(_, body)| body))
+        .collect();
+    let mut expected = Vec::new();
+    for n in 0..160 {
+        expected.push(body(n));
+        if n % 3 == 0 {
+            expected.push("fast".to_owned());
+        }
+    }
+    expected.push(body(160));
+    assert_eq!(bodies.len(), expected.len());
+    for (got, want) in bodies.iter().zip(&expected) {
+        assert!(got == want, "{} bytes, expected {}", got.len(), want.len());
+    }
+}

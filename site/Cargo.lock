@@ -4,8 +4,8 @@ version = 4
 
 [[package]]
 name = "active"
-version = "0.3.2"
-source = "git+https://github.com/maxlestage/Active#8950ccc250b44a04042021b561c3f1253aecef6b"
+version = "0.3.3"
+source = "git+https://github.com/maxlestage/Active#0a0f86bcdd156d2ffe164fe9db488d22f527b645"
 dependencies = [
  "approx",
  "arrayvec",

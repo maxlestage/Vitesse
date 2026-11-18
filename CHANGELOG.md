@@ -6,6 +6,27 @@ project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-11-18
+
+### Changed
+
+- **Static files: their headers are formatted once.** A small file kept in
+  memory now also keeps its `ETag` and `Last-Modified` ready to send,
+  instead of formatting them (and the date) again for each request; the
+  `Cache-Control` of a `ServeDir` is formatted when it is configured, and
+  the MIME type is looked up without allocating. Same headers, same
+  conditional requests (`304`, `If-Range`); a file that changes on disk
+  gets its new validators as before. Measured on the 20 KiB stylesheet of
+  `examples/bench_app.rs` (server on 2 cores, wrk on 2 others, 2 series of
+  11 interleaved runs, paired medians): −7 to −10% CPU per request with a
+  browser's request (compressed response, −13 to −17% user CPU), −4% when
+  uncompressed (−5 to −11% user CPU).
+- **HTTP/2 and HTTP/3: the `date` header is formatted at most once per
+  second** and per thread, like in HTTP/1.1, instead of once per response
+  (same value, read from the clock for each response). Measured over h2c
+  on `GET /`, `GET /json` and `GET /users/42` of `examples/bench.rs`
+  (2 series of 9 and 11 interleaved runs): −5 to −7% CPU per request.
+
 ## [0.2.1] - 2026-11-17
 
 ### Changed
@@ -311,6 +332,7 @@ or actix-web"):
   `Cargo.toml` is tagged (`v0.1.0` for `0.1.0`), released on GitHub with its
   section of `CHANGELOG.md` as notes, and published on crates.io.
 
+[0.2.2]: https://crates.io/crates/vitesse/0.2.2
 [0.2.1]: https://crates.io/crates/vitesse/0.2.1
 [0.2.0]: https://crates.io/crates/vitesse/0.2.0
 [0.1.0]: https://crates.io/crates/vitesse/0.1.0

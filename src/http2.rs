@@ -16,7 +16,7 @@ use std::pin::{Pin, pin};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::task::{Context, Poll};
-use std::time::{Duration, SystemTime};
+use std::time::Duration;
 
 use bytes::{Buf, Bytes};
 use h2::server::SendResponse;
@@ -36,7 +36,7 @@ use crate::request::{ReqBody, Request};
 use crate::response::Response;
 use crate::server::ResponseFuture;
 use crate::upgrade::Io;
-use crate::util::http_date;
+use crate::util::date_header;
 
 /// Requests a client may have in flight at once on a connection.
 const MAX_STREAMS: u32 = 256;
@@ -287,7 +287,7 @@ async fn respond_with(
         }
     }
     drop(busy);
-    if let Ok(date) = HeaderValue::from_str(&http_date(SystemTime::now())) {
+    if let Some(date) = date_header() {
         head.headers.insert(header::DATE, date);
     }
     #[cfg(feature = "http3")]

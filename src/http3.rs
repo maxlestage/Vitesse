@@ -34,7 +34,6 @@ use std::path::Path;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
-use std::time::SystemTime;
 
 use bytes::{Buf, Bytes};
 use h3::server::RequestStream;
@@ -51,7 +50,7 @@ use crate::body::{Body, BoxError};
 use crate::pem::invalid;
 use crate::request::{ReqBody, Request};
 use crate::server::ResponseFuture;
-use crate::util::http_date;
+use crate::util::date_header;
 
 /// How long `Alt-Svc` remains valid in the browser: one day.
 const ALT_SVC_MAX_AGE: u32 = 86_400;
@@ -326,7 +325,7 @@ async fn respond<S>(
     ] {
         head.headers.remove(name);
     }
-    if let Ok(date) = HeaderValue::from_str(&http_date(SystemTime::now())) {
+    if let Some(date) = date_header() {
         head.headers.insert(header::DATE, date);
     }
     let bodyless = head.status.is_informational()

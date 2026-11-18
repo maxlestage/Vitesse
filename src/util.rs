@@ -51,12 +51,18 @@ pub(crate) fn percent_decode(input: &str) -> Cow<'_, str> {
 
 /// Guesses the MIME type of a file from its extension.
 pub(crate) fn mime_for(path: &Path) -> &'static str {
-    let ext = path
-        .extension()
-        .and_then(|e| e.to_str())
-        .map(str::to_ascii_lowercase)
-        .unwrap_or_default();
-    match ext.as_str() {
+    // En minuscules sur la pile : aucune extension connue ne dépasse 16 octets.
+    let mut lower = [0u8; 16];
+    let ext = match path.extension().and_then(|e| e.to_str()) {
+        Some(ext) if ext.len() <= lower.len() => {
+            let lower = &mut lower[..ext.len()];
+            lower.copy_from_slice(ext.as_bytes());
+            lower.make_ascii_lowercase();
+            std::str::from_utf8(lower).unwrap_or_default()
+        }
+        _ => "",
+    };
+    match ext {
         "html" | "htm" => "text/html; charset=utf-8",
         "css" => "text/css; charset=utf-8",
         "js" | "mjs" | "cjs" => "text/javascript; charset=utf-8",
@@ -118,6 +124,36 @@ pub(crate) fn http_date(time: SystemTime) -> String {
     )
 }
 
+/// The `Date` header of a response sent now (HTTP/2 and HTTP/3): the same
+/// value as `http_date(SystemTime::now())`, formatted at most once per
+/// second and per thread.
+#[cfg(any(feature = "http2", feature = "http3"))]
+pub(crate) fn date_header() -> Option<http::HeaderValue> {
+    use std::cell::RefCell;
+
+    thread_local! {
+        static CACHE: RefCell<Option<(u64, http::HeaderValue)>> = const { RefCell::new(None) };
+    }
+    let now = SystemTime::now();
+    let secs = now
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    CACHE.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        match &*cache {
+            Some((cached, value)) if *cached == secs => Some(value.clone()),
+            _ => {
+                let value =
+                    http::HeaderValue::from_maybe_shared(bytes::Bytes::from(http_date(now)))
+                        .ok()?;
+                *cache = Some((secs, value.clone()));
+                Some(value)
+            }
+        }
+    })
+}
+
 /// Converts a number of days since 1970-01-01 into (year, month, day).
 /// Howard Hinnant's algorithm.
 fn civil_from_days(z: i64) -> (i64, u32, u32) {
@@ -164,5 +200,25 @@ mod tests {
         assert_eq!(mime_for(Path::new("a/b.HTML")), "text/html; charset=utf-8");
         assert_eq!(mime_for(Path::new("x.wasm")), "application/wasm");
         assert_eq!(mime_for(Path::new("noext")), "application/octet-stream");
+        assert_eq!(
+            mime_for(Path::new("site.WebManifest")),
+            "application/manifest+json"
+        );
+        assert_eq!(
+            mime_for(Path::new("a.unextensiontreslongue")),
+            "application/octet-stream"
+        );
+    }
+
+    #[cfg(any(feature = "http2", feature = "http3"))]
+    #[test]
+    fn date_header_is_the_date_of_now() {
+        for _ in 0..3 {
+            let before = http_date(SystemTime::now());
+            let value = date_header().unwrap();
+            let after = http_date(SystemTime::now());
+            let value = value.to_str().unwrap();
+            assert!(value == before || value == after, "{value}");
+        }
     }
 }

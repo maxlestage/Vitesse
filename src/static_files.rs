@@ -40,6 +40,8 @@ pub(crate) struct CachedFile {
     len: u64,
     modified: Option<SystemTime>,
     pub(crate) data: Bytes,
+    /// Its `ETag` and `Last-Modified`, formatted once.
+    validators: Validators,
     /// Its forms compressed by [`middleware::compress()`](crate::middleware::compress)
     /// (Brotli, gzip, deflate), made once at the best quality; `None` when
     /// that does not make it smaller.
@@ -74,12 +76,13 @@ fn cached(path: &Path, meta: &Metadata) -> Option<Arc<CachedFile>> {
 /// Keeps `data`, the content of `path` read with `meta`. Requests that
 /// arrive together all read the file before one of them keeps it: they share
 /// the first one kept, and so its compressed forms, made once.
-fn keep(path: &Path, meta: &Metadata, data: Bytes) -> Arc<CachedFile> {
+fn keep(path: &Path, meta: &Metadata, data: Bytes, validators: Validators) -> Arc<CachedFile> {
     let (len, modified) = (meta.len(), meta.modified().ok());
     let file = Arc::new(CachedFile {
         len,
         modified,
         data,
+        validators,
         #[cfg(feature = "compress")]
         compressed: Default::default(),
     });
@@ -129,12 +132,58 @@ fn metadata(path: &Path) -> io::Result<Metadata> {
 /// app.serve_dir("/docs", ServeDir::new("./site").max_age(Duration::from_secs(3600)));
 /// app.middleware(ServeDir::new("./www")); // at the root, before the routes
 /// ```
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct ServeDir {
     root: PathBuf,
     index: Option<String>,
     max_age: u64,
+    /// `public, max-age=…`, formatted once.
+    cache_control: HeaderValue,
     dotfiles: bool,
+}
+
+impl std::fmt::Debug for ServeDir {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ServeDir")
+            .field("root", &self.root)
+            .field("index", &self.index)
+            .field("max_age", &self.max_age)
+            .field("dotfiles", &self.dotfiles)
+            .finish()
+    }
+}
+
+/// The `Cache-Control` header of the files served.
+fn cache_control(max_age: u64) -> HeaderValue {
+    if max_age == 0 {
+        return HeaderValue::from_static("public, max-age=0");
+    }
+    header_value(format!("public, max-age={max_age}"))
+}
+
+/// A header value made of visible ASCII characters only (a date, a number…).
+fn header_value(value: String) -> HeaderValue {
+    HeaderValue::from_maybe_shared(Bytes::from(value)).expect("visible ASCII characters")
+}
+
+/// The validators of a version of a file (its size and date of
+/// modification): its `ETag` and its `Last-Modified`.
+#[derive(Debug, Clone)]
+struct Validators {
+    etag: HeaderValue,
+    last_modified: Option<HeaderValue>,
+}
+
+impl Validators {
+    fn new(len: u64, modified: Option<SystemTime>) -> Self {
+        let mtime = modified
+            .and_then(|m| m.duration_since(UNIX_EPOCH).ok())
+            .map_or(0, |d| d.as_secs());
+        Validators {
+            etag: header_value(format!("W/\"{len:x}-{mtime:x}\"")),
+            last_modified: modified.map(|m| header_value(http_date(m))),
+        }
+    }
 }
 
 impl ServeDir {
@@ -144,6 +193,7 @@ impl ServeDir {
             root: root.into(),
             index: Some("index.html".into()),
             max_age: 0,
+            cache_control: cache_control(0),
             dotfiles: false,
         }
     }
@@ -158,6 +208,7 @@ impl ServeDir {
     /// Browser cache duration (`Cache-Control: max-age`).
     pub fn max_age(mut self, max_age: Duration) -> Self {
         self.max_age = max_age.as_secs();
+        self.cache_control = cache_control(self.max_age);
         self
     }
 
@@ -207,7 +258,16 @@ impl ServeDir {
         }
         let conditional = Conditional::from_request(req);
         let head = *req.method() == Method::HEAD;
-        Some(file_response(&path, &meta, Some(&conditional), head, self.max_age).await)
+        Some(
+            file_response(
+                &path,
+                &meta,
+                Some(&conditional),
+                head,
+                self.cache_control.clone(),
+            )
+            .await,
+        )
     }
 }
 
@@ -306,7 +366,7 @@ pub(crate) async fn send_file(path: &Path) -> Response {
     let conditional = CURRENT.with(|c| c.borrow().clone());
     match metadata(path) {
         Ok(meta) if meta.is_file() => {
-            file_response(path, &meta, conditional.as_deref(), false, 0).await
+            file_response(path, &meta, conditional.as_deref(), false, cache_control(0)).await
         }
         _ => Error::from_status(StatusCode::NOT_FOUND).into_response(),
     }
@@ -318,15 +378,26 @@ async fn file_response(
     meta: &Metadata,
     conditional: Option<&Conditional>,
     head: bool,
-    max_age: u64,
+    cache_control: HeaderValue,
 ) -> Response {
     let len = meta.len();
-    let modified = meta.modified().ok();
-    let mtime = modified
-        .and_then(|m| m.duration_since(UNIX_EPOCH).ok())
-        .map_or(0, |d| d.as_secs());
-    let etag = format!("W/\"{len:x}-{mtime:x}\"");
-    let last_modified = modified.map(http_date);
+    // Un petit fichier déjà en mémoire : ses validateurs sont déjà formatés.
+    let file = if len <= SMALL_FILE {
+        cached(path, meta)
+    } else {
+        None
+    };
+    let validators = match &file {
+        Some(file) => file.validators.clone(),
+        None => Validators::new(len, meta.modified().ok()),
+    };
+    let etag = || validators.etag.to_str().unwrap_or_default();
+    let last_modified = || {
+        validators
+            .last_modified
+            .as_ref()
+            .and_then(|v| v.to_str().ok())
+    };
 
     let mut res = Response::new()
         .header(
@@ -334,10 +405,10 @@ async fn file_response(
             HeaderValue::from_static(mime_for(path)),
         )
         .header(header::ACCEPT_RANGES, HeaderValue::from_static("bytes"))
-        .header(header::CACHE_CONTROL, format!("public, max-age={max_age}"))
-        .header(header::ETAG, etag.as_str());
-    if let Some(lm) = &last_modified {
-        res = res.header(header::LAST_MODIFIED, lm.as_str());
+        .header(header::CACHE_CONTROL, cache_control)
+        .header(header::ETAG, validators.etag.clone());
+    if let Some(lm) = &validators.last_modified {
+        res = res.header(header::LAST_MODIFIED, lm.clone());
     }
 
     let mut range = None;
@@ -346,12 +417,12 @@ async fn file_response(
         let fresh = match &c.if_none_match {
             Some(inm) => inm.split(',').any(|t| {
                 let t = t.trim();
-                t == "*" || t.trim_start_matches("W/") == etag.trim_start_matches("W/")
+                t == "*" || t.trim_start_matches("W/") == etag().trim_start_matches("W/")
             }),
-            None => matches!(
-                (&c.if_modified_since, &last_modified),
-                (Some(ims), Some(lm)) if ims == lm
-            ),
+            None => c
+                .if_modified_since
+                .as_deref()
+                .is_some_and(|ims| last_modified() == Some(ims)),
         };
         if fresh {
             return res.status(StatusCode::NOT_MODIFIED);
@@ -360,7 +431,7 @@ async fn file_response(
         // (date identique ; un ETag faible ne suffit pas, RFC 9110).
         let same_file = match &c.if_range {
             None => true,
-            Some(v) => last_modified.as_deref() == Some(v.as_str()),
+            Some(v) => last_modified() == Some(v.as_str()),
         };
         if let Some(value) = c.range.as_deref().filter(|_| same_file) {
             match parse_range(value, len) {
@@ -389,7 +460,7 @@ async fn file_response(
         return res.header(header::CONTENT_LENGTH, count);
     }
 
-    match read_file(path, meta, start, count).await {
+    match read_file(path, meta, start, count, file, validators).await {
         Ok((body, cached)) => {
             #[cfg_attr(not(feature = "compress"), allow(unused_mut))]
             let mut res = res.send(body);
@@ -407,18 +478,21 @@ async fn file_response(
     }
 }
 
-/// Reads `count` bytes starting at `start`: from the cache or in one go if
-/// that is small, as a stream otherwise. A whole small file is kept in the
-/// cache, and given back with the body.
+/// Reads `count` bytes starting at `start`: from the cache (`kept`, the
+/// version of the file found there) or in one go if that is small, as a
+/// stream otherwise. A whole small file is kept in the cache, with its
+/// `validators`, and given back with the body.
 async fn read_file(
     path: &Path,
     meta: &Metadata,
     start: u64,
     count: u64,
+    kept: Option<Arc<CachedFile>>,
+    validators: Validators,
 ) -> io::Result<(Body, Option<Arc<CachedFile>>)> {
     let len = meta.len();
     if start == 0 && count == len && count <= SMALL_FILE {
-        if let Some(file) = cached(path, meta) {
+        if let Some(file) = kept {
             return Ok((Body::from(file.data.clone()), Some(file)));
         }
         let data = Bytes::from(tokio::fs::read(path).await?);
@@ -427,7 +501,7 @@ async fn read_file(
         if data.len() as u64 != len {
             return Ok((Body::from(data), None));
         }
-        let file = keep(path, meta, data);
+        let file = keep(path, meta, data, validators);
         return Ok((Body::from(file.data.clone()), Some(file)));
     }
     let mut file = tokio::fs::File::open(path).await?;
@@ -527,7 +601,55 @@ impl http_body::Body for FileBody {
 
 #[cfg(test)]
 mod tests {
-    use super::parse_range;
+    use super::*;
+
+    /// The headers of a file kept in memory are those of the file as it is
+    /// on disk, and follow its changes.
+    #[tokio::test]
+    async fn kept_validators_follow_the_file() {
+        let dir = std::env::temp_dir().join(format!("vitesse-validators-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("a.TXT");
+        let headers = |res: &Response| {
+            ["content-type", "cache-control", "etag", "last-modified"]
+                .map(|name| res.get_header(name).unwrap_or_default().to_owned())
+        };
+        let expected = |meta: &Metadata| {
+            let mtime = meta.modified().unwrap();
+            let secs = mtime.duration_since(UNIX_EPOCH).unwrap().as_secs();
+            [
+                "text/plain; charset=utf-8".to_owned(),
+                "public, max-age=3600".to_owned(),
+                format!("W/\"{:x}-{secs:x}\"", meta.len()),
+                http_date(mtime),
+            ]
+        };
+        let served = || async {
+            let meta = metadata(&path).unwrap();
+            let res = file_response(&path, &meta, None, false, cache_control(3600)).await;
+            (headers(&res), expected(&meta))
+        };
+        std::fs::write(&path, "un").unwrap();
+        // Lu sur le disque, puis servi depuis la mémoire.
+        for _ in 0..2 {
+            let (got, want) = served().await;
+            assert_eq!(got, want);
+        }
+        std::fs::write(&path, "deux").unwrap();
+        let (got, want) = served().await;
+        assert_eq!(got, want);
+        assert!(want[2].starts_with("W/\"4-"));
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn debug() {
+        let dir = ServeDir::new("www").max_age(Duration::from_secs(60));
+        assert_eq!(
+            format!("{dir:?}"),
+            r#"ServeDir { root: "www", index: Some("index.html"), max_age: 60, dotfiles: false }"#
+        );
+    }
 
     #[test]
     fn ranges() {

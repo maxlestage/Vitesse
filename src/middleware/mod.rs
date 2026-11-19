@@ -212,27 +212,51 @@ pub fn serve_static(dir: impl Into<PathBuf>) -> ServeDir {
 
 /// Default security headers, like `helmet()`.
 pub fn helmet() -> impl Middleware {
-    const HEADERS: [(&str, &str); 9] = [
-        ("x-content-type-options", "nosniff"),
-        ("x-frame-options", "SAMEORIGIN"),
-        ("x-dns-prefetch-control", "off"),
-        ("x-download-options", "noopen"),
-        ("x-permitted-cross-domain-policies", "none"),
-        ("x-xss-protection", "0"),
-        ("referrer-policy", "no-referrer"),
-        ("cross-origin-opener-policy", "same-origin"),
+    // Noms et valeurs prêts à l'emploi : rien à analyser ni à vérifier à
+    // chaque réponse.
+    const HEADERS: [(HeaderName, HeaderValue); 9] = [
         (
-            "strict-transport-security",
-            "max-age=31536000; includeSubDomains",
+            HeaderName::from_static("x-content-type-options"),
+            HeaderValue::from_static("nosniff"),
+        ),
+        (
+            HeaderName::from_static("x-frame-options"),
+            HeaderValue::from_static("SAMEORIGIN"),
+        ),
+        (
+            HeaderName::from_static("x-dns-prefetch-control"),
+            HeaderValue::from_static("off"),
+        ),
+        (
+            HeaderName::from_static("x-download-options"),
+            HeaderValue::from_static("noopen"),
+        ),
+        (
+            HeaderName::from_static("x-permitted-cross-domain-policies"),
+            HeaderValue::from_static("none"),
+        ),
+        (
+            HeaderName::from_static("x-xss-protection"),
+            HeaderValue::from_static("0"),
+        ),
+        (
+            HeaderName::from_static("referrer-policy"),
+            HeaderValue::from_static("no-referrer"),
+        ),
+        (
+            HeaderName::from_static("cross-origin-opener-policy"),
+            HeaderValue::from_static("same-origin"),
+        ),
+        (
+            HeaderName::from_static("strict-transport-security"),
+            HeaderValue::from_static("max-age=31536000; includeSubDomains"),
         ),
     ];
     |req: Request, next: Next| async move {
         let mut res = next.run(req).await;
         let headers = res.headers_mut();
         for (name, value) in HEADERS {
-            headers
-                .entry(HeaderName::from_static(name))
-                .or_insert(HeaderValue::from_static(value));
+            headers.entry(name).or_insert(value);
         }
         res
     }
@@ -511,7 +535,7 @@ pub fn decompress() -> impl Middleware {
 mod compression {
     use std::io::Write;
 
-    use http::header;
+    use http::{HeaderValue, header};
 
     use crate::body::Body;
     use crate::response::Response;
@@ -587,26 +611,37 @@ mod compression {
 
     /// Whether a content type is worth compressing.
     pub(super) fn compressible(content_type: &str) -> bool {
+        // Sans casse, et sans copie en minuscules.
         let ty = content_type
             .split(';')
             .next()
             .unwrap_or("")
             .trim()
-            .to_ascii_lowercase();
-        ty.starts_with("text/")
-            || ty.ends_with("+json")
-            || ty.ends_with("+xml")
-            || matches!(
-                ty.as_str(),
-                "application/javascript"
-                    | "application/x-javascript"
-                    | "application/json"
-                    | "application/xml"
-                    | "application/wasm"
-                    | "image/svg+xml"
-                    | "font/ttf"
-                    | "font/otf"
-            )
+            .as_bytes();
+        let is = |name: &str| ty.eq_ignore_ascii_case(name.as_bytes());
+        let starts = |prefix: &str| {
+            ty.get(..prefix.len())
+                .is_some_and(|p| p.eq_ignore_ascii_case(prefix.as_bytes()))
+        };
+        let ends = |suffix: &str| {
+            ty.len() >= suffix.len()
+                && ty[ty.len() - suffix.len()..].eq_ignore_ascii_case(suffix.as_bytes())
+        };
+        starts("text/")
+            || ends("+json")
+            || ends("+xml")
+            || [
+                "application/javascript",
+                "application/x-javascript",
+                "application/json",
+                "application/xml",
+                "application/wasm",
+                "image/svg+xml",
+                "font/ttf",
+                "font/otf",
+            ]
+            .into_iter()
+            .any(is)
     }
 
     /// Up to this size a response is compressed on the thread that serves it;
@@ -663,12 +698,18 @@ mod compression {
         let headers = res.headers_mut();
         headers.remove(header::CONTENT_LENGTH);
         let vary = match headers.get(header::VARY).and_then(|v| v.to_str().ok()) {
-            Some(v) if v.to_ascii_lowercase().contains("accept-encoding") => v.to_owned(),
-            Some(v) => format!("{v}, accept-encoding"),
-            None => "accept-encoding".to_owned(),
+            Some(v) if v.to_ascii_lowercase().contains("accept-encoding") => Some(v.to_owned()),
+            Some(v) => Some(format!("{v}, accept-encoding")),
+            None => None,
         };
-        res.set_header(header::VARY, vary);
-        res.set_header(header::CONTENT_ENCODING, encoding.name());
+        match vary {
+            Some(vary) => res.set_header(header::VARY, vary),
+            None => res.set_header(header::VARY, HeaderValue::from_static("accept-encoding")),
+        };
+        res.set_header(
+            header::CONTENT_ENCODING,
+            HeaderValue::from_static(encoding.name()),
+        );
         *res.body_mut() = encoded;
     }
 
@@ -694,12 +735,17 @@ mod compression {
         .clone()
     }
 
+    /// `res.get_header(name)`, with a name that needs no parsing.
+    fn header_str(res: &Response, name: header::HeaderName) -> Option<&str> {
+        res.headers().get(name).and_then(|v| v.to_str().ok())
+    }
+
     /// Compresses the body of `res` when it is worth it (see [`super::compress`]).
     pub(super) async fn apply(mut res: Response, encoding: Encoding) -> Response {
         let worth = res.error().is_none()
             && !matches!(res.status_code().as_u16(), 204 | 304)
-            && res.get_header("content-encoding").is_none()
-            && res.get_header("content-type").is_some_and(compressible)
+            && header_str(&res, header::CONTENT_ENCODING).is_none()
+            && header_str(&res, header::CONTENT_TYPE).is_some_and(compressible)
             && res.body().size().is_some_and(|n| (MIN..=MAX).contains(&n));
         if !worth {
             return res;
@@ -760,6 +806,10 @@ mod compression {
                 "image/svg+xml",
                 "application/wasm",
                 "application/xml; charset=utf-8",
+                "Text/HTML; Charset=UTF-8",
+                " APPLICATION/JSON ",
+                "application/LD+JSON",
+                "Image/SVG+XML",
             ] {
                 assert!(compressible(ty), "{ty}");
             }
@@ -769,6 +819,10 @@ mod compression {
                 "application/zip",
                 "font/woff2",
                 "",
+                "text",
+                "json",
+                "application/jsonx",
+                "+json/x",
             ] {
                 assert!(!compressible(ty), "{ty}");
             }

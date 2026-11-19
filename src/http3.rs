@@ -50,7 +50,7 @@ use crate::body::{Body, BoxError};
 use crate::pem::invalid;
 use crate::request::{ReqBody, Request};
 use crate::server::ResponseFuture;
-use crate::util::date_header;
+use crate::util::{date_header, remove_connection_headers};
 
 /// How long `Alt-Svc` remains valid in the browser: one day.
 const ALT_SVC_MAX_AGE: u32 = 86_400;
@@ -315,16 +315,7 @@ async fn respond<S>(
     let res = ResponseFuture::new(app, req).await;
 
     let (mut head, body) = res.into_http().into_parts();
-    // En-têtes propres à une connexion HTTP/1.1, interdits en HTTP/3.
-    for name in [
-        header::CONNECTION,
-        header::TRANSFER_ENCODING,
-        header::UPGRADE,
-        header::HeaderName::from_static("keep-alive"),
-        header::HeaderName::from_static("proxy-connection"),
-    ] {
-        head.headers.remove(name);
-    }
+    remove_connection_headers(&mut head.headers);
     if let Some(date) = date_header() {
         head.headers.insert(header::DATE, date);
     }

@@ -26,7 +26,7 @@ use http_body::{Body as _, Frame, SizeHint};
 use http_body_util::BodyExt;
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 use tokio::sync::Notify;
-use tokio::task::JoinSet;
+use tokio::task::AbortHandle;
 use tokio::time::Instant;
 
 use crate::app::AppService;
@@ -36,7 +36,7 @@ use crate::request::{ReqBody, Request};
 use crate::response::Response;
 use crate::server::ResponseFuture;
 use crate::upgrade::Io;
-use crate::util::date_header;
+use crate::util::{date_header, remove_connection_headers};
 
 /// Requests a client may have in flight at once on a connection.
 const MAX_STREAMS: u32 = 256;
@@ -75,7 +75,7 @@ pub(crate) async fn serve<IO: Io>(
         return;
     };
 
-    let mut streams = JoinSet::new();
+    let mut streams = Streams::default();
     let requests = Arc::new(Requests::default());
     let mut stopped = pin!(state.stopped());
     // Une connexion sans requête en cours est fermée après le délai de keep-alive.
@@ -108,7 +108,6 @@ pub(crate) async fn serve<IO: Io>(
                 continue;
             }
             () = &mut idle, if !closing => {
-                while streams.try_join_next().is_some() {}
                 if streams.is_empty() {
                     closing = true;
                     conn.graceful_shutdown();
@@ -137,12 +136,53 @@ pub(crate) async fn serve<IO: Io>(
                 idle.as_mut().reset(Instant::now() + idle_timeout);
                 let guard = RequestGuard::new(&requests, state);
                 streams.spawn(respond_to(req, respond, peer, secure, app, guard));
-                while streams.try_join_next().is_some() {}
             }
             Some(Err(_)) | None => break,
         }
     }
     drop(hold);
+}
+
+/// The tasks of the streams of a connection, aborted when the connection
+/// ends, as with a `JoinSet`, but without what a `JoinSet` does for each
+/// task to hand back its result (an entry, a lock, a waker), which is not
+/// needed here: a task is simply forgotten once it has finished.
+#[derive(Default)]
+struct Streams {
+    tasks: Vec<AbortHandle>,
+    /// Number of tasks at which the finished ones are next forgotten.
+    prune_at: usize,
+}
+
+impl Streams {
+    fn spawn<F>(&mut self, task: F)
+    where
+        F: Future<Output = ()> + Send + 'static,
+    {
+        if self.tasks.len() >= self.prune_at {
+            self.prune();
+            self.prune_at = (2 * self.tasks.len()).max(16);
+        }
+        self.tasks.push(tokio::spawn(task).abort_handle());
+    }
+
+    fn prune(&mut self) {
+        self.tasks.retain(|task| !task.is_finished());
+    }
+
+    /// Whether every task has finished.
+    fn is_empty(&mut self) -> bool {
+        self.prune();
+        self.tasks.is_empty()
+    }
+}
+
+impl Drop for Streams {
+    fn drop(&mut self) {
+        for task in &self.tasks {
+            task.abort();
+        }
+    }
 }
 
 /// The HTTP requests in flight on a connection (WebSockets excluded).
@@ -243,16 +283,7 @@ async fn respond_with(
     tunnel: Option<RecvStream>,
 ) {
     let (mut head, body) = res.into_http().into_parts();
-    // En-têtes propres à une connexion HTTP/1.1, interdits en HTTP/2.
-    for name in [
-        header::CONNECTION,
-        header::TRANSFER_ENCODING,
-        header::UPGRADE,
-        header::HeaderName::from_static("keep-alive"),
-        header::HeaderName::from_static("proxy-connection"),
-    ] {
-        head.headers.remove(name);
-    }
+    remove_connection_headers(&mut head.headers);
     if head.status == StatusCode::SWITCHING_PROTOCOLS {
         let upgrade = head
             .extensions

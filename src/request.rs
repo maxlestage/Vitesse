@@ -229,8 +229,12 @@ struct Inner {
 
 /// The headers that make [`res::file`](crate::res::file) answer `304` or
 /// `206` instead of `200`.
-pub(crate) const CONDITIONAL_HEADERS: [&str; 4] =
-    ["range", "if-range", "if-none-match", "if-modified-since"];
+pub(crate) const CONDITIONAL_HEADERS: [HeaderName; 4] = [
+    header::RANGE,
+    header::IF_RANGE,
+    header::IF_NONE_MATCH,
+    header::IF_MODIFIED_SINCE,
+];
 
 impl Inner {
     fn new(shared: &'static Shared) -> Self {
@@ -416,7 +420,7 @@ impl Request {
         inner.push_target(pq.as_bytes());
         inner.conditional = CONDITIONAL_HEADERS
             .iter()
-            .any(|name| parts.headers.contains_key(*name));
+            .any(|name| parts.headers.contains_key(name));
         inner.headers = OnceLock::from(Box::new(parts.headers));
         inner.uri = OnceLock::from(Box::new(parts.uri));
         inner.extensions = parts.extensions;

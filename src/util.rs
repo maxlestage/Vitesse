@@ -154,6 +154,29 @@ pub(crate) fn date_header() -> Option<http::HeaderValue> {
     })
 }
 
+/// Removes the headers proper to an HTTP/1.1 connection, forbidden in
+/// HTTP/2 and HTTP/3. The response usually has none of them: one look at
+/// its few headers then spares five lookups by name.
+#[cfg(any(feature = "http2", feature = "http3"))]
+pub(crate) fn remove_connection_headers(headers: &mut http::HeaderMap) {
+    use http::header::{CONNECTION, HeaderName, TRANSFER_ENCODING, UPGRADE};
+
+    const KEEP_ALIVE: HeaderName = HeaderName::from_static("keep-alive");
+    const PROXY_CONNECTION: HeaderName = HeaderName::from_static("proxy-connection");
+    let names = [
+        CONNECTION,
+        TRANSFER_ENCODING,
+        UPGRADE,
+        KEEP_ALIVE,
+        PROXY_CONNECTION,
+    ];
+    if headers.keys().any(|key| names.contains(key)) {
+        for name in &names {
+            headers.remove(name);
+        }
+    }
+}
+
 /// Converts a number of days since 1970-01-01 into (year, month, day).
 /// Howard Hinnant's algorithm.
 fn civil_from_days(z: i64) -> (i64, u32, u32) {

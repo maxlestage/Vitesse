@@ -6,6 +6,37 @@ project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.2.3] - 2026-11-19
+
+### Changed
+
+- **HTTP/2: lighter bookkeeping per stream.** The tasks of a connection's
+  streams are no longer kept in a `JoinSet`, which takes a lock, an entry
+  and a waker per task to hand back results nobody reads: the connection
+  keeps a handle per task, forgets the finished ones, and still stops the
+  ones in progress when it closes. The HTTP/1.1 headers forbidden in
+  HTTP/2 and HTTP/3 (`Connection`, `Keep-Alive`…) are looked for once
+  among the few headers of the response instead of being removed one by
+  one under names parsed again for each response, and a request no longer
+  looks up its four conditional headers (`Range`, `If-None-Match`…) by a
+  name parsed each time. Same frames, same headers. Measured over h2c on
+  `GET /`, `GET /json` and `GET /users/42` of `examples/bench.rs` (server
+  on 2 cores, load on 2 others, 2 series of 11 and 9 interleaved runs,
+  paired medians): −5 to −9% CPU per request, −6% instructions per request
+  (callgrind).
+- **`helmet()` and `compress()`: headers ready to send.** The nine names
+  and values of `helmet()` are built once, at compile time, instead of
+  being parsed and checked for each response; `compress()` reads
+  `Content-Type` and `Content-Encoding` without parsing their names,
+  checks the type without copying it in lower case, and sets
+  `Content-Encoding: br`/`gzip` and `Vary: accept-encoding` without
+  allocating. Same headers, in the same order. Measured on the 20 KiB
+  stylesheet of `examples/bench_app.rs` with a browser's request (2 series
+  of 11 and 9 interleaved runs, paired medians): −7 to −18% user CPU per
+  request (−9% instructions per request), −2 to −4% CPU in all, the rest
+  being the kernel's TCP stack; the compressed JSON list, whose time goes
+  to Brotli, −2 to −3%.
+
 ## [0.2.2] - 2026-11-18
 
 ### Changed
@@ -332,6 +363,7 @@ or actix-web"):
   `Cargo.toml` is tagged (`v0.1.0` for `0.1.0`), released on GitHub with its
   section of `CHANGELOG.md` as notes, and published on crates.io.
 
+[0.2.3]: https://crates.io/crates/vitesse/0.2.3
 [0.2.2]: https://crates.io/crates/vitesse/0.2.2
 [0.2.1]: https://crates.io/crates/vitesse/0.2.1
 [0.2.0]: https://crates.io/crates/vitesse/0.2.0

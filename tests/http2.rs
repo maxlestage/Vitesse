@@ -429,3 +429,92 @@ async fn a_preface_split_across_reads_is_still_http2() {
     assert_eq!(res.version, http::Version::HTTP_2);
     assert!(!body.is_empty());
 }
+
+#[tokio::test]
+async fn connection_headers_of_http1_are_left_out() {
+    let mut app = App::new();
+    app.get("/", |_| async {
+        Response::new()
+            .header("connection", "close")
+            .header("keep-alive", "timeout=5")
+            .header("proxy-connection", "keep-alive")
+            .header("x-kept", "1")
+            .text("ok")
+    });
+    app.get("/plain", |_| async {
+        Response::new().header("x-kept", "2").text("ok")
+    });
+    let addr = server(app).await;
+    let mut c = client(addr).await;
+    let (res, body) = request(&mut c, Method::GET, "/", &[], b"").await;
+    assert_eq!(res.status, 200);
+    assert_eq!(body, b"ok");
+    assert_eq!(res.headers["x-kept"], "1");
+    for name in ["connection", "keep-alive", "proxy-connection"] {
+        assert!(!res.headers.contains_key(name), "{name}");
+    }
+    let (res, _) = request(&mut c, Method::GET, "/plain", &[], b"").await;
+    assert_eq!(res.headers["x-kept"], "2");
+}
+
+#[tokio::test]
+async fn closing_the_connection_stops_its_streams() {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    struct OnDrop(Arc<AtomicBool>);
+    impl Drop for OnDrop {
+        fn drop(&mut self) {
+            self.0.store(true, Ordering::SeqCst);
+        }
+    }
+
+    let (started, dropped) = (
+        Arc::new(AtomicBool::new(false)),
+        Arc::new(AtomicBool::new(false)),
+    );
+    let mut app = app();
+    let (s, d) = (started.clone(), dropped.clone());
+    app.get("/hang", move |_| {
+        let (s, d) = (s.clone(), d.clone());
+        async move {
+            let _guard = OnDrop(d);
+            s.store(true, Ordering::SeqCst);
+            tokio::time::sleep(Duration::from_secs(60)).await;
+            "jamais"
+        }
+    });
+    let addr = server(app).await;
+    let tcp = TcpStream::connect(addr).await.unwrap();
+    let (mut c, conn) = h2::client::handshake(tcp).await.unwrap();
+    let conn = tokio::spawn(async move {
+        let _ = conn.await;
+    });
+    // Assez de flux terminés pour que la connexion fasse le tri des siens.
+    for _ in 0..50 {
+        let (res, _) = request(&mut c, Method::GET, "/", &[], b"").await;
+        assert_eq!(res.status, 200);
+    }
+    let req = http::Request::get("http://localhost/hang")
+        .body(())
+        .unwrap();
+    let (_res, _) = c.send_request(req, true).unwrap();
+    for _ in 0..500 {
+        if started.load(Ordering::SeqCst) {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert!(started.load(Ordering::SeqCst));
+    assert!(!dropped.load(Ordering::SeqCst));
+    // Le client s'en va : le gestionnaire en cours est abandonné.
+    conn.abort();
+    drop(c);
+    for _ in 0..500 {
+        if dropped.load(Ordering::SeqCst) {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert!(dropped.load(Ordering::SeqCst));
+}
